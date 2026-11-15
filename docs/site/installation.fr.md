@@ -51,3 +51,7 @@ Adapter le FQDN et les certificats. Ne pas exposer directement le port 8080. Gar
 5. Suivre la [checklist de recette](https://github.com/Maxime3d77/OrigamiTasks/blob/main/docs/DEPLOYMENT-CHECKLIST.md).
 
 Pour les mises à jour, suivre [Exploitation](operations.md), et ne pas exécuter `git pull` aveuglément sur un répertoire modifié.
+
+## Premier test des agents
+
+Après avoir préparé le HTTPS et la liste des hôtes SSH, suivre [Agents](agents.md) pour déployer sur une VM Linux puis une VM Windows de recette. Garder `ALLOW_AGENT_SCRIPTS`, `ALLOW_AGENT_MUTATIONS` et `ALLOW_DIRECTORY_WRITES` sur false pendant les tests de lecture seule.

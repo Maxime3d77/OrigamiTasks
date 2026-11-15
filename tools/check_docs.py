@@ -22,6 +22,8 @@ def check_docs():
     assert english == french, f'Missing translations: EN-only={english-french}; FR-only={french-english}'
     assert len(english) >= 12, 'Documentation must be comprehensive and multipage'
     assert 'default: true' in (ROOT/'mkdocs.yml').read_text(), 'English must be default'
+    assert (DOCS/'assets/logo.png').is_file(), 'Official MkDocs logo asset missing'
+    assert 'logo: assets/logo.png' in (ROOT/'mkdocs.yml').read_text(), 'Official logo not configured in MkDocs'
     types=get_types()
     for slug in ('tasks.md','tasks.fr.md'):
         content=(DOCS/slug).read_text(encoding='utf-8')
