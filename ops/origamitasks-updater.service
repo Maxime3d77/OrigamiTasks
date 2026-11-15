@@ -1,0 +1,14 @@
+[Unit]
+Description=OrigamiTasks trusted Git update worker
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+[Service]
+Type=simple
+WorkingDirectory=/opt/origamitasks
+ExecStart=/usr/bin/python3 /opt/origamitasks/ops/update-worker.py --root /opt/origamitasks
+Restart=always
+RestartSec=5
+# Requires permission to run docker compose (privileged host service).
+# Recommended: dedicated service account with docker group permissions, never inside web container.
+[Install]
+WantedBy=multi-user.target

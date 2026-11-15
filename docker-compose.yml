@@ -1,0 +1,21 @@
+services:
+  origamitasks:
+    build: .
+    image: origamitasks:local
+    container_name: origamitasks
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:${ORIGAMI_PORT:-8080}:8000"
+    volumes:
+      - ./data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    pids_limit: 256
+    mem_limit: 768m
+    init: true
