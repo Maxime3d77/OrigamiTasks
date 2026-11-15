@@ -21,7 +21,7 @@ LDAP_CA_CERT = os.getenv('LDAP_CA_CERT', '')
 LDAP_GROUP_BASE_DN = os.getenv('LDAP_GROUP_BASE_DN', LDAP_BASE_DN)
 LDAP_NESTED_GROUPS = os.getenv('LDAP_NESTED_GROUPS', 'false').lower() == 'true'
 GIT_BRANCH = os.getenv('GIT_BRANCH', 'main')
-APP_VERSION = '0.2.0'
+APP_VERSION = '0.3.0-rc1'
 SESSION_HOURS = int(os.getenv('SESSION_HOURS', '12'))
 WORKERS = int(os.getenv('ORIGAMI_EXECUTOR_WORKERS', '2'))
 ALLOW_LOCAL_EXECUTION = os.getenv('ALLOW_LOCAL_EXECUTION', 'false').lower() == 'true'
@@ -35,3 +35,11 @@ MATRIX_ALLOWED_HOSTS = os.getenv("MATRIX_ALLOWED_HOSTS", "")
 PROXMOX_ALLOWED_HOSTS = os.getenv("PROXMOX_ALLOWED_HOSTS", "")
 PROXMOX_CA_CERT = os.getenv("PROXMOX_CA_CERT", "")
 ALLOW_PROXMOX_ACTIONS = os.getenv("ALLOW_PROXMOX_ACTIONS", "false").lower() == "true"
+
+# Agent management. All high-impact features are opt-in, independently gated.
+AGENT_SERVER_URL = os.getenv('AGENT_SERVER_URL', '')
+ALLOW_AGENT_REMOTE_DEPLOY = os.getenv('ALLOW_AGENT_REMOTE_DEPLOY', 'false').lower() == 'true'
+AGENT_DEPLOY_ALLOWED_HOSTS = os.getenv('AGENT_DEPLOY_ALLOWED_HOSTS', '')
+ALLOW_AGENT_SCRIPTS = os.getenv('ALLOW_AGENT_SCRIPTS', 'false').lower() == 'true'
+ALLOW_AGENT_MUTATIONS = os.getenv('ALLOW_AGENT_MUTATIONS', 'false').lower() == 'true'
+ALLOW_DIRECTORY_WRITES = os.getenv('ALLOW_DIRECTORY_WRITES', 'false').lower() == 'true'

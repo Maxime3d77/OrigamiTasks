@@ -6,6 +6,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 RUN groupadd -g 10001 origami && useradd -u 10001 -g 10001 -d /app -s /usr/sbin/nologin origami && mkdir -p /app/data && chown origami:origami /app/data
 COPY app /app/app
+COPY agents /app/agents
 COPY static /app/static
 USER origami
 EXPOSE 8000

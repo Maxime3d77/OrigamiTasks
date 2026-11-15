@@ -93,6 +93,23 @@ CREATE TABLE IF NOT EXISTS updates (
  actor TEXT NOT NULL, message TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
  finished_at TEXT
 );
+CREATE TABLE IF NOT EXISTS agents (
+ id INTEGER PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL,
+ group_name TEXT NOT NULL DEFAULT 'default', hostname TEXT NOT NULL DEFAULT '',
+ version TEXT NOT NULL DEFAULT '', enroll_hash TEXT, enroll_expires TEXT,
+ token_hash TEXT, enrolled INTEGER NOT NULL DEFAULT 0,
+ revoked INTEGER NOT NULL DEFAULT 0, last_seen TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_tasks (
+ id INTEGER PRIMARY KEY, agent_id INTEGER NOT NULL REFERENCES agents(id),
+ run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+ step_id TEXT NOT NULL, action TEXT NOT NULL, payload_json TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'queued', timeout_seconds INTEGER NOT NULL,
+ lease_hash TEXT, queued_at TEXT NOT NULL, claimed_at TEXT,
+ completed_at TEXT, exit_code INTEGER, output TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_queue ON agent_tasks(agent_id,status,id);
+CREATE INDEX IF NOT EXISTS idx_agents_online ON agents(last_seen);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status, queued_at);
 CREATE INDEX IF NOT EXISTS idx_runs_job ON runs(job_id, queued_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_next ON jobs(enabled, next_run_at);
@@ -103,6 +120,8 @@ def initialize():
     config.TRANSFER_ROOT.mkdir(parents=True, exist_ok=True)
     with session() as con:
         con.executescript(SCHEMA)
+        # Never silently replay a claimed remote action after a server restart.
+        con.execute("UPDATE agent_tasks SET status='interrupted', lease_hash=NULL WHERE status IN ('queued','claimed')")
         # On restart, a process killed mid-execution must not silently re-run side effects.
         con.execute("UPDATE runs SET status='interrupted', finished_at=?, error='Service redémarré pendant l’exécution' WHERE status='running'", (now(),))
 
