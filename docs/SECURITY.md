@@ -1,4 +1,4 @@
-# Sécurité — OrigamiTasks v0.1
+# Sécurité — OrigamiTasks v0.2
 
 ## Limites et modèle de confiance
 
@@ -37,3 +37,13 @@ OrigamiTasks est un ordonnanceur **privilégié** : un utilisateur ayant `edit` 
 - **admin** : accès total au coffre, workflows, audit, mises à jour.
 
 Un mot de passe root Windows ou un SSH root ne doit jamais être utilisé pour des scripts ordinaires. Préférer un compte de service dédié avec le minimum de droits.
+
+## Connecteurs v0.2 — garde-fous complémentaires
+
+- `MATRIX_ALLOWED_HOSTS` et `PROXMOX_ALLOWED_HOSTS` imposent une liste d'hôtes réseau explicitement autorisés (HTTPS seulement) ; aucune redirection des tokens n'est suivie.
+- Proxmox : les datacenters sont déclarés uniquement par un administrateur, les secrets sont résolus côté serveur, et les actions VM sont globalement désactivées sauf approbation explicite. Les opérateurs ne peuvent pas modifier une étape Proxmox.
+- **Attention** : la confirmation `approved` reste une option de configuration du workflow, et **n'est pas une validation humaine par exécution**. La solution v0.2 n'est donc pas adaptée aux actions de secours ou de destruction sans garde-fou externe.
+- Ansible : le playbook et l'inventaire sont confinés nominalement à des chemins prévus sur le runner SSH, les arguments sont échappés. Veiller aux liens symboliques, aux permissions des chemins et à la restriction du compte SSH (sinon un auteur de workflows peut toujours disposer de droits larges sur ce runner).
+- Matrix : le token du bot n'est pas exposé dans la réponse, mais les contenus de messages et logs peuvent contenir des données métier. Vérifier la classification des rooms.
+- Les appels distants gardent une surface SSRF si un administrateur configure des DNS hostiles pouvant changer de résolution. Réseau egress et DNS contrôlés restent nécessaires.
+- Le projet doit rester en **recette** tant que les droits Proxmox, les certificats internes, la journalisation des secrets et le PRA n'ont pas été validés.

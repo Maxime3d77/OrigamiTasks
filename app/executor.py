@@ -11,7 +11,7 @@ import time
 from email.message import EmailMessage
 from pathlib import Path
 import httpx
-from . import db, config, security
+from . import db, config, security, integrations
 
 
 class StepError(Exception):
@@ -176,6 +176,24 @@ def execute(step, ctx):
         else:
             cmd = 'bash -lc ' + shlex.quote(script)
         code, output = _ssh(cmd, opts, cred, timeout)
+    elif typ == 'matrix':
+        try:
+            output = integrations.matrix_message(opts,cred,ctx['run_id'],step['id'],timeout)
+        except (integrations.IntegrationError,httpx.HTTPError,ValueError) as exc:
+            raise StepError('Matrix : '+type(exc).__name__+' (vérifier URL, accès room et coffre)')
+        code = 0
+    elif typ == 'ansible':
+        try:
+            cmd = integrations.ansible_command(opts)
+        except integrations.IntegrationError as exc:
+            raise StepError('Ansible : '+str(exc))
+        code,output = _ssh(cmd,opts,cred,timeout)
+    elif typ == 'proxmox':
+        try:
+            output=integrations.proxmox_task(opts,credential,timeout)
+        except (integrations.IntegrationError,httpx.HTTPError,ValueError) as exc:
+            raise StepError('Proxmox : '+str(exc) if isinstance(exc,integrations.IntegrationError) else 'Proxmox : échec API '+type(exc).__name__)
+        code = 0
     elif typ == 'set_variable':
         name = str(opts.get('name','')).strip()
         if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,63}', name):

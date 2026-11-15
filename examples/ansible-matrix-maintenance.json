@@ -1,0 +1,26 @@
+{
+  "name": "Maintenance Linux avec notifications Matrix",
+  "description": "Exemple : Ansible puis notification conditionnelle Matrix.",
+  "folder": "Infrastructure / Maintenance",
+  "tags_json": ["ansible", "matrix", "linux", "maintenance"],
+  "enabled": false,
+  "acl_json": {"view": [], "run": [], "edit": []},
+  "schedule_json": {},
+  "steps_json": [
+    {
+      "id": "playbook", "name": "Exécuter Ansible", "type": "ansible",
+      "config": {"host": "runner.example.org", "port": 22, "playbook": "linux/upgrade.yml", "inventory": "prod/hosts.yml", "limit": "web", "check": true, "extra_vars": "{}", "credential_id": 0},
+      "retries": 0, "on_success": "notify_ok", "on_failure": "notify_failed"
+    },
+    {
+      "id": "notify_ok", "name": "Notifier Matrix — succès", "type": "matrix",
+      "config": {"homeserver": "https://matrix.example.org", "room_id": "!room:matrix.example.org", "message": "✅ Maintenance terminée. Run #{{ run.id }}", "credential_id": 0},
+      "retries": 1, "on_success": "END", "on_failure": "FAIL"
+    },
+    {
+      "id": "notify_failed", "name": "Notifier Matrix — erreur", "type": "matrix",
+      "config": {"homeserver": "https://matrix.example.org", "room_id": "!room:matrix.example.org", "message": "❌ Maintenance en échec, consulter les logs du run #{{ run.id }}.", "credential_id": 0},
+      "retries": 1, "on_success": "FAIL", "on_failure": "FAIL"
+    }
+  ]
+}

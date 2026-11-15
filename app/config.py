@@ -21,7 +21,7 @@ LDAP_CA_CERT = os.getenv('LDAP_CA_CERT', '')
 LDAP_GROUP_BASE_DN = os.getenv('LDAP_GROUP_BASE_DN', LDAP_BASE_DN)
 LDAP_NESTED_GROUPS = os.getenv('LDAP_NESTED_GROUPS', 'false').lower() == 'true'
 GIT_BRANCH = os.getenv('GIT_BRANCH', 'main')
-APP_VERSION = '0.1.0'
+APP_VERSION = '0.2.0'
 SESSION_HOURS = int(os.getenv('SESSION_HOURS', '12'))
 WORKERS = int(os.getenv('ORIGAMI_EXECUTOR_WORKERS', '2'))
 ALLOW_LOCAL_EXECUTION = os.getenv('ALLOW_LOCAL_EXECUTION', 'false').lower() == 'true'
@@ -29,3 +29,9 @@ MAX_LOG_BYTES = int(os.getenv('MAX_LOG_BYTES', '40000'))
 MAX_STEP_SECONDS = int(os.getenv('MAX_STEP_SECONDS', '1800'))
 TRANSFER_ROOT = DATA / 'transfers'
 KNOWN_HOSTS = Path(os.getenv('SSH_KNOWN_HOSTS', str(DATA / 'known_hosts')))
+
+# Restricted outbound API integrations: comma-separated exact hostnames or host:port
+MATRIX_ALLOWED_HOSTS = os.getenv("MATRIX_ALLOWED_HOSTS", "")
+PROXMOX_ALLOWED_HOSTS = os.getenv("PROXMOX_ALLOWED_HOSTS", "")
+PROXMOX_CA_CERT = os.getenv("PROXMOX_CA_CERT", "")
+ALLOW_PROXMOX_ACTIONS = os.getenv("ALLOW_PROXMOX_ACTIONS", "false").lower() == "true"

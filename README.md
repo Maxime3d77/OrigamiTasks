@@ -7,7 +7,7 @@
 
 *Organisez. Déclenchez. Décidez. Automatisez.*
 
-![Version](https://img.shields.io/badge/version-0.1.0-ffbe39?labelColor=24262d)
+![Version](https://img.shields.io/badge/version-0.2.0-ffbe39?labelColor=24262d)
 ![Stack](https://img.shields.io/badge/FastAPI-Python-ffbe39?labelColor=24262d)
 ![Déploiement](https://img.shields.io/badge/Docker-Compose-ffbe39?labelColor=24262d)
 
@@ -40,7 +40,7 @@ Il comprend une interface web responsive et un éditeur graphique de branches su
 
 ## Aperçu fonctionnel
 
-| Fonctionnalité | Implémentation v0.1 |
+| Fonctionnalité | Implémentation v0.2 |
 |---|---|
 | Dashboard, recherche, filtres dossiers/tags | ✅ Interface SPA sans CDN |
 | Thèmes anthracite/melon, clair, cyberpunk violet/néon | ✅ |
@@ -56,7 +56,45 @@ Il comprend une interface web responsive et un éditeur graphique de branches su
 | LDAP / AD, groupes et droits par workflow | ✅ LDAPS / STARTTLS ; groupes directs (nested AD en option) |
 | Historique, sorties stdout/stderr, audits | ✅ SQLite |
 | Mise à jour demandée depuis le web | ✅ Via worker indépendant *à installer sur l'hôte* |
-| Branches parallèles, agents natifs Windows, HA, webhooks externes | ⏳ Non inclus dans cette version |
+| Matrix — publier un message dans une room | ✅ Bot token stocké dans le coffre, idempotence par run/étape ; room non E2EE |
+| Ansible — lancer un playbook depuis le workflow | ✅ Runner SSH dédié, chemins restreints, `--check`, inventaire, limit et extra-vars |
+| Proxmox — datacenters et inventaire | ✅ Enregistrement, nœuds, VM, LXC et stockages via API |
+| Proxmox — actions contrôlées sur VM | ⚠️ Start / shutdown / reboot, option globalement désactivée par défaut |
+| Catalogue de tâches web et roadmap | ✅ Disponible dans le menu « Catalogue des tâches » |
+| Branches parallèles, agents natifs Windows, HA, réplication VM inter-DC | ⏳ Non inclus dans cette version |
+
+## Nouveautés v0.2 — Matrix, Ansible, Proxmox
+
+Le [catalogue complet des fonctionnalités](docs/FEATURE-CATALOG.md) distingue les tâches disponibles aujourd'hui des fonctionnalités planifiées, inspirées des familles VisualCron.
+
+### Matrix — message de room
+
+1. Dans **Coffre-fort**, créer un secret contenant `token` (token d’un bot Matrix déjà membre d’une room non chiffrée).
+2. Configurer `MATRIX_ALLOWED_HOSTS=matrix.exemple.fr` dans `.env` et relancer le conteneur.
+3. Dans **Workflows**, ajouter une étape **Message Matrix** : URL HTTPS racine du homeserver, identifiant de la room (`!roomid:exemple.fr`), message et credential.
+
+L'envoi utilise l'API Matrix v3 avec un ID de transaction déterministe par exécution/étape. **L'envoi n'impose pas une popup** : l'affichage de la notification dépend des préférences et permissions du client Element. Les rooms E2EE nécessiteront une intégration Matrix gérant les clés ; non implémenté ici.
+
+### Ansible — playbook via serveur runner
+
+1. Installer Ansible sur une VM/runner **séparé** ; ouvrir SSH et enregistrer la clé hôte dans `data/known_hosts`.
+2. Déployer les playbooks et inventaires (maintenus hors du conteneur OrigamiTasks) sous `/opt/origamitasks/ansible/playbooks/` et `/opt/origamitasks/ansible/inventories/`.
+3. Ajouter une étape **Ansible Playbook** : hôte runner, playbook relatif, inventaire relatif, `limit`, variables JSON et mode `--check`.
+4. Sélectionner dans le coffre l'identité SSH du compte de service d'exécution.
+
+Le backend lance une commande `ansible-playbook` strictement construite (pas de fragment shell arbitraire), **sur le runner distant**. Les artefacts et les permissions restent à configurer sur ce runner. L'intégration avancée Ansible Runner isolé reste prévue pour une version ultérieure.
+
+### Proxmox — découverte des datacenters
+
+1. Créer un token API Proxmox dédié à la lecture, puis un secret OrigamiTasks : `username=user@pve!tokenid`, `token=SECRET`.
+2. Déclarer dans `.env` les endpoints autorisés, par exemple `PROXMOX_ALLOWED_HOSTS=pve-au.example.fr:8006,pve-sd.example.fr:8006`.
+3. Le conteneur vérifie le certificat TLS Proxmox ; en cas de CA interne, monter un fichier PEM sous `/app/data` et définir `PROXMOX_CA_CERT=/app/data/ca-proxmox.pem` (pas de désactivation TLS).
+4. Dans **Datacenters**, déclarer un nom, une URL HTTPS `https://pve-au.example.fr:8006` et le credential, puis cliquer **Découvrir**.
+5. Dans un workflow, ajouter l'étape **Proxmox VE** et sélectionner `inventory` (lecture seule) ou une opération VM encadrée.
+
+Par défaut, `ALLOW_PROXMOX_ACTIONS=false` bloque les actions `start`, `shutdown`, `reboot`. Un administrateur doit activer explicitement ce verrou serveur et l'option de l'étape avant toute utilisation. Cette première version **ne migre ni ne réplique les VM entre clusters**. Pour l’architecture et les risques PRA : [design Proxmox DR](docs/PROXMOX-DR-DESIGN.md).
+
+**Exemple importable via l'API** : [Ansible + Matrix](examples/ansible-matrix-maintenance.json). Ne pas saisir de secrets dans les variables JSON.
 
 ## Déploiement sur Debian 12/13 ou Ubuntu
 
@@ -67,12 +105,12 @@ Prérequis : serveur Linux, Docker Engine + plugin Docker Compose, Python 3 pour
 ```bash
 sudo mkdir -p /opt
 cd /opt
-sudo git clone git@github.com:VOTRE_ORGANISATION/OrigamiTasks.git origamitasks
+sudo git clone https://github.com/Maxime3d77/OrigamiTasks.git origamitasks
 cd /opt/origamitasks
 sudo bash ops/bootstrap.sh
 ```
 
-**Si le dépôt distant n'existe pas encore**, utiliser l'archive fournie, puis créer un dépôt vide (privé recommandé) sur GitHub/GitLab et pousser le projet (voir « Publier sur Git » ci-dessous).
+**Attention :** le dépôt GitHub source est actuellement public. Ne jamais y placer de secrets, de données utilisateur ou des scripts internes confidentiels.
 
 Le bootstrap affiche **une seule fois** le mot de passe de `admin`, crée une clé Fernet et écrit `.env` en mode 0600. Sauvegarder ce mot de passe et cette clé hors du serveur. Ne jamais committer `.env`.
 
@@ -112,7 +150,7 @@ Quelques expressions cron :
 30 2 * * 0    # dimanche à 02:30 (heure du fuseau choisi)
 ```
 
-**Interpolation (dans les scripts, URLs et champs textuels)** : `{{ run.id }}`, `{{ steps.etape_1.output }}`, `{{ steps.etape_1.status }}`, `{{ steps.etape_1.exit_code }}`, `{{ var.nom }}`. Dans cette v0.1, aucune interface n'écrit de variables de workflow ; les valeurs `var.*` non définies se résolvent en chaîne vide. Les secrets ne sont pas disponibles par interpolation directe.
+**Interpolation (dans les scripts, URLs et champs textuels)** : `{{ run.id }}`, `{{ steps.etape_1.output }}`, `{{ steps.etape_1.status }}`, `{{ steps.etape_1.exit_code }}`, `{{ var.nom }}`. Dans cette v0.2, aucune interface n'écrit de variables de workflow ; les valeurs `var.*` non définies se résolvent en chaîne vide. Les secrets ne sont pas disponibles par interpolation directe.
 
 ### 4. Exécuter à distance (Linux et Windows)
 
@@ -124,7 +162,7 @@ Sur Linux : type `SSH / PowerShell distant` avec plateforme `linux`, exécuté p
 
 Le coffre de secrets accepte nom d'utilisateur, mot de passe, clé privée SSH et passphrase. Aucun mot de passe n'est renvoyé à l'interface après enregistrement.
 
-Un administrateur peut aussi ouvrir le menu **Webhook** d’un workflow pour générer un secret d’appel à usage unique et une URL POST `/api/hooks/{id}`. Ajouter l’en-tête `X-Origami-Webhook-Token`. Un corps JSON comme `{"ticket_id":"123"}` rend `{{ var.ticket_id }}` disponible dans les étapes.
+Un administrateur peut aussi ouvrir le menu **Webhook** d’un workflow pour générer un secret affiché une seule fois (réutilisable ensuite jusqu’à sa révocation) et une URL POST `/api/hooks/{id}`. Ajouter l’en-tête `X-Origami-Webhook-Token`. Un corps JSON comme `{"ticket_id":"123"}` rend `{{ var.ticket_id }}` disponible dans les étapes.
 
 Les tâches de transfert ne voient que `data/transfers`. Une tâche SFTP ou FTPS `put` envoie un fichier de cette zone ; `get` l'y télécharge. Le FTP non chiffré requiert l'option explicite `allow_plaintext`.
 

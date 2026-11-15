@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security
+from . import config, db, engine, scheduler, security, integrations
 
 
 @asynccontextmanager
@@ -103,7 +103,7 @@ def logout(request: Request, response: Response):
     return {'ok':True}
 
 
-VALID_TYPES = {'shell','powershell','ssh','sftp','ftp','email','http','delay','set_variable'}
+VALID_TYPES = {'shell','powershell','ssh','sftp','ftp','email','http','delay','set_variable','matrix','ansible','proxmox'}
 
 
 def validate_job(payload):
@@ -163,6 +163,81 @@ def get_job(con,job_id):
     return db.obj(row,'tags_json','acl_json','steps_json','schedule_json')
 
 
+@app.get('/api/catalog')
+def task_catalog(request: Request):
+    security.require(request)
+    return {'available':[
+      {'type':'shell','category':'Scripts','name':'Bash local'},
+      {'type':'powershell','category':'Scripts','name':'PowerShell local'},
+      {'type':'ssh','category':'Scripts','name':'SSH / Windows distant'},
+      {'type':'ansible','category':'Infrastructure','name':'Ansible Playbook sur runner SSH'},
+      {'type':'matrix','category':'Messagerie','name':'Message Matrix'},
+      {'type':'proxmox','category':'Infrastructure','name':'Proxmox inventaire et actions encadrées'},
+      {'type':'email','category':'Messagerie','name':'SMTP'},
+      {'type':'sftp','category':'Transferts','name':'SFTP'},
+      {'type':'ftp','category':'Transferts','name':'FTP/FTPS'},
+      {'type':'http','category':'API','name':'HTTP / REST'},
+      {'type':'set_variable','category':'Logique','name':'Variable'},
+      {'type':'delay','category':'Logique','name':'Attente'}
+    ],'roadmap_document':'docs/FEATURE-CATALOG.md'}
+
+
+@app.get('/api/datacenters')
+def list_datacenters(request:Request):
+    security.require(request,role='admin')
+    with db.session() as con:
+        rows=con.execute('SELECT id,name,url,credential_id,created_at FROM datacenters ORDER BY name').fetchall()
+    return {'items':[dict(row) for row in rows]}
+
+
+@app.post('/api/datacenters')
+def add_datacenter(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    name=str(payload.get('name','')).strip()
+    if not 1<=len(name)<=100: raise HTTPException(422,'Nom du datacenter invalide')
+    try:
+        origin=integrations.authorized_origin(payload.get('url'),config.PROXMOX_ALLOWED_HOSTS)
+        credential_id=int(payload.get('credential_id'))
+    except (integrations.IntegrationError,ValueError,TypeError) as exc:
+        raise HTTPException(422,str(exc))
+    with db.session() as con:
+        credential_exists=con.execute('SELECT 1 FROM credentials WHERE id=?',(credential_id,)).fetchone()
+        if not credential_exists: raise HTTPException(422,'Credential introuvable')
+        try:
+            cur=con.execute('INSERT INTO datacenters(name,url,credential_id,created_at) VALUES (?,?,?,?)',
+                            (name,origin,credential_id,db.now()))
+        except __import__('sqlite3').IntegrityError:
+            raise HTTPException(409,'Datacenter déjà enregistré')
+        dc_id=cur.lastrowid
+    db.audit(user['username'],'datacenter.create',dc_id,name)
+    return {'id':dc_id}
+
+
+@app.get('/api/datacenters/{dc_id}/discover')
+def discover_datacenter(dc_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        dc=integrations.configured_datacenter(dc_id)
+        cred=engine.executor.credential(dc['credential_id'])
+        result=integrations.discover_datacenter(dc,cred)
+    except integrations.IntegrationError as exc:
+        raise HTTPException(422,str(exc))
+    except Exception as exc:
+        raise HTTPException(502,'Proxmox API indisponible : '+type(exc).__name__)
+    return {'datacenter':dc['name'],'resources':result}
+
+
+@app.delete('/api/datacenters/{dc_id}')
+def delete_datacenter(dc_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    with db.session() as con:
+        row=con.execute('SELECT name FROM datacenters WHERE id=?',(dc_id,)).fetchone()
+        if not row:raise HTTPException(404,'Datacenter introuvable')
+        con.execute('DELETE FROM datacenters WHERE id=?',(dc_id,))
+    db.audit(user['username'],'datacenter.delete',dc_id,row['name'])
+    return {'ok':True}
+
+
 @app.get('/api/jobs')
 def list_jobs(request: Request):
     user=security.require(request)
@@ -203,6 +278,8 @@ def update_job(job_id: int,payload:dict[str,Any],request: Request):
         if not security.can_job(user,old,'edit'): raise HTTPException(403,'Modification interdite')
         # Operators cannot grant new ACLs or edit existing ACLs, only admins.
         if user['role'] != 'admin':
+            if any(s.get('type')=='proxmox' for s in old['steps_json']+payload['steps_json']):
+                raise HTTPException(403,'Seul un administrateur peut modifier les étapes Proxmox')
             fields['acl_json']=json.dumps(old['acl_json'],ensure_ascii=False)
             existing_creds={step['id']:str(step.get('config',{}).get('credential_id') or '') for step in old['steps_json']}
             for step in payload['steps_json']:
