@@ -1,10 +1,12 @@
 # OrigamiTasks
 
+![OrigamiTasks — official logo](static/logo.png)
+
 [![CI](https://github.com/Maxime3d77/OrigamiTasks/actions/workflows/ci.yml/badge.svg)](https://github.com/Maxime3d77/OrigamiTasks/actions/workflows/ci.yml)
 
 **OrigamiTasks** is an open-source, self-hosted Linux workflow scheduler and automation control plane with an editable web UI, a credential vault, LDAP role mapping, and remote integrations. Inspired by the **workflow concepts** of VisualCron, it is an independent implementation, not a compatible VisualCron clone.
 
-> **Pre-production v0.2.0.** Production deployment requires integration/security review. **Not all VisualCron features are implemented**; native agents and cross-cluster real-time replication are not available yet.
+> **Pre-production v0.3.0-rc1.** Production deployment requires integration/security review. **Not all VisualCron features are implemented**; signed native agent binaries and cross-cluster real-time replication are not available yet.
 
 ![OrigamiTasks dark dashboard](docs/screenshots/dashboard-dark.png)
 
@@ -21,7 +23,7 @@ The maintained, **multipage** guides are in `docs/site/` and use MkDocs Material
 | [Task types](docs/site/tasks.md) | [Catalogue des tâches](docs/site/tasks.fr.md) |
 | [Matrix, Ansible, SMTP](docs/site/integrations.md) | [Matrix, Ansible, SMTP](docs/site/integrations.fr.md) |
 | [Proxmox/DR architecture](docs/site/proxmox.md) | [Proxmox/PRA](docs/site/proxmox.fr.md) |
-| [Agents: planned design](docs/site/agents.md) | [Agents : conception](docs/site/agents.fr.md) |
+| [Agents and deployment](docs/site/agents.md) | [Agents et déploiement](docs/site/agents.fr.md) |
 | [Operations and updates](docs/site/operations.md) | [Exploitation/mises à jour](docs/site/operations.fr.md) |
 | [Security](docs/site/security.md) | [Sécurité](docs/site/security.fr.md) |
 | [API reference](docs/site/api.md) | [Référence API](docs/site/api.fr.md) |
@@ -49,10 +51,12 @@ See `mkdocs.yml` for navigation, languages, search, and theme. Do not confuse do
 - FTPS/SFTP transfer, SMTP with HTML/attachments, HTTP, file operations restricted to transfer storage, Matrix room messages, Ansible playbooks via a dedicated SSH runner.
 - Proxmox inventory/discovery across independently configured clusters, **read-only DR/storage assessment**, explicitly gated power actions.
 - Fernet-encrypted credential vault, LDAPS/STARTTLS with group access control, admin/operator/viewer job ACLs, host-side Git updater.
+- Preview Linux (Python) and Windows (PowerShell) HTTPS polling agents; SSH deployment from the UI and single-use enrollment.
+- Directory workflow actions for LDAP and Active Directory search, user creation, groups, account state and password resets, with opt-in write gates.
 
 ## Not yet implemented
 
-Complete VisualCron task parity (100+ categories), IMAP event triggers, Windows/Linux native agents, full parallel DAG, document conversion, HA scheduler, Proxmox/PDM cross-cluster migration, PBS orchestration and **live/near-real-time inter-DC VM replication**. See the [feature catalogue](docs/FEATURE-CATALOG.md) for a detailed implementation roadmap.
+Complete VisualCron task parity (100+ categories), IMAP event triggers, signed/mTLS native agent packages, full parallel DAG, document conversion, HA scheduler, Proxmox/PDM cross-cluster migration, PBS orchestration and **live/near-real-time inter-DC VM replication**. See the [feature catalogue](docs/FEATURE-CATALOG.md) for a detailed implementation roadmap.
 
 ### Quick install (Linux)
 
@@ -80,7 +84,7 @@ External systems (Windows AD/LDAP, Matrix, SMTP, SAN/PVE/PBS and agents) need in
 
 OrigamiTasks est une plateforme d'automatisation auto-hébergée sur Linux : interface web moderne, moteur de workflows conditionnels, coffre d'identifiants, LDAP/AD, scripts Windows/Linux via SSH, Matrix, Ansible, email, FTP/SFTP, fichiers et découverte Proxmox.
 
-**La v0.2.0 est une préversion :** les agents natifs Windows/Linux, toutes les tâches VisualCron et la réplication inter-datacenters de VM ne sont pas encore réalisés. Pour deux clusters Proxmox sur baies iSCSI, un `rsync` de blocs d'une VM allumée **n'est pas un mécanisme de réplication cohérente** : voir le [guide Proxmox/PRA](docs/site/proxmox.fr.md).
+**La v0.2.0 est une préversion :** les agents natifs signés/mTLS, toutes les tâches VisualCron et la réplication inter-datacenters de VM ne sont pas encore réalisés. Pour deux clusters Proxmox sur baies iSCSI, un `rsync` de blocs d'une VM allumée **n'est pas un mécanisme de réplication cohérente** : voir le [guide Proxmox/PRA](docs/site/proxmox.fr.md).
 
 La documentation française intégrale se trouve dans [docs/site/index.fr.md](docs/site/index.fr.md). Toute modification du code devra mettre à jour les pages EN **et** FR ainsi que l'historique.
 
