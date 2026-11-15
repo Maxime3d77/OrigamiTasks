@@ -245,7 +245,7 @@ Un seul processus Uvicorn (`--workers 1`) est requis : le scheduler et le moteur
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt pytest
-pytest -q
+python -m pytest -q
 node --check static/app.js
 ```
 
