@@ -1,6 +1,6 @@
 # Documentation OrigamiTasks
 
-![Logo officiel OrigamiTasks](assets/logo.png)
+<img src="../assets/logo.png" alt="Logo officiel OrigamiTasks" width="120">
 
 **OrigamiTasks** est un ordonnanceur de workflows auto-hébergé sous Linux, avec interface web, intégrations et exécutions distantes encadrées. Le produit est **en préproduction (v0.3.0-rc1)** : il ne possède pas encore toutes les fonctions de VisualCron.
 
