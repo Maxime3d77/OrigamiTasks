@@ -1,5 +1,7 @@
 """Task adapters. All scripts are trusted privileged automation, never user sandboxing."""
 import base64
+import mimetypes
+import shutil
 import ftplib
 import io
 import os
@@ -221,6 +223,25 @@ def execute(step, ctx):
         msg['To'] = opts['to']
         msg['Subject'] = opts.get('subject', 'OrigamiTasks')
         msg.set_content(opts.get('body', ''))
+        if opts.get('html_body'):
+            msg.add_alternative(str(opts['html_body']), subtype='html')
+        attachments = opts.get('attachments') or []
+        if isinstance(attachments, str):
+            attachments = [x.strip() for x in attachments.split(',') if x.strip()]
+        if not isinstance(attachments,list) or len(attachments)>10:
+            raise StepError('Liste de pièces jointes invalide (10 maximum)')
+        total = 0
+        for item in attachments:
+            file = resolve_local(str(item))
+            if not file.is_file():
+                raise StepError('Pièce jointe introuvable dans transfers/')
+            length = file.stat().st_size
+            total += length
+            if total > 10_000_000:
+                raise StepError('Pièces jointes limitées à 10 Mo au total')
+            media = mimetypes.guess_type(file.name)[0] or 'application/octet-stream'
+            main_type,sub_type = media.split('/',1)
+            msg.add_attachment(file.read_bytes(), maintype=main_type, subtype=sub_type, filename=file.name)
         host, port = opts['host'], int(opts.get('port') or 587)
         if opts.get('ssl'):
             conn = smtplib.SMTP_SSL(host, port, timeout=timeout)
@@ -235,6 +256,53 @@ def execute(step, ctx):
         finally:
             conn.quit()
         code, output = 0, 'Message envoyé à ' + opts['to']
+    elif typ == 'file':
+        action = str(opts.get('action') or '')
+        path = resolve_local(str(opts.get('path') or ''))
+        if action == 'list':
+            if not path.is_dir():
+                raise StepError('Répertoire introuvable')
+            items = sorted(x.name for x in path.iterdir())[:1000]
+            code, output = 0, '\n'.join(items)
+        elif action == 'read':
+            if not path.is_file():
+                raise StepError('Fichier introuvable')
+            with path.open('rb') as f:
+                contents = f.read(config.MAX_LOG_BYTES + 1)
+            if len(contents) > config.MAX_LOG_BYTES:
+                raise StepError('Fichier trop volumineux pour une lecture en sortie de tâche')
+            code, output = 0, contents.decode('utf-8',errors='replace')
+        elif action == 'write':
+            data = str(opts.get('content') or '').encode('utf-8')
+            if len(data) > 100_000:
+                raise StepError('Écriture de fichier limitée à 100 Ko')
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_bytes(data)
+            code, output = 0, f'Écriture de {len(data)} octets dans le dossier de transferts'
+        elif action in ('copy','move'):
+            source = resolve_local(str(opts.get('source') or ''))
+            if not source.is_file():
+                raise StepError('Fichier source introuvable')
+            if source == path:
+                raise StepError('La source et la destination sont identiques')
+            path.parent.mkdir(parents=True,exist_ok=True)
+            if action == 'copy':
+                shutil.copy2(source,path)
+            else:
+                shutil.move(str(source),str(path))
+            code, output = 0, f'Fichier {action} réussi dans le dossier de transferts'
+        elif action == 'mkdir':
+            path.mkdir(parents=True,exist_ok=True)
+            code, output = 0, 'Répertoire créé dans le dossier de transferts'
+        elif action == 'delete':
+            if opts.get('approved') is not True:
+                raise StepError('Suppression de fichier soumise à confirmation explicite')
+            if not path.is_file():
+                raise StepError('Fichier introuvable')
+            path.unlink()
+            code, output = 0, 'Fichier supprimé du dossier de transferts'
+        else:
+            raise StepError('Action fichier inconnue')
     elif typ == 'ftp':
         # No plaintext FTP by default. Require explicit opt-in for legacy servers.
         plain = bool(opts.get('allow_plaintext', False))

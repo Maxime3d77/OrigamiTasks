@@ -148,3 +148,65 @@ def proxmox_task(opts, load_credential, timeout):
     path=f'/api2/json/nodes/{quote(node)}/qemu/{vmid}/status/{action}'
     upid=proxmox_request(dc['url'],cred,path,timeout,method='POST')
     return json.dumps({'datacenter':dc['name'],'vmid':vmid,'action':action,'upid':upid},ensure_ascii=False)
+
+
+def assess_vm_dr(dc, cred, vmid, timeout=20):
+    """Read-only storage-aware assessment, never a replication plan or failover approval.
+
+    Storage type is derived from PVE /storage metadata, not guessed from disk names.
+    Results deliberately avoid claiming operational readiness or an RPO.
+    """
+    try:
+        vmid = int(vmid)
+    except (TypeError, ValueError):
+        raise IntegrationError('VMID invalide')
+    if not 100 <= vmid <= 999999999:
+        raise IntegrationError('VMID invalide')
+    inventory = discover_datacenter(dc, cred, timeout)
+    matches = [r for r in inventory if r.get('type') == 'qemu' and r.get('vmid') == vmid]
+    if len(matches) != 1:
+        raise IntegrationError('VM QEMU introuvable dans l’inventaire')
+    vm = matches[0]
+    node = str(vm.get('node') or '')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', node):
+        raise IntegrationError('Nœud Proxmox invalide')
+    conf = proxmox_request(dc['url'], cred,
+                           f'/api2/json/nodes/{quote(node)}/qemu/{vmid}/config', timeout)
+    storage_items = proxmox_request(dc['url'], cred, '/api2/json/storage', timeout)
+    if not isinstance(conf, dict) or not isinstance(storage_items, list):
+        raise IntegrationError('Configuration VM ou stockages indisponibles')
+    types = {str(x.get('storage')): {'type': x.get('type', 'unknown'),
+             'shared': bool(x.get('shared', 0))} for x in storage_items
+             if isinstance(x, dict) and isinstance(x.get('storage'), str)}
+    drives = []
+    for key, value in sorted(conf.items()):
+        if not re.fullmatch(r'(?:scsi|virtio|sata|ide)\d+', key) or not isinstance(value,str):
+            continue
+        volume = value.split(',', 1)[0]
+        # Disk entries may reference a storage pool or special values like cdrom/none.
+        pool = volume.split(':', 1)[0] if ':' in volume else ''
+        meta = types.get(pool, {'type': 'unknown', 'shared': False})
+        drives.append({'slot': key, 'storage': pool or None,
+                       'storage_type': meta['type'], 'shared': meta['shared'],
+                       'snapshot_capability': 'not_verified'})
+    unique_types = sorted({d['storage_type'] for d in drives})
+    risks = ['No source fencing check, destination disk mapping, write-order guarantee or DR validation has been performed.',
+             'Never boot a standby clone while the source may still be writing.']
+    if any(t in ('iscsi','iscsidirect','lvm','lvmthin') for t in unique_types):
+        risks.append('Block/iSCSI storage: evaluate vendor array snapshots, replication, consistency groups and LUN ownership. rsync of live block devices is unsafe.')
+    options = [
+      {'engine': 'pbs_backup_sync_restore', 'status': 'requires_design',
+       'purpose': 'Periodic recovery points; a backup requires restore before boot.'},
+      {'engine': 'storage_array_replication', 'status': 'requires_vendor_validation',
+       'purpose': 'Potentially low-lag mirror depending on the array, consistency and fencing.'},
+      {'engine': 'remote_migration', 'status': 'requires_pdm_and_mapping_validation',
+       'purpose': 'Moves an active VM; not a continuously maintained standby.'},
+    ]
+    if drives and all(t == 'zfspool' for t in unique_types):
+        options.append({'engine':'pvesr', 'status':'intra_cluster_only',
+                        'purpose':'Native PVE local ZFS replication within one cluster, not generic cross-cluster DR.'})
+    return {'datacenter':dc['name'], 'vmid':vmid, 'name':vm.get('name'),
+            'node':node, 'source_status':vm.get('status'), 'disks':drives,
+            'storage_types':unique_types,'options':options, 'risks':risks,
+            'ready_to_failover':False, 'replication_active':False,
+            'note':'Read-only exploratory assessment; no snapshot, copy, migration, or replication was executed.'}

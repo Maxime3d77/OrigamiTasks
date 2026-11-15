@@ -103,7 +103,7 @@ def logout(request: Request, response: Response):
     return {'ok':True}
 
 
-VALID_TYPES = {'shell','powershell','ssh','sftp','ftp','email','http','delay','set_variable','matrix','ansible','proxmox'}
+VALID_TYPES = {'shell','powershell','ssh','sftp','ftp','email','http','delay','set_variable','matrix','ansible','proxmox','file'}
 
 
 def validate_job(payload):
@@ -175,6 +175,7 @@ def task_catalog(request: Request):
       {'type':'proxmox','category':'Infrastructure','name':'Proxmox inventaire et actions encadrées'},
       {'type':'email','category':'Messagerie','name':'SMTP'},
       {'type':'sftp','category':'Transferts','name':'SFTP'},
+      {'type':'file','category':'Fichiers','name':'Opérations fichiers dans transfers/'},
       {'type':'ftp','category':'Transferts','name':'FTP/FTPS'},
       {'type':'http','category':'API','name':'HTTP / REST'},
       {'type':'set_variable','category':'Logique','name':'Variable'},
@@ -225,6 +226,19 @@ def discover_datacenter(dc_id:int,request:Request):
     except Exception as exc:
         raise HTTPException(502,'Proxmox API indisponible : '+type(exc).__name__)
     return {'datacenter':dc['name'],'resources':result}
+
+
+@app.get('/api/datacenters/{dc_id}/vms/{vmid}/dr-assessment')
+def vm_dr_assessment(dc_id:int, vmid:int, request:Request):
+    user = security.require(request, role='admin')
+    try:
+        dc = integrations.configured_datacenter(dc_id)
+        cred = engine.executor.credential(dc['credential_id'])
+        return integrations.assess_vm_dr(dc, cred, vmid)
+    except integrations.IntegrationError as exc:
+        raise HTTPException(422, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, 'Évaluation Proxmox indisponible : '+type(exc).__name__)
 
 
 @app.delete('/api/datacenters/{dc_id}')

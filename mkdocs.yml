@@ -1,0 +1,76 @@
+site_name: OrigamiTasks Documentation
+site_description: Open-source Linux workflow automation control plane
+site_url: https://maxime3d77.github.io/OrigamiTasks/
+repo_url: https://github.com/Maxime3d77/OrigamiTasks
+repo_name: Maxime3d77/OrigamiTasks
+docs_dir: docs/site
+site_dir: site
+strict: true
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Configuration: configuration.md
+  - Workflows: workflows.md
+  - Task reference: tasks.md
+  - Integrations: integrations.md
+  - Proxmox & DR: proxmox.md
+  - Agents: agents.md
+  - Operations & Upgrades: operations.md
+  - Security: security.md
+  - API: api.md
+  - Troubleshooting: troubleshooting.md
+  - Feature roadmap: roadmap.md
+  - Changelog: changelog.md
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: slate
+      primary: amber
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light theme
+    - scheme: default
+      primary: amber
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark theme
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - search.suggest
+    - content.code.copy
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: false
+      reconfigure_material: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+        - locale: fr
+          name: Français
+          nav_translations:
+            Home: Accueil
+            Installation: Installation
+            Configuration: Configuration
+            Workflows: Workflows
+            Task reference: Catalogue des tâches
+            Integrations: Intégrations
+            Proxmox & DR: Proxmox et PRA
+            Agents: Agents
+            Operations & Upgrades: Exploitation et mises à jour
+            Security: Sécurité
+            API: API
+            Troubleshooting: Dépannage
+            Feature roadmap: Fonctionnalités prévues
+            Changelog: Historique
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true

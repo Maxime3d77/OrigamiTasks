@@ -109,3 +109,25 @@ def test_proxmox_power_fail_closed(monkeypatch):
         integrations.proxmox_task({'datacenter_id':1,'action':'start','node':'n1','vmid':106,'approved':True},lambda _: {'username':'test'},10)
     with pytest.raises(integrations.IntegrationError,match='non autorisée'):
         integrations.proxmox_task({'datacenter_id':1,'action':'replicate'},lambda _: {},10)
+
+
+def test_read_only_dr_assessment_fails_closed_and_classifies_iscsi(monkeypatch):
+    inv=[{'id':'qemu/106','type':'qemu','vmid':106,'node':'pve1','name':'vm-db','status':'running'}]
+    calls=[]
+    monkeypatch.setattr(integrations,'discover_datacenter',lambda dc,cred,timeout: inv)
+    def request(origin,credential,path,timeout=20,method='GET',data=None):
+        calls.append((method,path))
+        if path.endswith('/config'):
+            return {'scsi0':'SAN:vm-106-disk-0,cache=none','net0':'virtio=00:00:00:00:00:01'}
+        if path=='/api2/json/storage':
+            return [{'storage':'SAN','type':'iscsi','shared':1}]
+        raise AssertionError(path)
+    monkeypatch.setattr(integrations,'proxmox_request',request)
+    result=integrations.assess_vm_dr({'name':'DC AU','url':'https://pve.example:8006'}, {},106)
+    assert result['ready_to_failover'] is False
+    assert result['replication_active'] is False
+    assert result['disks']==[{'slot':'scsi0','storage':'SAN','storage_type':'iscsi','shared':True,'snapshot_capability':'not_verified'}]
+    assert len(calls)==2 and all(c[0]=='GET' for c in calls)
+    assert 'rsync' in ' '.join(result['risks'])
+    with pytest.raises(integrations.IntegrationError,match='introuvable'):
+        integrations.assess_vm_dr({'name':'DC AU','url':'https://pve.example:8006'}, {},999)

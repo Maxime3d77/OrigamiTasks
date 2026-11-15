@@ -48,14 +48,16 @@ Sources de référence :
 - [ ] SCP, WebDAV, SMB, NFS, rsync, S3, Azure Blob, SharePoint, OneDrive.
 - [ ] Reprise de transferts, transferts multipart, checksum, comparaison, débit limité, règles de rétention.
 - [ ] TCP/UDP, ping, check port, DNS, SNMP get/walk/trap, syslog, AMQP/RabbitMQ, MQTT.
-- [ ] Copier/synchroniser/déplacer/list/read/write/touch/rename/delete, création et suppression de dossiers.
+- [x] Copier/déplacer/list/read/write/delete fichiers et création de dossiers, dans le répertoire transferts uniquement (v0.2).
+- [ ] Synchronisation/touch/filtres avancés/rename/delete de dossiers en cible distante.
 - [ ] Archive ZIP/7z/TAR/GZIP, chiffrement PGP, certificats, signatures, CRC/SHA, permissions ACL/ownership.
 - [ ] Déclencheurs File System Watch et réconciliation d'événements après interruption.
 
 ## 4. Communication
 
 - [x] SMTP texte (MVP), Matrix message non chiffré via bot token (v0.2).
-- [ ] SMTP HTML/pièces jointes, distribution/copie, modèles, DKIM/PGP/S-MIME et politiques d'envoi.
+- [x] SMTP HTML alternatif et pièces jointes plafonnées (v0.2).
+- [ ] Distribution/copie, modèles avancés, DKIM/PGP/S-MIME et politiques d'envoi.
 - [ ] IMAP/POP3 fetch/move/delete/attachments/filters, déclencheur réception email.
 - [ ] Matrix : markdown, pièces jointes, mentions, réactions, boutons d'approbation, réponse au thread et support E2EE via client adapté.
 - [ ] Teams, Slack, Telegram, Discord, Signal via intégration officiellement maintenue, SMS/push.
@@ -74,6 +76,7 @@ Sources de référence :
 
 - [x] Découverte Proxmox VE : nodes, QEMU, LXC et storages ; déclaration des datacenters via UI (v0.2).
 - [x] Tâche Proxmox inventaire ; démarrer, shutdown, reboot sous verrou global + option validée (v0.2).
+- [x] Évaluation PRA Proxmox en lecture seule par type de disque et stockage (v0.2).
 - [ ] Proxmox Datacenter Manager : découverte multi-clusters, état et historique des migrations.
 - [ ] Migration planifiée intra/inter-clusters via API officielles, dry-run, mappage bridges/storage, suivi UPID et reprise sur échec.
 - [ ] Proxmox Backup Server : backups à la demande, synchronisation remote, vérification, restauration-test et PRA.
