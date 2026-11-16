@@ -1,5 +1,7 @@
 """Editable LDAP settings overlay: .env defaults, encrypted SQLite overrides, safe bind test."""
 import re
+import base64
+import binascii
 import ssl
 import hashlib
 import os
@@ -19,14 +21,32 @@ class LDAPSettingsError(Exception):
     pass
 
 
-def import_ca(pem_text):
-    """Store a validated public CA PEM file in the persistent app-data volume.
+def import_ca(pem_text=None, der_base64=None):
+    """Accept CA certificates from .pem or .crt/.cer files in PEM or binary DER.
 
-    Private keys are rejected; server certificate verification remains required.
-    The resulting path can be selected as LDAP_CA_CERT in the admin form.
+    The container always stores a validated public PEM CA file. Neither
+    server certificate verification nor LDAPS/STARTTLS are disabled.
     """
+    from cryptography import x509
+    from cryptography.hazmat.primitives.serialization import Encoding
+    if (pem_text is None) == (der_base64 is None):
+        raise LDAPSettingsError("Fournir un certificat CA PEM ou DER, pas les deux")
+    if der_base64 is not None:
+        if not isinstance(der_base64,str) or len(der_base64)>175000:
+            raise LDAPSettingsError("Certificat CRT/DER invalide (128 Kio maximum)")
+        try:
+            raw=base64.b64decode(der_base64,validate=True)
+            if not 100<=len(raw)<=131072:
+                raise ValueError("invalid certificate size")
+            cert=x509.load_der_x509_certificate(raw)
+            basic=cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+            if not basic.ca:
+                raise LDAPSettingsError("Le fichier CRT est un certificat serveur, pas une autorité CA")
+            pem_text=cert.public_bytes(Encoding.PEM).decode("ascii")
+        except (ValueError,binascii.Error,x509.ExtensionNotFound):
+            raise LDAPSettingsError("Fichier CRT/DER invalide ou sans attribut CA=true") from None
     if not isinstance(pem_text,str) or not 100<=len(pem_text)<=131072:
-        raise LDAPSettingsError("Certificat PEM invalide (128 Kio maximum)")
+        raise LDAPSettingsError("Certificat CA invalide (128 Kio maximum)")
     if 'PRIVATE KEY' in pem_text or '\x00' in pem_text:
         raise LDAPSettingsError("Ne jamais importer une clé privée ; fournir uniquement la CA publique")
     import re as _re
