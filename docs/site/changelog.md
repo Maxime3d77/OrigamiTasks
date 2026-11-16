@@ -2,6 +2,15 @@
 
 ## 0.3.2-rc1 — 2026-11-16
 
+- Added **Administration → LDAP / Active Directory** with encrypted live settings and read-only bind/group diagnostics.
+- Added protocol-specific vault forms for SMTP, SSH/SFTP, FTP/FTPS, LDAP, API, Matrix and Proxmox.
+- SMTP profiles now include host, port, TLS mode, optional authentication, default sender and no-send connection testing.
+- Email steps reuse the vault's SMTP settings; legacy credentials remain supported.
+- Added automated security/integration tests and updated EN/FR documentation.
+
+
+## 0.3.2-rc1 — 2026-11-16
+
 - Added **Administration → LDAP / Active Directory** with encrypted stored settings, URI/port, TLS, base DNs, user attribute, role groups and read-only connection diagnostics.
 - Added protocol-specific connection profiles for SMTP, SSH/SFTP, FTP/FTPS, LDAP, API, Matrix, Proxmox and generic secrets.
 - SMTP profiles configure server/port, implicit TLS or STARTTLS, optional authentication, default sender and no-send connection test.
