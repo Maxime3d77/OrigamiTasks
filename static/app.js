@@ -901,7 +901,7 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   const next=addStep();
   next.name='Si échec · '+step.name.slice(0,35);
   next.on_success=step.on_failure&&step.on_failure!=='FAIL'&&step.on_failure!=='END'?
-     step.on_failure:'END';
+     step.on_failure:'FAIL';
   step.on_failure=next.id;
   state.editor.steps_json.push(next);
   state.selectedStep=state.editor.steps_json.length-1;
