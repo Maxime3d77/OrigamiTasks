@@ -167,8 +167,8 @@ def ssh(values, options=None):
     client.load_system_host_keys()
     if config.KNOWN_HOSTS.is_file():
         client.load_host_keys(str(config.KNOWN_HOSTS))
-    from .ssh_keys import strict_host_key_policy, SSHUnknownHostKey
-    client.set_missing_host_key_policy(strict_host_key_policy())
+    from .ssh_keys import configured_host_key_policy, SSHUnknownHostKey
+    client.set_missing_host_key_policy(configured_host_key_policy())
     params = dict(hostname=host, port=_port(values.get("port"), 22), username=user,
                   timeout=TIMEOUT, auth_timeout=TIMEOUT, banner_timeout=TIMEOUT,
                   look_for_keys=False, allow_agent=False)
@@ -185,7 +185,7 @@ def ssh(values, options=None):
     try:
         client.connect(**params)
         checks = [check("Connectivité TCP", "Connexion établie"),
-                  check("Clé de l'hôte", "Empreinte vérifiée dans known_hosts"),
+                  check("Clé de l'hôte", "Nouvelle clé automatiquement enregistrée dans known_hosts" if getattr(client, "_origami_added_host_key", False) else "Clé reconnue dans known_hosts"),
                   check("Authentification", "Compte SSH accepté")]
         if _bool(options, "check_sftp"):
             sftp = client.open_sftp()
