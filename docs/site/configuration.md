@@ -11,7 +11,8 @@ The `.env.example` file is the normative list of settings. Restart the container
 | `ORIGAMI_EXECUTOR_WORKERS` | Concurrent workflow workers | Start with `2`; single API instance only |
 | `MAX_STEP_SECONDS` | Upper bound for one step | `1800` |
 | `MATRIX_ALLOWED_HOSTS` | Explicit Matrix homeserver hostnames | e.g. `matrix.example.org` |
-| `PROXMOX_ALLOWED_HOSTS` | Proxmox REST API endpoints | e.g. `pve.example.org:8006` |
+| `PROXMOX_ALLOWED_HOSTS` | Proxmox REST API endpoints and read-only credential tests | e.g. `pve.example.org:8006` |
+| `CONNECTION_TEST_ALLOWED_HOSTS` | Exact allow-listed HTTPS hosts for generic API credential GET diagnostics | Empty by default; set only trusted hosts |
 | `PROXMOX_CA_CERT` | Trusted PEM CA file inside container | Optional if system CA trusted |
 | `ALLOW_PROXMOX_ACTIONS` | Allow gated VM power actions | `false` until reviewed |
 | `GIT_ALLOWED_ORIGIN` | Updater's exact permitted Git URL | Protected origin only |
@@ -35,6 +36,20 @@ Use **Administration → LDAP / Active Directory** to configure URI and port, LD
 ## Credentials
 
 Create **protocol-specific vault profiles** for SMTP (server, port, STARTTLS / implicit SSL / unencrypted relay, optional authentication and default sender), SSH/SFTP, FTP/FTPS, LDAP, API, Matrix and Proxmox. The editor changes fields when you select a connection type. **Test SMTP** verifies TLS and optional credentials without sending mail. Use the **Administration → LDAP** test for the directory itself. Grant workflow editing rights only to trusted operators. Non-sensitive settings can be reviewed by administrators; passwords, tokens and SSH keys are never re-displayed. Blank secret fields retain their existing encrypted values. Old hostless credentials remain compatible with tasks that define their own host.
+
+### Test saved vault credentials
+
+From **Vault → Test**, or the vault selector inside a workflow, administrators can test saved SMTP, SSH/SFTP, FTPS, LDAP, Matrix, Proxmox and generic HTTPS API profiles. The result distinguishes connectivity, TLS/host-key validation, credential acceptance and checks that could not be established.
+
+- **SSH/SFTP:** host key must already be verified in `known_hosts`; login is tested, without running commands.
+- **FTPS:** checks the TLS control channel, login and protected data channel, without listing or transferring files. Plain FTP only verifies TCP/banner connectivity: the password is **never** sent in clear text by the diagnostic.
+- **LDAP:** LDAPS/STARTTLS, bind and optional read-only base search; no directory writes.
+- **Matrix:** authenticated `/_matrix/client/v3/account/whoami`, restricted by `MATRIX_ALLOWED_HOSTS`.
+- **Proxmox:** authenticated read-only `/api2/json/access/permissions`, restricted by `PROXMOX_ALLOWED_HOSTS`.
+- **HTTPS API:** GET-only `test_path` (default `/`), restricted by `CONNECTION_TEST_ALLOWED_HOSTS`. A 2xx response does **not** always establish whether a token was validated; use an endpoint requiring authentication. No redirects are followed.
+- **Generic** secrets without an endpoint or protocol cannot be meaningfully tested until saved as a typed connection.
+
+Only administrators can invoke tests; they are recorded in the audit trail. Use outbound firewall rules in addition to allow-lists. Secrets never appear in diagnostic output.
 
 ## Remote SSH
 
