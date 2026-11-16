@@ -47,6 +47,8 @@ def test_unknown_host_fingerprint_reported_but_key_is_not_trusted():
 
 
 def test_diagnostic_separately_identifies_unknown_host(monkeypatch):
+    # Explicitly exercise the optional strict mode; the default is now accept-new.
+    monkeypatch.setattr(config,"SSH_HOST_KEY_POLICY","strict")
     key=paramiko.RSAKey.generate(1024)
     class FakeSSH:
         def load_system_host_keys(self):pass
