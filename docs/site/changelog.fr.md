@@ -1,5 +1,12 @@
 # Historique des modifications
 
+## 0.3.3-rc2 — 16 novembre 2026
+
+- Correctif de mise en page pour les assistants de diagnostic : les cases à cocher héritaient de la largeur 100 % des champs texte.
+- Cases à cocher de 18 px et libellés lisibles, sans débordement horizontal dans les fenêtres modales.
+- Ajustements responsive pour mobiles et petits écrans, et test automatique de non-régression.
+- Versionnement des ressources CSS et JS pour forcer le navigateur à récupérer la correction après mise à jour.
+
 ## 0.3.3-rc1 — 16 novembre 2026
 
 - **Assistant de diagnostic par protocole** dans le coffre (et depuis les tâches), avec paramètres et résultats détaillés.
