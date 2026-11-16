@@ -50,7 +50,7 @@ function jobs(){
   +(cards||empty('Aucun workflow','Sélectionnez un autre dossier ou créez votre première automatisation.'))+'</div></section></div>';
 }
 function runs(){return title('Journal d’exécution','Chaque événement, chaque branche et chaque sortie de script.')+`<div class="panel"><div class="panel-title"><h2>Historique (${state.runs.length})</h2><button class="btn tiny" data-action="refresh">↻ Actualiser</button></div>${runsTable(state.runs)}</div>`}
-function vault(){if(!roleAdmin())return title('Coffre-fort','Réservé aux administrateurs.')+`<div class="notice">Le coffre de secrets est accessible aux seuls administrateurs.</div>`;return title('Coffre-fort','Credentials chiffrés au repos. Les valeurs ne sont jamais renvoyées par l’API.','<button class="btn primary" data-action="new-credential">＋ Nouveau secret</button>')+`<div class="panel"><div class="panel-title"><h2>Identités et connexions</h2><span class="hint">${state.credentials.length} identifiants</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Type</th><th>Créé le</th><th></th></tr></thead><tbody>${state.credentials.map(c=>`<tr><td class="name-cell">◇ ${e(c.name)}</td><td>${e(c.kind)}</td><td class="muted">${dt(c.created_at)}</td><td>${c.kind==="smtp"?`<button class="btn tiny" data-action="credential-test" data-id="${c.id}">Tester</button>`:""} <button class="btn tiny" data-action="credential-edit" data-id="${c.id}">Modifier</button> <button class="btn tiny" data-action="credential-clone" data-id="${c.id}">Cloner</button> <button class="btn tiny danger" data-action="delete-credential" data-id="${c.id}">Supprimer</button></td></tr>`).join('')}</tbody></table></div>${!state.credentials.length?empty('Coffre vide','Ajoutez un identifiant SSH, SFTP, SMTP ou API.'):''}</div><div class="notice">Les secrets sont chiffrés avec Fernet et la clé VAULT_KEY externe au dépôt. Pour les scripts, les valeurs de l'identifiant sélectionné sont fournies via ORIGAMI_USERNAME / ORIGAMI_PASSWORD / ORIGAMI_TOKEN. Un administrateur qui peut créer des scripts doit être considéré comme privilégié.</div>`}
+function vault(){if(!roleAdmin())return title('Coffre-fort','Réservé aux administrateurs.')+`<div class="notice">Le coffre de secrets est accessible aux seuls administrateurs.</div>`;return title('Coffre-fort','Credentials chiffrés au repos. Les valeurs ne sont jamais renvoyées par l’API.','<button class="btn primary" data-action="new-credential">＋ Nouveau secret</button>')+`<div class="panel"><div class="panel-title"><h2>Identités et connexions</h2><span class="hint">${state.credentials.length} identifiants</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Type</th><th>Créé le</th><th></th></tr></thead><tbody>${state.credentials.map(c=>`<tr><td class="name-cell">◇ ${e(c.name)}</td><td>${e(c.kind)}</td><td class="muted">${dt(c.created_at)}</td><td><button class="btn tiny" data-action="credential-test" data-id="${c.id}" title="Tester cette connexion sans action métier">Tester</button> <button class="btn tiny" data-action="credential-edit" data-id="${c.id}">Modifier</button> <button class="btn tiny" data-action="credential-clone" data-id="${c.id}">Cloner</button> <button class="btn tiny danger" data-action="delete-credential" data-id="${c.id}">Supprimer</button></td></tr>`).join('')}</tbody></table></div>${!state.credentials.length?empty('Coffre vide','Ajoutez un identifiant SSH, SFTP, SMTP ou API.'):''}</div><div class="notice">Les secrets sont chiffrés avec Fernet et la clé VAULT_KEY externe au dépôt. Pour les scripts, les valeurs de l'identifiant sélectionné sont fournies via ORIGAMI_USERNAME / ORIGAMI_PASSWORD / ORIGAMI_TOKEN. Un administrateur qui peut créer des scripts doit être considéré comme privilégié.</div>`}
 
 function ldapPage(){
  if(!roleAdmin())return title('Configuration LDAP','Réservée aux administrateurs');
@@ -308,6 +308,7 @@ const connectionSchemas={
  ],
  api:[
   ['base_url','URL de base HTTPS','text','https://api.example.org'],
+  ['test_path','Chemin GET de diagnostic (optionnel)','text','/health'],
   ['token','Jeton API','password',''],
   ['username','Utilisateur (si API Basic)','text',''],
   ['password','Mot de passe (si API Basic)','password','']
@@ -382,7 +383,7 @@ function drawCredentialBrowser(){
       return '<div class="credential-entry" data-credential-search="'+e((c.name+' '+c.kind+' '+(c.public?.host||c.public?.uri||c.public?.url||'')).toLowerCase())+'">'
        +'<div><b>'+e(c.name)+'</b><p class="hint">'+e(c.kind.toUpperCase())+' · '+e(c.public?.host||c.public?.uri||c.public?.url||'')+' · #'+c.id+'</p></div>'
        +'<div class="credential-actions">'+(state.pickerField?'<button class="btn tiny primary" data-action="credential-select" data-id="'+c.id+'" '+(compatible?'':'disabled title="Protocole non compatible"')+'>Sélectionner</button>':'')
-       +(c.kind==='smtp'?'<button class="btn tiny" data-action="credential-test" data-id="'+c.id+'">Tester SMTP</button>':'')
+       +'<button class="btn tiny" data-action="credential-test" data-id="'+c.id+'">Tester</button>'
        +'<button class="btn tiny" data-action="credential-edit" data-id="'+c.id+'">Modifier</button>'
        +'<button class="btn tiny" data-action="credential-clone" data-id="'+c.id+'">Cloner</button>'
        +'<button class="btn tiny danger" data-action="credential-remove" data-id="'+c.id+'">Supprimer</button></div></div>';
@@ -396,6 +397,29 @@ function filterCredentialRows(){
  $$('#credentialLayer [data-credential-search]').forEach(row=>{
   row.hidden=!(row.dataset.credentialSearch||'').includes((state.credentialSearch||'').toLowerCase());
  });
+}
+
+async function testCredentialConnection(id,button){
+ const entry=state.credentials.find(c=>c.id===id);
+ if(!entry)return toast('Connexion introuvable',false);
+ if(button)button.disabled=true;
+ try{
+  const result=await api('/credentials/'+id+'/test','POST');
+  const rows=(result.checks||[]).map(item=>{
+   const success=item.status==='success';
+   return '<div class="connection-test-row"><span class="connection-test-mark '+(success?'passed':'untested')+'">'+(success?'✓':'—')+'</span><div><strong>'+e(item.name)+'</strong><p class="hint">'+e(item.detail)+'</p></div></div>';
+  }).join('');
+  openLayer('credentialTestLayer','Diagnostic · '+entry.name,
+    '<div class="notice">'+e(result.message||'Test effectué')+'</div>'
+    +'<div class="connection-test-list">'+rows+'</div>'
+    +'<p class="hint">Ces diagnostics ne lancent aucune commande SSH, aucun transfert, aucun email et aucune écriture LDAP. Les contrôles dépendent du protocole.</p>'
+    +'<div class="tool-row"><button class="btn primary" data-action="layer-close" data-layer="credentialTestLayer">Fermer</button></div>');
+ }catch(ex){
+  openLayer('credentialTestLayer','Échec du test · '+entry.name,
+   '<div class="notice error">'+e(ex.message)+'</div>'
+   +'<p class="hint">Vérifier la cible, les certificats, les autorisations réseau et le compte utilisé. Aucun secret n’est affiché.</p>'
+   +'<div class="tool-row"><button class="btn" data-action="layer-close" data-layer="credentialTestLayer">Fermer</button></div>');
+ }finally{if(button)button.disabled=false}
 }
 function credentialSelected(id){
  const step=state.editor?.steps_json[state.selectedStep];
@@ -466,9 +490,7 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='credential-edit'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='edit';drawCredentialBrowser();return}
  if(a==='credential-clone'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='clone';drawCredentialBrowser();return}
  if(a==='credential-test'){
-  toast('Test de connexion SMTP en cours…');
-  try{const result=await api('/credentials/'+id+'/test','POST');toast(result.message)}
-  catch(ex){toast(ex.message,false)}return
+  await testCredentialConnection(id,b);return
  }
  if(a==='credential-remove'){if(!confirm('Supprimer définitivement cette connexion ? Une connexion utilisée par un workflow ne pourra pas être supprimée.'))return;await api('/credentials/'+id,'DELETE');await reloadCredentials();drawCredentialBrowser();if(state.page==='vault')render();toast('Connexion supprimée');return}
  if(a==='group-browser'){await openGroupBrowser(b.dataset.role);return}
