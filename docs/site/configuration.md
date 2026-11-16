@@ -20,9 +20,15 @@ The `.env.example` file is the normative list of settings. Restart the container
 
 Use LDAPS (`ldaps://dc.example.org:636`) or LDAP+STARTTLS; never use plain LDAP on untrusted networks. Bind account must be read-only. Configure `LDAP_URI`, `LDAP_BASE_DN`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_USER_ATTRIBUTE`, `LDAP_GROUP_BASE_DN`, group names and optional `LDAP_CA_CERT`. For OpenLDAP, `LDAP_USER_ATTRIBUTE=uid` is typically correct (not `sAMAccountName`); `posixGroup/memberUid` and `groupOfNames/member` memberships are resolved under `LDAP_GROUP_BASE_DN`. The ACL picker requires read access to the group subtree. For nested AD groups, set `LDAP_NESTED_GROUPS=true` and test memberships with actual users. See [Security](security.md).
 
+### Graphical LDAP / Active Directory administration
+
+Administrators can open **Administration → LDAP / Active Directory**. Initial settings are read from `.env`; settings saved in the UI override them without editing that file. Configure URI and port, LDAPS or STARTTLS, bind/user/group bases, `uid` (OpenLDAP) or `sAMAccountName` (AD), mapped role groups, and an optional trusted CA file accessible in the container under `/etc/ssl` or `/app/data`.
+
+**Test connection** performs certificate-verified TLS negotiation, service-account bind, base DN and group searches, and optional user lookup. This is **read-only**: no directory objects change and no password is returned. Settings are encrypted in SQLite using `VAULT_KEY`; retain backups and restrict database access. The local `admin` account is independent of LDAP. Directory steps can default to central settings; use a separate vault service account for write actions when possible.
+
 ## Credentials
 
-Create secrets under **Vault**: SSH (`username`, `password` or `private_key`), Matrix (`token`), SMTP (`username`, `password`), Proxmox (`username=user@realm!tokenid`, `token=secret`). Grant workflow editing rights only to trusted operators. Vault contents are not returned to browsers.
+Create **protocol-specific vault profiles** for SMTP (server, port, STARTTLS / implicit SSL / unencrypted relay, optional authentication and default sender), SSH/SFTP, FTP/FTPS, LDAP, API, Matrix and Proxmox. The editor changes fields when you select a connection type. **Test SMTP** verifies TLS and optional credentials without sending mail. Use the **Administration → LDAP** test for the directory itself. Grant workflow editing rights only to trusted operators. Non-sensitive settings can be reviewed by administrators; passwords, tokens and SSH keys are never re-displayed. Blank secret fields retain their existing encrypted values. Old hostless credentials remain compatible with tasks that define their own host.
 
 ## Remote SSH
 
