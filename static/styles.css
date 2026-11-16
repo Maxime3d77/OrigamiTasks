@@ -81,3 +81,13 @@
  .credential-actions{justify-content:flex-start}
  .editor-meta{grid-template-columns:1fr}
 }
+
+/* v0.3.2 — protocol-specific connection form */
+.credential-protocol-fields{margin-top:12px}
+.credential-protocol-fields .field.checkbox{min-height:41px;align-self:end;flex-direction:row-reverse;justify-content:flex-end;gap:11px}
+.credential-protocol-fields .field.checkbox span{color:var(--text)}
+.credential-protocol-fields [data-smtp-auth-field][hidden]{display:none!important}
+#credentialProfile>.notice{margin:8px 0 14px}
+#ldapAdminForm .form-grid{row-gap:5px}
+#ldapAdminForm .field.checkbox{align-self:center}
+#ldapTestResult{margin-top:14px;line-height:1.6}
