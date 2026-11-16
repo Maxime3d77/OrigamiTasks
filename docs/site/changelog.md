@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6-rc1 — 2026-11-16
+
+- **SSH test** against a manually supplied FQDN and port without registering a server; strict host-key verification remains enforced.
+- **LDAP CA** import from binary `.crt`, `.cer`, `.der` or PEM, converted to trusted PEM without disabling TLS.
+- **Workflow graph**: 8–250% zoom, Ctrl-wheel, drag-to-pan, fit width, overview and viewport preservation.
+- API and UI regression tests and bilingual documentation updates.
+
+
 ## 0.3.5-rc1 — 2026-11-16
 
 - Bulk Linux/Windows agent installation from a **host FQDN list** or SSH inventory group, with a persistent per-host status queue (100 targets maximum).
