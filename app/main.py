@@ -660,7 +660,13 @@ def list_credentials(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
         items=con.execute('SELECT * FROM credentials ORDER BY name').fetchall()
-    return {'items':[dict(id=r['id'],name=r['name'],kind=r['kind'],created_at=r['created_at'],updated_at=r['updated_at'],fields=list(security.decrypt(r['encrypted_payload']).keys())) for r in items]}
+    result=[]
+    for row in items:
+        values=security.decrypt(row['encrypted_payload'])
+        result.append({'id':row['id'],'name':row['name'],'kind':row['kind'],
+                       'created_at':row['created_at'],'updated_at':row['updated_at'],
+                       'fields':list(values),'public':connections.public(values)})
+    return {'items':result}
 
 
 @app.post('/api/credentials')
@@ -670,18 +676,20 @@ def create_credential(payload:dict[str,Any],request:Request):
     fields=payload.get('payload',{})
     if not name or len(name)>120 or not isinstance(fields,dict) or len(json.dumps(fields))>30000:
         raise HTTPException(422,'Coffre invalide')
-    if not fields or not any(str(x) for x in fields.values()):
-        raise HTTPException(422,'Au moins une valeur de secret requise')
-    encrypted=security.encrypt({str(k):str(v) for k,v in fields.items() if v is not None})
+    kind=str(payload.get('kind','generic'))
+    try:
+        values=connections.normalize(kind,fields,is_new=True)
+    except connections.ConnectionError as exc:
+        raise HTTPException(422,str(exc)) from None
     with db.session() as con:
         try:
             cur=con.execute('INSERT INTO credentials (name,kind,encrypted_payload,created_at,updated_at) VALUES (?,?,?,?,?)',
-                            (name,str(payload.get('kind','generic'))[:30],encrypted,db.now(),db.now()))
+                            (name,kind,security.encrypt(values),db.now(),db.now()))
         except db.sqlite3.IntegrityError:
             raise HTTPException(409,'Ce nom de coffre existe déjà')
-    db.audit(user['username'],'vault.create',cur.lastrowid,name)
-    return {'id':cur.lastrowid}
-
+        credential_id=cur.lastrowid
+    db.audit(user['username'],'vault.create',credential_id,name)
+    return {'id':credential_id}
 
 
 @app.put('/api/credentials/{credential_id}')
@@ -694,19 +702,43 @@ def update_credential(credential_id:int,payload:dict[str,Any],request:Request):
     with db.session() as con:
         row=con.execute('SELECT * FROM credentials WHERE id=?',(credential_id,)).fetchone()
         if not row: raise HTTPException(404,'Identifiant introuvable')
+        kind=str(payload.get('kind') or row['kind'])
+        if kind!=row['kind']:
+            raise HTTPException(422,'Type de connexion non modifiable : cloner ou créer une nouvelle connexion')
         values=security.decrypt(row['encrypted_payload'])
-        values.update({str(k):str(v) for k,v in updates.items() if v is not None and str(v)})
-        for key in payload.get('remove_fields',[]):
-            if key in ('username','password','token','private_key','passphrase'): values.pop(key,None)
-        if not values: raise HTTPException(422,'Au moins un champ secret est obligatoire')
+        remove=payload.get('remove_fields',[])
+        if not isinstance(remove,list):
+            raise HTTPException(422,'Liste de champs à supprimer invalide')
+        for key in remove:
+            if key in connections.SECRET_KEYS: values.pop(key,None)
+        try:
+            values=connections.normalize(kind,updates,values,is_new=False)
+        except connections.ConnectionError as exc:
+            raise HTTPException(422,str(exc)) from None
         try:
             con.execute('UPDATE credentials SET name=?,kind=?,encrypted_payload=?,updated_at=? WHERE id=?',
-                        (name,str(payload.get('kind') or row['kind'])[:30],
-                         security.encrypt(values),db.now(),credential_id))
+                        (name,kind,security.encrypt(values),db.now(),credential_id))
         except db.sqlite3.IntegrityError:
             raise HTTPException(409,'Ce nom de coffre existe déjà')
     db.audit(user['username'],'vault.update',credential_id,name)
     return {'ok':True}
+
+
+@app.post('/api/credentials/{credential_id}/test')
+def test_credential(credential_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    with db.session() as con:
+        row=con.execute('SELECT kind,encrypted_payload FROM credentials WHERE id=?',(credential_id,)).fetchone()
+    if not row: raise HTTPException(404,'Connexion introuvable')
+    if row['kind']!='smtp':
+        raise HTTPException(422,'Test disponible pour SMTP ; utiliser Administration / LDAP pour tester LDAP')
+    try:
+        result=connections.test_smtp(security.decrypt(row['encrypted_payload']))
+    except connections.ConnectionError as exc:
+        db.audit(user['username'],'vault.test.failed',credential_id,'smtp')
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'vault.test',credential_id,'smtp')
+    return result
 
 
 @app.post('/api/credentials/{credential_id}/clone')
