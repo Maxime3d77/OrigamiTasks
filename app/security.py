@@ -79,6 +79,14 @@ def ldap_authenticate(username, password):
         user_dn = entry.entry_dn
         groups = [str(g) for g in entry.memberOf.values] if 'memberOf' in entry else []
         display_name = str(entry.displayName.value or username) if 'displayName' in entry else username
+        # OpenLDAP posixGroup/memberUid and groupOfNames/member often lack memberOf.
+        # Resolve them through the configured group subtree before unbinding the service.
+        if config.LDAP_GROUP_BASE_DN:
+            safe_uid=escape_filter_chars(username)
+            safe_dn=escape_filter_chars(user_dn)
+            membership=f'(|(memberUid={safe_uid})(member={safe_dn})(uniqueMember={safe_dn}))'
+            svc.search(config.LDAP_GROUP_BASE_DN,membership,SUBTREE,attributes=['cn'],size_limit=300)
+            groups.extend(item.entry_dn for item in svc.entries)
         if config.LDAP_NESTED_GROUPS:
             # AD LDAP_MATCHING_RULE_IN_CHAIN: nested group memberships for user DN.
             svc.search(config.LDAP_GROUP_BASE_DN, f'(&(objectClass=group)(member:1.2.840.113556.1.4.1941:={escape_filter_chars(user_dn)}))', SUBTREE, attributes=['distinguishedName'])
