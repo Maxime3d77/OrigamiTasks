@@ -372,7 +372,7 @@ function drawCredentialBrowser(){
    +(clone?'<div class="notice">La copie conserve les paramètres et secrets chiffrés. Aucune valeur sensible n’est affichée.</div>':
     '<div id="credentialProfile">'+credentialProfileFields(kind,edit?selected:null)+'</div>'
     +'<div class="hint">Les mots de passe et jetons restent masqués ; laisser ces champs vides en modification conserve leurs valeurs.</div>')
-   +'<div class="tool-row" style="margin-top:16px"><button class="btn primary" type="submit">'+(clone?'Cloner cette connexion':edit?'Enregistrer les modifications':'Créer et chiffrer la connexion')+'</button></div></form>';
+   +'<div class="tool-row" style="margin-top:16px"><button class="btn primary" type="submit">'+(clone?'Cloner cette connexion':edit?'Enregistrer les modifications':'Créer et chiffrer la connexion')+'</button>'+(edit?'<button class="btn" type="button" data-action="credential-test" data-id="'+selected.id+'">Tester la connexion enregistrée</button>':'')+'</div>'+(edit?'<p class="hint">Le test utilise les paramètres déjà enregistrés : enregistrer d’abord les éventuelles modifications.</p>':'')+'</form>';
  }else{
   const target=state.pickerField?credentialKindForStep():null;
   body='<div class="tool-row"><input id="credentialSearch" placeholder="Rechercher une connexion (nom, type, hôte…)" value="'+e(state.credentialSearch||'')+'">'
