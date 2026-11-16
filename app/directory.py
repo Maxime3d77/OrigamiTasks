@@ -2,7 +2,7 @@
 import json
 import re
 import ssl
-from . import config
+from . import config, ldap_settings
 
 READ_ACTIONS = {'search','get_user'}
 WRITE_ACTIONS = {'create_user','modify_user','group_add','group_remove',
@@ -36,11 +36,12 @@ def execute(opts, credential):
         raise DirectoryError('Unknown LDAP/AD action')
     if action in WRITE_ACTIONS and (not config.ALLOW_DIRECTORY_WRITES or opts.get('approved') is not True):
         raise DirectoryError('Directory writes require ALLOW_DIRECTORY_WRITES=true and approved=true')
-    uri = str(opts.get('uri') or config.LDAP_URI)
-    starttls = bool(opts.get('starttls',config.LDAP_STARTTLS))
+    saved = ldap_settings.current()
+    uri = str(opts.get('uri') or credential.get('uri') or saved['uri'])
+    starttls = bool(credential.get('starttls', saved['starttls'])) if not opts.get('uri') else bool(opts.get('starttls',False))
     if not ((uri.startswith('ldaps://') and not starttls) or (uri.startswith('ldap://') and starttls)):
         raise DirectoryError('LDAPS or LDAP+STARTTLS required')
-    base = str(opts.get('base_dn') or config.LDAP_BASE_DN)
+    base = str(opts.get('base_dn') or credential.get('base_dn') or saved['base_dn'])
     if not base:
         raise DirectoryError('base_dn required')
     target = str(opts.get('target_dn') or '')
@@ -49,15 +50,17 @@ def execute(opts, credential):
         raise DirectoryError('target_dn outside permitted LDAP base_dn')
     if action.startswith('group_') and not dn_within(group,base):
         raise DirectoryError('group_dn outside permitted LDAP base_dn')
+    if not credential.get('username') and saved['enabled'] and saved['bind_password']:
+        credential = dict(credential, username=saved['bind_dn'], password=saved['bind_password'])
     if not credential.get('username') or not credential.get('password'):
-        raise DirectoryError('Dedicated directory credential (bind DN/password) required')
+        raise DirectoryError('Compte de liaison LDAP manquant (coffre ou administration LDAP)')
     from ldap3 import Server, Connection, Tls, SUBTREE, BASE, MODIFY_REPLACE, MODIFY_ADD, MODIFY_DELETE
     from ldap3.utils.conv import escape_filter_chars
     import urllib.parse
     parsed = urllib.parse.urlparse(uri)
     if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('','/'):
         raise DirectoryError('Invalid LDAP URI')
-    tls = Tls(validate=ssl.CERT_REQUIRED,ca_certs_file=config.LDAP_CA_CERT or None)
+    tls = Tls(validate=ssl.CERT_REQUIRED,ca_certs_file=saved['ca_cert'] or None)
     server = Server(uri, tls=tls, connect_timeout=10)
     conn = Connection(server,user=credential['username'],password=credential['password'],receive_timeout=15,auto_bind=not starttls)
     try:
