@@ -107,14 +107,32 @@
 .connection-test-intro .hint{overflow-wrap:anywhere}
 .connection-test-config{margin:17px 0;display:flex;flex-direction:column;gap:13px}
 .connection-test-config>p{margin:0;color:var(--muted);line-height:1.55;font-size:13px}
-.test-wizard-option{display:flex;align-items:flex-start;gap:11px;padding:12px 14px;border:1px solid var(--stroke);border-radius:11px;background:var(--panel2);cursor:pointer}
-.test-wizard-option input{flex:0 0 auto;margin:3px 0 0;accent-color:var(--yellow)}
-.test-wizard-option span{display:flex;flex-direction:column;gap:5px;min-width:0}
-.test-wizard-option strong{font-size:13px}
-.test-wizard-option small{font-size:11px;line-height:1.45;color:var(--muted)}
+/* Do not inherit the global input width:100% on protocol checkboxes. */
+.test-wizard-option{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:start;column-gap:13px;width:100%;max-width:100%;min-width:0;padding:13px 14px;border:1px solid var(--stroke);border-radius:11px;background:var(--panel2);cursor:pointer}
+.test-wizard-option input[type=checkbox]{display:block;appearance:auto;width:18px;min-width:18px;max-width:18px;height:18px;min-height:18px;flex:none;padding:0;margin:2px 0 0;border-radius:4px;accent-color:var(--yellow)}
+.test-wizard-option>span{display:flex;flex-direction:column;gap:5px;min-width:0;max-width:100%;overflow-wrap:anywhere}
+.test-wizard-option strong{font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.test-wizard-option small{display:block;font-size:11px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
 .test-wizard-dependent{display:flex;flex-direction:column;gap:13px;border-left:2px solid var(--yellow);padding:8px 0 10px 14px}
 .test-wizard-dependent[hidden]{display:none!important}
 #credentialTestResult{margin-top:18px}
 #credentialTestResult .connection-test-list{margin-top:13px}
 .connection-test-mark.warning{background:#53360e;color:#f8c269}
 @media(max-width:720px){.test-wizard-dependent{padding-left:10px}}
+
+/* Diagnostic dialog: single vertical scroll area, never a horizontal page. */
+#credentialTestLayer .manager-dialog{width:min(890px,calc(100vw - 32px));max-width:100%;min-width:0}
+#credentialTestLayer .modal-body{min-width:0;max-width:100%;overflow-y:auto;overflow-x:hidden}
+#credentialTestForm,#credentialTestForm .connection-test-config,
+#credentialTestForm .test-wizard-dependent,#credentialTestResult{width:100%;max-width:100%;min-width:0}
+#credentialTestForm .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+#credentialTestForm .field,#credentialTestForm .field input,
+#credentialTestForm .field textarea,#credentialTestForm .field select{min-width:0;max-width:100%}
+#credentialTestForm .connection-test-row>div{min-width:0;overflow-wrap:anywhere}
+#credentialTestLayer .connection-test-intro>*{min-width:0;overflow-wrap:anywhere}
+@media(max-width:680px){
+  #credentialTestLayer .modal-body{padding:17px 16px}
+  #credentialTestForm .form-grid{grid-template-columns:minmax(0,1fr)}
+  #credentialTestLayer .test-wizard-option{grid-template-columns:18px minmax(0,1fr);padding:12px}
+  #credentialTestLayer .test-wizard-dependent{padding-left:11px}
+}
