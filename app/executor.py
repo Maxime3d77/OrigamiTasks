@@ -101,8 +101,8 @@ def _ssh(command, opts, cred, timeout):
     client.load_system_host_keys()
     if config.KNOWN_HOSTS.exists():
         client.load_host_keys(str(config.KNOWN_HOSTS))
-    from .ssh_keys import strict_host_key_policy, SSHUnknownHostKey
-    client.set_missing_host_key_policy(strict_host_key_policy())
+    from .ssh_keys import configured_host_key_policy, SSHUnknownHostKey
+    client.set_missing_host_key_policy(configured_host_key_policy())
     user = cred.get('username') or opts.get('username')
     if not user:
         raise StepError('Utilisateur SSH manquant')
