@@ -301,7 +301,7 @@ const FIELDS={
  ftp:[['host','Hôte FTP','text'],['port','Port FTP','number'],['remote_path','Fichier distant','text'],['local_path','Fichier local (transfers/)','text'],['direction','Sens','select:get|put'],['allow_plaintext','Autoriser FTP non chiffré (déconseillé)','checkbox'],['credential_id','Identifiant','credential']],
  http:[['url','URL complète (manuel)','text'],['path','Chemin relatif (coffre)','text'],['method','Méthode','select:GET|POST|PUT|PATCH|DELETE'],['body','Corps','textarea'],['timeout','Timeout (s)','number'],['credential_id','Token Bearer','credential']],
  file:[['action','Opération','select:list|read|write|copy|move|mkdir|delete'],['path','Chemin cible sous transfers/','text'],['source','Source copy/move sous transfers/','text'],['content','Contenu (write)','textarea'],['approved','Confirmer la suppression (delete)','checkbox']],
- email:[['host','Serveur SMTP (facultatif si renseigné dans le coffre)','text'],['port','Port SMTP (facultatif)','number'],['ssl','Forcer SSL immédiat pour cette tâche','checkbox'],['from','Expéditeur (facultatif si défini dans le coffre)','text'],['to','Destinataires','text'],['subject','Objet','text'],['body','Corps texte','textarea'],['html_body','Corps HTML (optionnel)','textarea'],['attachments','Pièces jointes (transfers/ séparées par virgules)','text'],['credential_id','Connexion SMTP configurée dans le coffre','credential']],
+ email:[['host','Serveur SMTP (manuel)','text'],['port','Port SMTP (manuel)','number'],['ssl','SSL direct (compatibilité ancienne tâche)','checkbox'],['tls_mode','Sécurité SMTP','select:starttls|ssl|none'],['from','Expéditeur (facultatif si défini dans le coffre)','text'],['to','Destinataires','text'],['subject','Objet','text'],['body','Corps texte','textarea'],['html_body','Corps HTML (optionnel)','textarea'],['attachments','Pièces jointes (transfers/ séparées par virgules)','text'],['credential_id','Connexion SMTP configurée dans le coffre','credential']],
  delay:[['seconds','Secondes (maximum 300)','number']],
  set_variable:[['name','Nom de la variable','text'],['value','Valeur','textarea']]
 };
@@ -740,7 +740,7 @@ function drawGroupBrowser(){
 }
 
 const CONNECTION_STEP_TYPES={
- email:{manual:['host','port','ssl','from'],vault:['credential_id']},
+ email:{manual:['host','port','ssl','tls_mode','from'],vault:['credential_id']},
  ssh:{manual:['host','port'],vault:['ssh_server_id']},
  sftp:{manual:['host','port'],vault:['ssh_server_id']},
  ansible:{manual:['host','port'],vault:['ssh_server_id']},
@@ -778,6 +778,7 @@ function stepConfigFields(step){
  return connectionModeWidget(step)+fields.filter(([key])=>{
   if(!schema)return true;
   if(key==='credential_id')return (step.type==='email'||step.type==='http')?mode==='vault':true;
+  if(step.type==='email'&&key==='ssl'&&step.config?.connection_mode)return false;
   if(schema.manual.includes(key))return mode==='manual';
   if(schema.vault.includes(key))return mode==='vault';
   return true;
