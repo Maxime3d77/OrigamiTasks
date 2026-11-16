@@ -80,7 +80,7 @@ function ldapSettingsForm(cfg){
  +ldapInput('Groupe des opérateurs','operator_group',cfg.operator_group)
  +ldapInput('Groupe des lecteurs','viewer_group',cfg.viewer_group)
  +ldapInput('Chemin CA TLS (dans le conteneur)','ca_cert',cfg.ca_cert,'text','Optionnel : certificat CA de confiance, sous /etc/ssl ou /app/data')
- +'<div class="field full"><span>Importer un certificat CA public (.pem / .crt)</span><div class="inline-picker"><input id="ldapCAImportFile" type="file" accept=".pem,.crt,.cer,application/x-pem-file,text/plain"><button class="btn" type="button" data-action="ldap-ca-import">Importer la CA</button></div><small class="hint">Certificat(s) PEM uniquement, jamais de clé privée. Après import, enregistrer la configuration LDAP puis tester la connexion. La vérification du certificat TLS reste obligatoire.</small></div>'
+ +'<div class="field full"><span>Importer un certificat CA public (.pem, .crt, .cer ou .der)</span><div class="inline-picker"><input id="ldapCAImportFile" type="file" accept=".pem,.crt,.cer,.der,application/x-pem-file,application/pkix-cert,text/plain,application/octet-stream"><button class="btn" type="button" data-action="ldap-ca-import">Importer la CA</button></div><small class="hint">Certificats publics CA au format PEM ou DER, même si le fichier porte l’extension .crt. Une clé privée ou un certificat serveur non-CA sera refusé. Le certificat est converti en PEM, puis utilisé pour vérifier TLS. Enregistrer la configuration et tester LDAP.</small></div>'
  +ldapCheck('Utiliser la recherche des groupes AD imbriqués','nested_groups',cfg.nested_groups)
  +'</div><div class="divider"></div>'
  +'<div class="form-grid">'+ldapInput('Utilisateur à rechercher (test facultatif)','test_user','','text','Test en lecture seule du login, sans tenter de l’authentifier')+'</div>'
@@ -899,11 +899,25 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='group-done'){closeLayer('groupLayer');renderEditor();return}
  if(a==='ldap-ca-import'){
   const file=document.getElementById('ldapCAImportFile')?.files?.[0];
-  if(!file)return toast('Sélectionner un certificat CA PEM (.crt ou .pem)',false);
+  if(!file)return toast('Sélectionner un certificat CA (.crt, .cer, .der ou .pem)',false);
   if(file.size>131072)return toast('Certificat trop volumineux (128 Kio maximum)',false);
   const original=b.textContent;b.disabled=true;b.textContent='Import en cours…';
   try{
-   const result=await api('/admin/ldap/ca','POST',{pem:await file.text()});
+   const bytes=new Uint8Array(await file.arrayBuffer());
+   if(!bytes.length)throw Error('Fichier certificat vide');
+   const textValue=new TextDecoder('utf-8',{fatal:false}).decode(bytes);
+   let payload;
+   if(textValue.includes('-----BEGIN CERTIFICATE-----')){
+    payload={pem:textValue};
+   }else{
+    // Encode binary DER without large apply() arguments or Unicode corruption.
+    let binary='';
+    for(let i=0;i<bytes.length;i+=8192){
+     binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    }
+    payload={der_base64:btoa(binary)};
+   }
+   const result=await api('/admin/ldap/ca','POST',payload);
    const input=document.querySelector('#ldapAdminForm [name="ca_cert"]');
    if(input)input.value=result.path;
    toast(result.certificate_count+' certificat(s) CA importé(s). Enregistrer la configuration LDAP.');
