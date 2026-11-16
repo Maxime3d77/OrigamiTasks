@@ -251,9 +251,11 @@ def ftp(values, options=None):
         client.login(values.get("username") or "anonymous",
                      values.get("password") or "")
         client.prot_p()
+        auth_label = ("Compte accepté" if values.get("username")
+                      else "Connexion anonyme acceptée ; aucun compte utilisateur spécifique validé")
         checks = [check("Connectivité FTP", "Bannière reçue"),
                   check("TLS", "Canal de commande sécurisé et données protégées"),
-                  check("Authentification", "Compte accepté")]
+                  check("Authentification", auth_label)]
         if _bool(options, "check_directory"):
             client.pwd()
             checks.append(check("Accès répertoire", "Commande PWD autorisée, aucun fichier transféré"))
@@ -474,6 +476,10 @@ def api(values, options=None):
             else:
                 response = client.get(base+path, headers=headers)
         status = response.status_code
+        if status in (401, 403):
+            raise ConnectionTestError(
+                "API : identifiants refusés ou permissions insuffisantes (HTTP "+str(status)+")"
+            )
         accepted = (200 <= status < 300) if expected=="2xx" else status==int(expected)
         if not accepted:
             raise ConnectionTestError(
