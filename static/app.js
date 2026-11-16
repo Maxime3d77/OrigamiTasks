@@ -664,6 +664,21 @@ async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users
 function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP()}
 async function refresh(){await load();render()}
 async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='layer-close'){closeLayer(b.dataset.layer);return}
+ if(a==='ssh-goto-inventory'){closeLayer('credentialTestLayer');closeLayer('credentialLayer');showPage('ssh-inventory');return}
+ if(a==='ssh-group-new'){sshGroupForm();return}
+ if(a==='ssh-group-edit'){sshGroupForm(id);return}
+ if(a==='ssh-server-new'){sshServerForm();return}
+ if(a==='ssh-server-edit'){sshServerForm(id);return}
+ if(a==='ssh-group-remove'){
+  if(!confirm('Supprimer ce groupe SSH ? Les serveurs resteront dans l’inventaire.'))return;
+  await api('/ssh/groups/'+id,'DELETE');
+  toast('Groupe supprimé, serveurs conservés');await refresh();return
+ }
+ if(a==='ssh-server-remove'){
+  if(!confirm('Retirer ce serveur de l’inventaire ? Les workflows qui le référencent doivent être modifiés avant suppression.'))return;
+  await api('/ssh/servers/'+id,'DELETE');
+  toast('Serveur retiré de l’inventaire');await refresh();return
+ }
  if(a==='folder-manage'){foldersBrowser();return}
  if(a==='folder-filter'){state.folderFilter=b.dataset.path||'';render();return}
  if(a==='folder-select'){state.folderSelected=b.dataset.path;drawFolderBrowser();return}
@@ -695,6 +710,29 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git autorisée et redémarrer les services ?'))return;await api('/updates/request','POST',{action:b.dataset.value});toast('Demande envoyée au service de maintenance');hydrateAdmins();return}if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='sshGroupForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id),name=String(f.get('name')||'').trim();
+  if(!name)return toast('Renseigner un nom de groupe',false);
+  const payload={name,description:String(f.get('description')||'').trim(),
+                 servers:String(f.get('servers')||'').split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean)};
+  try{
+   await api(id?'/ssh/groups/'+id:'/ssh/groups',id?'PUT':'POST',payload);
+   closeLayer('sshInventoryLayer');toast('Groupe SSH enregistré');await refresh();
+  }catch(ex){toast(ex.message,false)}return
+ }
+ if(ev.target.id==='sshServerForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id);
+  const payload={fqdn:String(f.get('fqdn')||'').trim(),port:Number(f.get('port')||22),
+                 label:String(f.get('label')||'').trim(),
+                 group_ids:f.getAll('group_id').map(Number)};
+  try{
+   await api(id?'/ssh/servers/'+id:'/ssh/servers',id?'PUT':'POST',payload);
+   closeLayer('sshInventoryLayer');toast('Serveur SSH enregistré');await refresh();
+  }catch(ex){toast(ex.message,false)}return
+ }
+
  if(ev.target.id==='credentialTestForm'){ev.preventDefault();await submitCredentialTest(ev.target);return}
 
  if(ev.target.id==='ldapAdminForm'){ev.preventDefault();
@@ -742,8 +780,14 @@ async function handleSubmit(ev){
 function initTheme(){let theme=localStorage.getItem('origami-theme')||'dark';document.body.className='theme-'+theme;$('#themeToggle').textContent={dark:'☾',light:'☀',cyber:'✧'}[theme]||'☾'}
 async function bootstrap(){document.addEventListener('submit',handleSubmit);try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initialisation:',ex)}try{const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);$('#userAvatar').textContent=initials();await load();showPage('dashboard')}catch{$('#auth').hidden=false;$('#application').hidden=true}document.addEventListener('click',handleClick);document.addEventListener('input',ev=>{
  if(ev.target.id==='credentialSearch'){state.credentialSearch=ev.target.value;filterCredentialRows()}
+ if(ev.target.matches('[data-ssh-filter-search]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
+ if(ev.target.id==='sshInventorySearch'){state.sshInventorySearch=ev.target.value;
+  $('.ssh-server-row[data-ssh-search]').forEach(row=>row.hidden=!row.dataset.sshSearch.includes(ev.target.value.toLowerCase()));
+ }
  if(ev.target.id==='groupSearch'){state.groupQuery=ev.target.value;clearTimeout(state.groupTimer);state.groupTimer=setTimeout(searchGroups,250)}
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',ev=>{
+ if(ev.target.matches('[data-ssh-filter-group]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
+ if(ev.target.id==='sshInventoryGroupFilter'){state.sshInventoryGroupFilter=ev.target.value;render();}
  if(ev.target.closest('#credentialTestForm'))updateCredentialTestVisibility();
  if(ev.target.name==='kind'&&ev.target.closest('#credentialManageForm')){
   document.getElementById('credentialProfile').innerHTML=credentialProfileFields(ev.target.value);
