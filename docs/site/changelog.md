@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.5-rc1 — 2026-11-16
+
+- Bulk Linux/Windows agent installation from a **host FQDN list** or SSH inventory group, with a persistent per-host status queue (100 targets maximum).
+- Filtered deployment credential choices to **SSH identities**; typed connection pickers no longer show unrelated protocols.
+- **Updates** screen compares installed/latest version, latest remote Git commit date, commits behind, and verified/unverified state.
+- **LDAP** public PEM CA import from the browser, preserving strict TLS certificate validation.
+- Renamed **DC Proxmox**; Proxmox API inventory and VM actions do not require PVE node agents.
+- Workflow source selector (**vault or manual network settings**), concise once/assistant/cron schedules and a one-click **Add on failure** branch.
+- Additional regression tests for bulk deployment, LDAP TLS trust, SMTP modes and failure handling.
+
+
 ## 0.3.4-rc1 — 2026-11-16
 
 - Decoupled **SSH identities** (login, password or private key, optional passphrase) from server addresses in the encrypted vault.
