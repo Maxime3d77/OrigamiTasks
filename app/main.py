@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests
 
 
 @asynccontextmanager
@@ -730,14 +730,16 @@ def test_credential(credential_id:int,request:Request):
     with db.session() as con:
         row=con.execute('SELECT kind,encrypted_payload FROM credentials WHERE id=?',(credential_id,)).fetchone()
     if not row: raise HTTPException(404,'Connexion introuvable')
-    if row['kind']!='smtp':
-        raise HTTPException(422,'Test disponible pour SMTP ; utiliser Administration / LDAP pour tester LDAP')
     try:
-        result=connections.test_smtp(security.decrypt(row['encrypted_payload']))
-    except connections.ConnectionError as exc:
-        db.audit(user['username'],'vault.test.failed',credential_id,'smtp')
+        result=connection_tests.run(row['kind'], security.decrypt(row['encrypted_payload']))
+    except connection_tests.ConnectionTestError as exc:
+        db.audit(user['username'],'vault.test.failed',credential_id,row['kind'])
         raise HTTPException(422,str(exc)) from None
-    db.audit(user['username'],'vault.test',credential_id,'smtp')
+    except Exception as exc:
+        db.audit(user['username'],'vault.test.failed',credential_id,row['kind'])
+        # No raw server exception or decrypted credential is ever returned.
+        raise HTTPException(422,'Test '+str(row['kind'])+' impossible ('+type(exc).__name__+')') from None
+    db.audit(user['username'],'vault.test',credential_id,row['kind'])
     return result
 
 
