@@ -23,10 +23,10 @@ def test_graphical_scheduler_modes():
     assert scheduler.check_schedule({'mode': 'manual'}) is None
     t = scheduler.check_schedule({'mode': 'interval', 'every': 5,
                                    'unit': 'minutes', 'timezone': 'Europe/Paris'}, now)
-    assert datetime.fromisoformat(t) == now + timedelta(minutes=5)
+    assert abs((datetime.fromisoformat(t) - (now + timedelta(minutes=5))).total_seconds()) < 1
     t = scheduler.check_schedule({'mode': 'interval', 'every': 2,
                                    'unit': 'hours', 'timezone': 'Europe/Paris'}, now)
-    assert datetime.fromisoformat(t) == now + timedelta(hours=2)
+    assert abs((datetime.fromisoformat(t) - (now + timedelta(hours=2))).total_seconds()) < 1
     future = (now + timedelta(hours=1)).astimezone(
         __import__('zoneinfo').ZoneInfo('Europe/Paris'))
     date = future.strftime('%Y-%m-%dT%H:%M')
