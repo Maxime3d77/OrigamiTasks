@@ -269,13 +269,15 @@ function updates(){
   +'<div class="panel"><div class="panel-title"><h2>État des versions</h2><span class="hint">Source : service de maintenance hôte</span></div>'
   +'<div id="updateVersionSummary"><div class="hint">Vérification des versions…</div></div>'
   +'<div class="tool-row"><button class="btn" data-action="update-request" data-value="check">⌕ Vérifier maintenant</button>'
+  +'<button class="btn" data-action="update-request" data-value="preflight">◫ Tester la mise à jour (simulation)</button>'
   +'<button class="btn primary" data-action="update-request" data-value="apply">⇣ Installer la version Git disponible</button>'
   +'<button class="btn" data-action="refresh-updates">↻ Rafraîchir</button></div>'
-  +'<div class="notice">Les vérifications sont effectuées par <code>ops/update-worker.py</code> sur l’hôte, avec <code>GIT_ALLOWED_ORIGIN</code> et <code>GIT_BRANCH</code>. La date affichée est la date du dernier commit de la branche suivie, pas nécessairement une date de release. Un correctif en recette sur une autre branche ne doit pas être annoncé comme « à jour sur main ». Installation toujours sur validation manuelle.</div></div>'
+  +'<div class="notice">Les vérifications sont effectuées par <code>ops/update-worker.py</code> sur l’hôte, avec <code>GIT_ALLOWED_ORIGIN</code> et <code>GIT_BRANCH</code>. La date affichée est la date du dernier commit de la branche suivie, pas nécessairement une date de release. Le bouton « Tester la mise à jour » vérifie Git, Docker Compose et la sauvegarde sans modifier la version. Les releases GitHub sont créées automatiquement par la CI lors de l’envoi d’un tag `vX.Y.Z` ou `vX.Y.Z-rcN`. Un correctif en recette sur une autre branche ne doit pas être annoncé comme « à jour sur main ». Installation toujours sur validation manuelle.</div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Historique des opérations Git</h2></div><div id="updateStatus">Chargement…</div></div>';
 }
 function renderUpdateVersion(data){
  const w=data.worker||{},installed=data.version||'inconnue';
+ const serviceOnline=data.worker_online===true;
  const checkedTime=Date.parse(w.checked_at||'');
  const fresh=Number.isFinite(checkedTime)&&Date.now()-checkedTime<26*3600*1000
              &&Date.now()-checkedTime>=-5*60*1000;
@@ -299,6 +301,8 @@ function renderUpdateVersion(data){
   +(known&&w.available?'<span class="hint">'+e(w.commits_behind||'?')+' commit(s) disponibles</span>':'')+'</div>'
   +'<p class="hint">Branche suivie : <code>'+e(branch)+'</code> · Dernière vérification : '+e(checked)+'</p>'
   +'<p class="hint">'+e(w.message||'Le service de maintenance hôte n’a pas encore effectué de vérification')+'</p>'
+ +'<p class="hint">Service de maintenance : <strong>'+e(serviceOnline?'En ligne (sur l’hôte)':'Hors ligne ou non configuré')+'</strong></p>'
+ +(w.preflight_ok===true?'<div class="notice">Simulation réussie'+(w.preflight_at?' le '+e(dt(w.preflight_at)):'')+' ; aucune installation effectuée. Cette vérification est indépendante des futurs tests fonctionnels.</div>':'')
   +(!matchingBranch&&w.branch?'<div class="notice error">Le service surveille une branche différente de GIT_BRANCH. Vérification non fiable.</div>':'')
   +(!matchingInstall?'<div class="notice error">Le commit local ne correspond pas à la version exécutée dans le conteneur. Reconstruire et vérifier le déploiement.</div>':'')
   +(!fresh&&w.checked_at?'<div class="notice error">Dernière vérification trop ancienne : relancer un contrôle Git.</div>':'')
@@ -1030,7 +1034,12 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   renderEditor();
   toast('Étape liée à la branche d’échec');return
  }
- if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git autorisée et redémarrer les services ?'))return;await api('/updates/request','POST',{action:b.dataset.value});toast('Demande envoyée au service de maintenance');hydrateAdmins();return}if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
+ if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){
+  if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git AUTORISÉE puis redémarrer les services ? Une sauvegarde SQLite est créée mais toutes les migrations ne sont pas nécessairement réversibles.'))return;
+  await api('/updates/request','POST',{action:b.dataset.value});
+  toast(b.dataset.value==='preflight'?'Simulation demandée : aucune installation ne sera effectuée':'Demande envoyée au service de maintenance');
+  hydrateAdmins();return
+ }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
  if(ev.target.id==='sshGroupForm'){
   ev.preventDefault();
