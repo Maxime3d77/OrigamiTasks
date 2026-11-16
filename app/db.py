@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS jobs (
  schedule_json TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
  next_run_at TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS workflow_folders (
+ id INTEGER PRIMARY KEY,
+ path TEXT NOT NULL UNIQUE,
+ created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS webhooks (
  job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
  token_hash TEXT NOT NULL, created_at TEXT NOT NULL
@@ -120,6 +125,7 @@ def initialize():
     config.TRANSFER_ROOT.mkdir(parents=True, exist_ok=True)
     with session() as con:
         con.executescript(SCHEMA)
+        con.execute("INSERT OR IGNORE INTO workflow_folders (path,created_at) VALUES ('Général',?)", (now(),))
         # Never silently replay a claimed remote action after a server restart.
         con.execute("UPDATE agent_tasks SET status='interrupted', lease_hash=NULL WHERE status IN ('queued','claimed')")
         # On restart, a process killed mid-execution must not silently re-run side effects.
