@@ -323,9 +323,25 @@ def add_datacenter(payload:dict[str,Any],request:Request):
     except (integrations.IntegrationError,ValueError,TypeError) as exc:
         raise HTTPException(422,str(exc))
     with db.session() as con:
-        credential_exists=con.execute('SELECT kind FROM credentials WHERE id=?',(credential_id,)).fetchone()
+        credential_exists=con.execute(
+            'SELECT kind,encrypted_payload FROM credentials WHERE id=?',(credential_id,)
+        ).fetchone()
         if not credential_exists or credential_exists['kind'] not in ('proxmox','api'):
             raise HTTPException(422,'Un jeton Proxmox/API du coffre-fort est obligatoire')
+        vault_values=security.decrypt(credential_exists['encrypted_payload'])
+        source_url=vault_values.get('url') or vault_values.get('base_url')
+        if not source_url:
+            raise HTTPException(422,'Le profil du coffre doit contenir l’URL du DC Proxmox')
+        try:
+            saved_origin=integrations.authorized_origin(
+                source_url,config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True)
+        except integrations.IntegrationError as exc:
+            raise HTTPException(422,'URL du token Proxmox invalide : '+str(exc)) from None
+        if saved_origin.rstrip('/').lower()!=origin.rstrip('/').lower():
+            raise HTTPException(
+                422,'L’URL du DC doit correspondre à l’URL du token enregistré dans le coffre '
+                    'pour éviter l’envoi du secret à un autre serveur'
+            )
         try:
             cur=con.execute('INSERT INTO datacenters(name,url,credential_id,created_at) VALUES (?,?,?,?)',
                             (name,origin,credential_id,db.now()))
