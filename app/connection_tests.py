@@ -7,11 +7,12 @@ import re
 import ssl
 import time
 import threading
+import secrets
 import smtplib
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import make_msgid, format_datetime
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote
 
 import ftplib
 import httpx
@@ -21,6 +22,7 @@ from . import config, connections, integrations, ldap_settings
 TIMEOUT = 8
 _SEND_LOCK = threading.Lock()
 _LAST_MAIL_SEND = {}
+_LAST_MATRIX_SEND = {}
 _MAIL_SEND_COOLDOWN_SECONDS = 30
 
 
@@ -334,28 +336,71 @@ def ldap(values, options=None):
         raise ConnectionTestError("LDAP : échec TLS/bind/recherche ("+type(exc).__name__+")") from None
 
 
-def matrix(values):
-    """Use the authenticated Matrix whoami endpoint, with allow-list validation."""
+def matrix(values, options=None, credential_id=None):
+    """Authenticated whoami; optional room membership check and explicit send."""
+    options = options or {}
     base = _allowed_origin(values.get("homeserver"), config.MATRIX_ALLOWED_HOSTS)
     token = values.get("token")
     if not token:
         raise ConnectionTestError("Matrix : token d'accès manquant")
+    room = _short(options, "room_id", 255)
+    check_room = _bool(options, "check_room")
+    send = _bool(options, "send_message")
+    if (check_room or send) and (not room.startswith("!") or ":" not in room):
+        raise ConnectionTestError("Matrix : indiquer l'identifiant complet de la room (!id:serveur)")
+    headers = {"Authorization": "Bearer "+token}
     try:
         with httpx.Client(timeout=TIMEOUT, follow_redirects=False, trust_env=False) as client:
-            r = client.get(base+"/_matrix/client/v3/account/whoami",
-                           headers={"Authorization": "Bearer "+token})
-        if r.status_code != 200:
-            raise ConnectionTestError("Matrix : identité du token non validée (HTTP "+str(r.status_code)+")")
-        data = r.json()
-        if not isinstance(data, dict) or not data.get("user_id"):
-            raise ConnectionTestError("Matrix : réponse whoami invalide")
-        return ok("matrix", "Token Matrix reconnu ; aucun message envoyé.",
-                  [check("HTTPS", "Homeserver accessible"),
-                   check("Identité", "Endpoint whoami a accepté le token")])
+            response = client.get(base+"/_matrix/client/v3/account/whoami", headers=headers)
+            if response.status_code != 200:
+                raise ConnectionTestError("Matrix : identité non validée (HTTP "+str(response.status_code)+")")
+            data = response.json()
+            if not isinstance(data, dict) or not isinstance(data.get("user_id"), str):
+                raise ConnectionTestError("Matrix : réponse whoami invalide")
+            checks = [check("HTTPS", "Homeserver accessible"),
+                      check("Identité", "Le jeton est reconnu par whoami")]
+            if check_room:
+                url = (base+"/_matrix/client/v3/rooms/"+quote(room, safe="")+
+                       "/state/m.room.member/"+quote(data["user_id"], safe=""))
+                membership = client.get(url, headers=headers)
+                if membership.status_code != 200:
+                    raise ConnectionTestError(
+                        "Matrix : appartenance à la room non confirmée (HTTP "+
+                        str(membership.status_code)+")"
+                    )
+                info = membership.json()
+                if not isinstance(info, dict) or info.get("membership") != "join":
+                    raise ConnectionTestError("Matrix : le bot n'est pas membre de cette room")
+                checks.append(check("Appartenance room", "Le compte est membre du salon"))
     except ConnectionTestError:
         raise
     except (httpx.HTTPError, ValueError):
         raise ConnectionTestError("Matrix : erreur réseau/TLS ou réponse inattendue") from None
+
+    if send:
+        if not _bool(options, "confirm_send"):
+            raise ConnectionTestError("Confirmer explicitement l'envoi du message de test")
+        message = _short(options, "message", 1000, multiline=True) or (
+            "[OrigamiTasks] Message de test volontaire. Vérifier sa présence dans le salon."
+        )
+        with _SEND_LOCK:
+            if credential_id is not None:
+                last = _LAST_MATRIX_SEND.get(credential_id, 0)
+                if last and time.monotonic()-last < _MAIL_SEND_COOLDOWN_SECONDS:
+                    raise ConnectionTestError("Attendre 30 secondes entre deux messages Matrix de test")
+            try:
+                integrations.matrix_message(
+                    {"homeserver":base, "room_id":room, "message":message}, values,
+                    "test-"+secrets.token_hex(8), "matrix", TIMEOUT
+                )
+            except Exception as exc:
+                raise ConnectionTestError(
+                    "Matrix : envoi refusé ou impossible ("+type(exc).__name__+")"
+                ) from None
+            if credential_id is not None:
+                _LAST_MATRIX_SEND[credential_id] = time.monotonic()
+        checks.append(check("Envoi message", "API Matrix a accepté le message ; vérifier son affichage dans la room"))
+    return ok("matrix", "Jeton Matrix validé ; tests demandés effectués.", checks)
 
 
 def proxmox(values):
