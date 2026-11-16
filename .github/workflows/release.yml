@@ -1,0 +1,58 @@
+name: Publish GitHub release
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify tag matches checked-in version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os, re
+          from pathlib import Path
+          tag=os.environ["RELEASE_TAG"]
+          conf=Path("app/config.py").read_text()
+          match=re.search(r"(?m)^APP_VERSION\s*=\s*['\"]([^'\"]{1,64})['\"]",conf)
+          if not match or tag != "v"+match.group(1):
+              raise SystemExit("Release tag does not match APP_VERSION")
+          if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-rc\d+)?",tag):
+              raise SystemExit("Invalid release tag")
+          print("Release version validated:",tag)
+          PY
+      - name: Install and run full test suite
+        run: |
+          python -m pip install -r requirements.txt -r requirements-docs.txt pytest
+          node --check static/app.js
+          node --check static/login.js
+          node tests/login_smoke.cjs
+          python -m compileall -q app agents/linux/agent.py
+          python -m pytest -q
+          python tools/check_docs.py
+          mkdocs build --strict
+      - name: Create prerelease or stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          args=()
+          if [[ "$RELEASE_TAG" == *-rc* ]]; then args+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --title "OrigamiTasks ${RELEASE_TAG#v}" \
+            --generate-notes \
+            "${args[@]}"
