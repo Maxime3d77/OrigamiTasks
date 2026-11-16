@@ -34,10 +34,10 @@ def authorized_origin(raw_url, allowed_hosts, *, admin_proxmox=False):
             parsed.path not in ('', '/')):
         raise IntegrationError('URL HTTPS racine obligatoire (sans identifiants ni chemin)')
     host = parsed.hostname.lower().rstrip('.')
-    if not allowed_hosts:
-        if not admin_proxmox:
-            raise IntegrationError("Connecteur désactivé : configurer la liste des hôtes autorisés dans .env")
-        # Auto-authorization is narrowly scoped to the expected API/HTTPS ports.
+    if admin_proxmox:
+        # This origin is already stored in an admin-controlled Proxmox vault
+        # connection or datacenter. The global env allow-list is not consulted.
+        # Auto-authorization is scoped to the expected HTTPS API ports.
         if (port not in (None, 443, 8006) or host == 'localhost' or
                 host.endswith('.localhost') or host in ('metadata.google.internal',)):
             raise IntegrationError('Proxmox : hôte ou port interdit en autorisation automatique')
@@ -49,6 +49,8 @@ def authorized_origin(raw_url, allowed_hosts, *, admin_proxmox=False):
             if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
                 raise IntegrationError('Proxmox : adresse locale ou spéciale interdite')
         return url
+    if not allowed_hosts:
+        raise IntegrationError("Connecteur désactivé : configurer la liste des hôtes autorisés dans .env")
     allowed = {item.strip().lower() for item in allowed_hosts.split(',') if item.strip()}
     effective = (host+':'+str(port)) if port else host
     if host not in allowed and effective not in allowed:
