@@ -38,6 +38,19 @@ Use **Administration → LDAP / Active Directory** to configure URI and port, LD
 Create **protocol-specific vault profiles** for SMTP (server, port, STARTTLS / implicit SSL / unencrypted relay, optional authentication and default sender), SSH/SFTP, FTP/FTPS, LDAP, API, Matrix and Proxmox. The editor changes fields when you select a connection type. **Test SMTP** verifies TLS and optional credentials without sending mail. Use the **Administration → LDAP** test for the directory itself. Grant workflow editing rights only to trusted operators. Non-sensitive settings can be reviewed by administrators; passwords, tokens and SSH keys are never re-displayed. Blank secret fields retain their existing encrypted values. Old hostless credentials remain compatible with tasks that define their own host.
 
 
+### Approve a server's SSH host key from the browser
+
+An SSH user private key imported from another computer can be reused unchanged in **Vault → SSH identity**. The user private key and the SSH **server's public host key** are unrelated.
+
+Under **Vault → SSH connection test**, select a manual FQDN or inventory host, then **Inspect server host key**. OrigamiTasks displays the algorithm, SHA256 fingerprint and known/unknown/changed status. **Independently compare the fingerprint against the target server console**, for example using `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256`. Type the independently verified fingerprint and explicitly confirm its verification; only then does the server persist the **public host key** in `/app/data/known_hosts` (host volume `data/known_hosts`).
+
+The offered host key is fetched again before approval and must match the confirmed SHA256 fingerprint. An existing changed host key cannot be overwritten from the browser. Unknown hosts are **never silently trusted**, and user private keys are **not transmitted** by this operation.
+
+### Import LDAP CA chains from CRT
+
+A `.crt` file may contain several X.509 certificates. The importer accepts PEM and DER; for a PEM bundle containing both CAs and server-leaf certificates, it **keeps only CA certificates** and reports any non-CA certificates ignored. A `CA:TRUE` CA is retained, while a leaf-only bundle is rejected. After import, **save the LDAP configuration** with the resulting CA path and test LDAPS/STARTTLS. A greyed-out skip-verification checkbox means the host-level `ALLOW_INSECURE_LDAP_TLS` permission is disabled. With the correct CA, leave this bypass turned off.
+
+
 ### SSH diagnostics: user private keys and trusted host keys
 
 The SSH vault stores **a user authentication private key** (OpenSSH or RSA/EC PEM), not a server identity key. The user's matching public key must be in the target server's \`authorized_keys\`; never import \`/etc/ssh/ssh_host_*_key\` as a user credential.
