@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],sshInventory:{servers:[],groups:[]},folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +10,7 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory')}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
@@ -201,15 +201,44 @@ function catalog(){const entries=state.catalog.available||[];const groups=[...ne
 function agentsPage(){
  if(!roleAdmin())return title('Agents','Administration uniquement.');
  return title('Agents Linux et Windows','Gestion des agents en sortie HTTPS, déploiement SSH et révocation.',
- '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button><button class="btn primary" data-action="agent-deploy-form">⇣ Déployer par SSH</button></div>')+
+ '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button><button class="btn primary" data-action="agent-deploy-form">⇣ Un serveur</button><button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')+
  '<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2><span class="hint">'+state.agents.length+' agent(s)</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Plateforme</th><th>Groupe</th><th>État</th><th>Dernier contact</th><th></th></tr></thead><tbody>'+
  state.agents.map(a=>'<tr><td class="name-cell">'+e(a.name)+'<div class="muted tinytext">'+e(a.hostname||'Non enrôlé')+'</div></td><td>'+e(a.platform)+' · '+e(a.version||'—')+'</td><td>'+e(a.group_name)+'</td><td>'+labelStatus(a.status)+'</td><td>'+dt(a.last_seen)+'</td><td>'+(a.revoked?'—':'<button class="btn tiny danger" data-action="agent-revoke" data-id="'+a.id+'">Révoquer</button>')+'</td></tr>').join('')+
- '</tbody></table></div></div><div class="notice">Déploiement SSH : compte privilégié, clé d’hôte connue, AGENT_SERVER_URL HTTPS, ALLOW_AGENT_REMOTE_DEPLOY=true et liste AGENT_DEPLOY_ALLOWED_HOSTS. Les écritures sont désactivées par défaut. Linux utilise un compte non privilégié ; Windows utilise une tâche SYSTEM.</div>'}
+ '</tbody></table></div></div><div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2><button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button></div>${agentBatchPanel()}</div><div class="notice">Déploiement SSH : compte privilégié, clé d’hôte connue, AGENT_SERVER_URL HTTPS, ALLOW_AGENT_REMOTE_DEPLOY=true et liste AGENT_DEPLOY_ALLOWED_HOSTS. Les écritures sont désactivées par défaut. Linux utilise un compte non privilégié ; Windows utilise une tâche SYSTEM.</div>'}
 function agentDeployForm(){modal('Déployer un agent via SSH','<form id="agentDeployForm"><div class="form-grid">'+
  field('Nom de l’agent','name')+selectField('Système','platform',[['linux','Linux (Python 3 + systemd)'],['windows','Windows (PowerShell 5.1+)']],'linux')+
  field('Hôte / FQDN autorisé','host')+field('Port SSH','port',22,'number')+field('Groupe','group','default')+
- selectField('Compte SSH (coffre)','credential_id',[['','— Choisir —'],...state.credentials.map(c=>[c.id,c.name])],'')+
+ selectField('Compte SSH (coffre)','credential_id',[['','— Sélectionner une identité SSH —'],...state.credentials.filter(c=>c.kind==='ssh').map(c=>[c.id,c.name])],'')+
  '</div><div class="field checkbox"><input type="checkbox" name="approved" required><span>Je confirme l’installation d’un service ou d’une tâche planifiée sur cet hôte.</span></div><p class="hint">Le serveur doit joindre l’hôte par SSH et l’agent joindre OrigamiTasks par HTTPS.</p><button class="btn primary" type="submit">Déployer l’agent</button></form>', '', true)}
+
+function agentBatchPanel(){
+ const batches=state.agentDeployBatches||[];
+ if(!batches.length)return '<p class="hint">Aucun déploiement groupé pour le moment.</p>';
+ return batches.slice(0,8).map(batch=>{
+  const stateLabel=batch.status==='success'?'Terminé':batch.status==='completed_with_errors'?'Terminé avec erreurs':batch.status==='interrupted'?'Interrompu':'En cours';
+  const rows=batch.targets.map(t=>'<div class="agent-batch-host"><strong>'+e(t.host)+':'+e(t.port)+'</strong><span class="chip">'+e(t.status)+'</span>'
+   +(t.error?'<small class="hint">'+e(t.error)+'</small>':'')+'</div>').join('');
+  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong><span>'+e(stateLabel)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
+   +'<div class="agent-batch-hosts">'+rows+'</div></details>';
+ }).join('');
+}
+function agentBulkDeployForm(){
+ const groups=(state.sshInventory.groups||[]),serverCount=(state.sshInventory.servers||[]).length;
+ const sshAccounts=state.credentials.filter(c=>c.kind==='ssh');
+ const body='<form id="agentBulkDeployForm"><div class="notice">Installer des agents sur une liste de serveurs est une action privilégiée. Les installations sont mises en file et suivies individuellement ; aucune relance automatique après interruption.</div>'
+  +'<div class="form-grid">'+selectField('Système cible','platform',[['linux','Linux (Python 3 / systemd)'],['windows','Windows (PowerShell / tâche SYSTEM)']],'linux')
+  +selectField('Identité SSH (coffre)','credential_id',[['','— Choisir une identité SSH —'],...sshAccounts.map(c=>[c.id,c.name])],'')
+  +field('Groupe attribué aux agents','agent_group','default')
+  +'<div class="field"><span>Choisir un groupe de serveurs</span><div class="inline-picker"><select name="inventory_group" id="agentBulkInventoryGroup">'
+  +option([['','— Ajouter par FQDN —'],...groups.map(g=>[g.id,g.name+' ('+g.server_count+')'])],'')
+  +'</select><button type="button" class="btn tiny" data-action="agent-bulk-add-group">Ajouter</button></div></div></div>'
+  +'<div class="field"><span>FQDN des cibles (un par ligne, port optionnel)</span><textarea name="targets" rows="10" placeholder="au-host01.infra.example.org&#10;sd-host02.infra.example.org&#10;au-host03.infra.example.org:2222" required></textarea>'
+  +'<small class="hint">'+serverCount+' serveur(s) dans l’inventaire, 100 cibles maximum par lot. Le FQDN doit être explicitement autorisé dans AGENT_DEPLOY_ALLOWED_HOSTS. Les cibles Windows nécessitent SSH/SFTP actif.</small></div>'
+  +'<label class="test-wizard-option"><input type="checkbox" name="approved" required><span><strong>Je confirme l’installation de l’agent sur chacun des serveurs indiqués.</strong><small>Service systemd non privilégié sur Linux ou tâche planifiée SYSTEM sur Windows. L’agent contacte OrigamiTasks par HTTPS.</small></span></label>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">Mettre les déploiements en file</button><button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal('Déployer des agents sur plusieurs serveurs',body,'',true);
+}
+
 function agentEnrollForm(){modal('Enrôlement manuel','<form id="agentEnrollForm"><div class="form-grid">'+
  field('Nom','name')+selectField('Plateforme','platform',[['linux','Linux'],['windows','Windows']],'linux')+
  field('Groupe','group','default')+'</div><p class="hint">Jeton unique valable 15 minutes. Installer agents/linux/agent.py ou agents/windows/agent.ps1 avec config.json sur la machine.</p><button class="btn primary" type="submit">Créer un jeton</button></form>')}
