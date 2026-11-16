@@ -37,6 +37,21 @@ Use **Administration → LDAP / Active Directory** to configure URI and port, LD
 
 Create **protocol-specific vault profiles** for SMTP (server, port, STARTTLS / implicit SSL / unencrypted relay, optional authentication and default sender), SSH/SFTP, FTP/FTPS, LDAP, API, Matrix and Proxmox. The editor changes fields when you select a connection type. **Test SMTP** verifies TLS and optional credentials without sending mail. Use the **Administration → LDAP** test for the directory itself. Grant workflow editing rights only to trusted operators. Non-sensitive settings can be reviewed by administrators; passwords, tokens and SSH keys are never re-displayed. Blank secret fields retain their existing encrypted values. Old hostless credentials remain compatible with tasks that define their own host.
 
+### SSH identities and reusable server groups
+
+An **SSH** vault entry is a **reusable identity**, not a host configuration: profile name, login, password **or** OpenSSH private key, with an optional key passphrase. Secrets remain encrypted and are never revealed after saving. Prefer individual least-privilege service keys.
+
+Open **Administration → SSH servers & groups** to:
+
+- Create a server **group** by entering FQDNs one per line, e.g. `au-app01.infra.example.org` or `sd-app01.infra.example.org:2222` for a non-standard SSH port.
+- Register individual hosts with their FQDN, port and label; assign a host to **multiple groups**.
+- Search/filter the inventory by group and FQDN. Deleting a group **never deletes its servers**.
+- Open **Vault → SSH identity → Test**, choose a **specific inventoried host**, and verify credentials or the private key against that target. Optional SFTP and `whoami` checks are still available.
+
+**SSH**, **SFTP** and **Ansible runner** workflow steps can select an inventoried server while referencing a reusable vault identity. The selected host and port override any legacy host stored in the old credential. Groups **organize and filter targets**; they do not silently run a task across every member. Legacy host-bound SSH credentials remain supported.
+
+SSH host-key verification remains strict via `known_hosts` to prevent server impersonation. Independently verify a host fingerprint before adding it to `SSH_KNOWN_HOSTS`. Basic authentication tests do not run remote commands.
+
 ### Connection diagnostic wizard
 
 From **Vault → Test** or the workflow's credential selector, each typed profile opens its own diagnostic wizard:
