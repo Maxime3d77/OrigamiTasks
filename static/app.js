@@ -70,6 +70,8 @@ function ldapSettingsForm(cfg){
  +'<form id="ldapAdminForm"><div class="form-grid">'
  +ldapCheck('Activer la connexion LDAP', 'enabled', cfg.enabled)
  +ldapCheck('Activer STARTTLS (ldap://, généralement port 389)', 'starttls', cfg.starttls)
+ +'<div class="field full"><label class="field checkbox ldap-insecure-toggle"><input type="checkbox" name="skip_cert_verification" '+(cfg.skip_cert_verification?'checked':'')+' '+(!cfg.insecure_tls_allowed?'disabled':'')+'><span>Exception avancée : ignorer la vérification du certificat LDAP</span></label><small class="hint">DANGEREUX : le chiffrement demeure actif mais l’identité du serveur n’est plus vérifiée. Cela expose les identifiants à une interception. Autorisation hôte requise : ALLOW_INSECURE_LDAP_TLS=true ; désactivée par défaut.</small></div>'
+ +(cfg.skip_cert_verification?'<div class="notice error">Attention : la vérification des certificats LDAPS/STARTTLS est désactivée pour cet annuaire. Remettre une CA valide dès que possible.</div>':'')
  +ldapInput('Adresse de l’annuaire','uri',cfg.uri,'text','Ex. ldaps://serveur:636 ou ldap://serveur:389 avec STARTTLS')
  +ldapInput('DN du compte de liaison','bind_dn',cfg.bind_dn,'text','Compte de service en lecture seule')
  +ldapInput('Mot de passe du compte de liaison','bind_password','','password',cfg.has_bind_password?'Déjà configuré — laisser vide pour conserver':'Mot de passe requis si LDAP est activé')
@@ -99,7 +101,7 @@ function readLDAPForm(){
  const form=document.getElementById('ldapAdminForm');
  if(!form)throw Error('Le formulaire LDAP est fermé');
  const f=new FormData(form),data={};
- for(const key of ['enabled','starttls','nested_groups'])data[key]=f.has(key);
+ for(const key of ['enabled','starttls','nested_groups','skip_cert_verification'])data[key]=f.has(key);
  for(const key of ['uri','bind_dn','bind_password','base_dn','group_base_dn','user_attribute','admin_group','operator_group','viewer_group','ca_cert']){
   if(key==='bind_password'&&!f.get(key))continue;
   data[key]=String(f.get(key)||'').trim();
