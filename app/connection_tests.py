@@ -272,7 +272,7 @@ def ftp(values, options=None):
 def ldap(values, options=None):
     """Bind and optional scoped user/group lookups; never write LDAP objects."""
     options = options or {}
-    from ldap3 import Server, Connection, Tls, BASE, SUBTREE
+    from ldap3 import Server, Connection, Tls, BASE, SUBTREE, NONE
     from ldap3.utils.conv import escape_filter_chars
     uri = str(values.get("uri") or "")
     parsed = urlsplit(uri)
@@ -289,9 +289,10 @@ def ldap(values, options=None):
     try:
         settings=ldap_settings.current()
         server = Server(uri, tls=ldap_settings.tls_for(settings,uri=uri),
-                        connect_timeout=TIMEOUT)
+                        connect_timeout=TIMEOUT, get_info=NONE)
         conn = Connection(server, user=username, password=password,
-                          receive_timeout=TIMEOUT, auto_bind=not starttls)
+                          receive_timeout=TIMEOUT, auto_bind=not starttls,
+                          check_names=False)
         try:
             if starttls:
                 conn.open()
