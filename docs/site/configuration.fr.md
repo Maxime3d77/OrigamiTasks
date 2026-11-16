@@ -38,6 +38,19 @@ Le menu **Administration → LDAP / Active Directory** permet de configurer l’
 Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
 
 
+### Approuver la clé d'hôte SSH depuis le navigateur
+
+Une clé privée SSH importée depuis un autre ordinateur peut être utilisée telle quelle dans **Coffre-fort → Identité SSH**. La clé privée de l'utilisateur est indépendante de la clé publique d'identité **du serveur**.
+
+Dans **Coffre-fort → Tester la connexion SSH**, choisir un FQDN manuel ou un serveur d'inventaire, puis **Vérifier la clé d'hôte du serveur**. OrigamiTasks affiche l'algorithme, l'empreinte SHA256 et l'état connu / inconnu / modifié. Avant de l'approuver, **comparer l'empreinte à celle obtenue directement sur la console du serveur cible**, par exemple avec `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256`. Recopier l'empreinte vérifiée dans le champ de confirmation et cocher la validation indépendante ; alors seulement le serveur enregistre la **clé d'hôte publique** dans `/app/data/known_hosts`, persistant dans `data/known_hosts` sur l'hôte.
+
+La clé d'hôte est récupérée une seconde fois lors de l'approbation et son empreinte doit être identique. Une empreinte déjà connue mais différente bloque l'opération : vérifier une éventuelle rotation de clé depuis la console. Le système ne fait pas confiance automatiquement à un serveur inconnu. **Aucune clé privée utilisateur n'est envoyée dans ce parcours.**
+
+### Import des chaînes de CA LDAP en CRT
+
+Un fichier `.crt` peut contenir plusieurs certificats X.509. L'import prend en charge PEM et DER ; pour un bundle PEM mêlant CA et certificat serveur, il **conserve uniquement les certificats d'autorité** et indique les certificats non-CA ignorés. Les certificats CA avec `CA:TRUE` sont conservés ; un fichier ne contenant que des certificats serveur est refusé. Après import, utiliser le chemin CA fourni, **enregistrer la configuration LDAP**, puis vérifier LDAPS/STARTTLS. Si la case « Ignorer la vérification du certificat » est grisée, c'est que `ALLOW_INSECURE_LDAP_TLS` est désactivé sur l'hôte. Avec une CA correcte, laisser cette case désactivée.
+
+
 ### Diagnostic SSH : clé privée utilisateur et clé d'hôte
 
 La connexion SSH du coffre contient **la clé privée du compte utilisateur** (OpenSSH, RSA ou EC en PEM), pas la clé d'identité du serveur. La clé publique correspondante doit être dans \`authorized_keys\` côté serveur. Une clé \`/etc/ssh/ssh_host_*_key\` ne doit jamais être importée comme identité du compte.
