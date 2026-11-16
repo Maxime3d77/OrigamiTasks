@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],sshInventory:{servers:[],groups:[]},folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,13 +10,13 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory')}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
 const badgeTags=tags=>tags.map(t=>`<span class="chip tag">#${e(t)}</span>`).join('');
-function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'Datacenters',agents:'Agents Linux / Windows',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
-function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
+function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'Datacenters',agents:'Agents Linux / Windows','ssh-inventory':'Serveurs & groupes SSH',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
+function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage,'ssh-inventory':sshInventoryPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
 function dashboard(){const s=state.summary;return title('Vue d’ensemble','Votre centre de contrôle de l’automatisation.','<button class="btn primary" data-action="create">＋ Nouveau workflow</button>')+`<div class="stats-grid">
  <div class="stat-card featured"><span class="label">Workflows disponibles</span><span class="stat-icon">◈</span><div class="value">${s.jobs||0}</div><div class="sub">${s.enabled||0} workflows actifs</div></div>
  <div class="stat-card"><span class="label">Exécutions réussies</span><span class="stat-icon">✓</span><div class="value">${s.success||0}</div><div class="sub">sur les 100 dernières</div></div>
@@ -106,6 +106,85 @@ function readLDAPForm(){
  return {settings:data,test_user:String(f.get('test_user')||'').trim()};
 }
 
+
+function sshServerOptions(selected='',query='',group=''){
+ const list=state.sshInventory.servers||[];
+ return [['','— Choisir un serveur SSH —'],...list
+  .filter(s=>(!group||s.group_ids.includes(Number(group)))&&
+      (!query||(s.fqdn+' '+s.label).toLowerCase().includes(query.toLowerCase())))
+  .map(s=>[s.id,s.fqdn+' : '+s.port+(s.label?' · '+s.label:'')])];
+}
+function sshTargetPicker(prefix,selected='',required=false){
+ const groups=state.sshInventory.groups||[];
+ const count=(state.sshInventory.servers||[]).length;
+ return '<div class="ssh-target-picker" data-ssh-picker="'+e(prefix)+'">'
+  +'<div class="form-grid"><div class="field"><span>Filtrer par groupe</span><select data-ssh-filter-group>'
+  +option([['','Tous les groupes'],...groups.map(g=>[g.id,g.name+' ('+g.server_count+')'])],'')+'</select></div>'
+  +'<div class="field"><span>Rechercher un FQDN</span><input data-ssh-filter-search placeholder="server.infra.example.org" autocomplete="off"></div></div>'
+  +'<div class="field"><span>Serveur cible'+(required?' *':'')+'</span><select name="'+e(prefix)+'" data-ssh-target-select '+(required?'required':'')+'>'
+  +option(sshServerOptions(selected),selected)+'</select></div>'
+  +'<p class="hint">'+count+' serveur(s) enregistré(s) · Gérer les FQDN dans <b>Administration → Serveurs & groupes SSH</b>.</p></div>';
+}
+function sshRefreshPicker(container){
+ if(!container)return;
+ const selected=container.querySelector('[data-ssh-target-select]');
+ if(!selected)return;
+ const value=selected.value,query=container.querySelector('[data-ssh-filter-search]')?.value||'';
+ const group=container.querySelector('[data-ssh-filter-group]')?.value||'';
+ selected.innerHTML=option(sshServerOptions(value,query,group),value);
+ if(value&&!Array.from(selected.options).some(x=>x.value===value))selected.value='';
+}
+function sshInventoryPage(){
+ if(!roleAdmin())return title('Serveurs SSH','Administration uniquement');
+ const groups=state.sshInventory.groups||[],servers=state.sshInventory.servers||[];
+ const selected=state.sshInventoryGroupFilter||'',term=(state.sshInventorySearch||'').toLowerCase();
+ const filtered=servers.filter(x=>(!selected||x.group_ids.includes(Number(selected)))&&
+      (!term||(x.fqdn+' '+x.label).toLowerCase().includes(term)));
+ const groupCards=groups.map(g=>'<div class="ssh-group-card"><div><b>'+e(g.name)+'</b><p class="hint">'+e(g.description||'')+' · '+g.server_count+' serveur(s)</p></div>'
+  +'<div class="credential-actions"><button class="btn tiny" data-action="ssh-group-edit" data-id="'+g.id+'">Modifier</button>'
+  +'<button class="btn tiny danger" data-action="ssh-group-remove" data-id="'+g.id+'">Supprimer</button></div></div>').join('');
+ const rows=filtered.map(x=>'<div class="ssh-server-row" data-ssh-search="'+e((x.fqdn+' '+x.label).toLowerCase())+'"><div><strong>'+e(x.fqdn)+'</strong><small>Port '+e(x.port)+(x.label?' · '+e(x.label):'')+'</small>'
+  +'<div class="ssh-server-tags">'+x.group_ids.map(gid=>{const group=groups.find(g=>g.id===gid);return group?'<span class="chip">'+e(group.name)+'</span>':''}).join('')+'</div></div>'
+  +'<div class="credential-actions"><button class="btn tiny" data-action="ssh-server-edit" data-id="'+x.id+'">Modifier</button>'
+  +'<button class="btn tiny danger" data-action="ssh-server-remove" data-id="'+x.id+'">Supprimer</button></div></div>').join('');
+ return title('Serveurs & groupes SSH','Inventaire des cibles indépendant des identités chiffrées du coffre-fort.',
+   '<button class="btn primary" data-action="ssh-group-new">＋ Groupe</button><button class="btn" data-action="ssh-server-new">＋ Serveur</button>')
+  +'<div class="notice">Créer une identité <b>SSH</b> dans le Coffre-fort, puis sélectionner un serveur de cet inventaire lors du test ou dans une tâche. Un même serveur peut appartenir à plusieurs groupes. Supprimer un groupe ne supprime pas les serveurs.</div>'
+  +'<div class="section-grid ssh-inventory-layout"><section class="panel"><div class="panel-title"><h2>Groupes de serveurs</h2><span class="hint">'+groups.length+' groupe(s)</span></div>'
+  +(groupCards||'<p class="hint">Aucun groupe. Crée un groupe et ajoute tes FQDN, un par ligne.</p>')+'</section>'
+  +'<section class="panel"><div class="panel-title"><h2>Serveurs enregistrés</h2><span class="hint">'+filtered.length+' / '+servers.length+'</span></div>'
+  +'<div class="form-grid"><div class="field"><span>Groupe</span><select id="sshInventoryGroupFilter">'+option([['','Tous les groupes'],...groups.map(g=>[g.id,g.name])],selected)+'</select></div>'
+  +'<div class="field"><span>Rechercher</span><input id="sshInventorySearch" placeholder="FQDN ou libellé…" value="'+e(state.sshInventorySearch||'')+'"></div></div>'
+  +'<div class="ssh-server-list">'+(rows||'<p class="hint">Aucun serveur correspondant.</p>')+'</div></section></div>';
+}
+function sshGroupForm(groupId=null){
+ const group=(state.sshInventory.groups||[]).find(g=>g.id===groupId);
+ const servers=group?(state.sshInventory.servers||[]).filter(s=>group.server_ids.includes(s.id)):[];
+ const lines=servers.map(x=>x.fqdn+(x.port!==22?':'+x.port:'')).join('\n');
+ const body='<form id="sshGroupForm" data-id="'+(group?.id||'')+'">'
+  +'<div class="form-grid">'+field('Nom du groupe','name',group?.name||'')
+  +field('Description','description',group?.description||'')+'</div>'
+  +'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="au-server01.infra.example.org&#10;sd-server01.infra.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>'
+  +'<small class="hint">Ajouter ou retirer des lignes modifie l’appartenance au groupe. Les serveurs retirés restent dans l’inventaire. Port 22 par défaut, préciser :2222 si nécessaire. Max. 250 serveurs.</small></div>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">'+(group?'Enregistrer le groupe':'Créer le groupe')+'</button>'
+  +'<button class="btn" data-action="layer-close" data-layer="sshInventoryLayer" type="button">Annuler</button></div></form>';
+ openLayer('sshInventoryLayer',group?'Modifier le groupe SSH':'Créer un groupe SSH',body);
+}
+function sshServerForm(serverId=null){
+ const server=(state.sshInventory.servers||[]).find(x=>x.id===serverId);
+ const groups=state.sshInventory.groups||[];
+ const boxes=groups.map(g=>'<label class="ssh-group-option"><input type="checkbox" name="group_id" value="'+g.id+'" '+(server?.group_ids.includes(g.id)?'checked':'')+'><span>'+e(g.name)+'</span></label>').join('');
+ const body='<form id="sshServerForm" data-id="'+(server?.id||'')+'"><div class="form-grid">'
+  +'<div class="field"><span>FQDN *</span><input name="fqdn" value="'+e(server?.fqdn||'')+'" '+(server?'readonly':'required')+' placeholder="server01.infra.example.org"></div>'
+  +'<div class="field"><span>Port SSH</span><input type="number" min="1" max="65535" name="port" value="'+(server?.port||22)+'" required></div></div>'
+  +field('Libellé / environnement','label',server?.label||'')
+  +'<div class="field"><span>Groupes du serveur</span><div class="ssh-group-checkboxes">'+(boxes||'<span class="hint">Aucun groupe créé</span>')+'</div></div>'
+  +'<p class="hint">Le FQDN est immuable sur une fiche existante : cela évite de rediriger silencieusement des workflows vers une autre machine.</p>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">'+(server?'Enregistrer le serveur':'Ajouter le serveur')+'</button>'
+  +'<button class="btn" type="button" data-action="layer-close" data-layer="sshInventoryLayer">Annuler</button></div></form>';
+ openLayer('sshInventoryLayer',server?'Modifier le serveur SSH':'Ajouter un serveur SSH',body);
+}
+
 function users(){return title('Utilisateurs & permissions','Identités LDAP et groupes affectés aux autorisations des workflows.')+`<div class="panel"><div class="panel-title"><h2>Comptes connectés</h2><span class="hint">Les rôles sont attribués à la connexion LDAP</span></div><div id="userTable">Chargement...</div></div><div class="notice">Groupes par workflow : <b>Lecture</b>, <b>Exécution</b>, <b>Modification</b>. Un utilisateur non membre d'un groupe explicitement autorisé n'accède pas au workflow. Les administrateurs disposent de tous les droits. Les groupes et rôles LDAP sont configurés dans .env.</div>`}
 const plannedCatalog=[
  ['Déclencheurs','Fichier créé/modifié, email reçu, trap SNMP, seuil Zabbix, événement Windows, dépendance entre jobs'],
@@ -137,7 +216,7 @@ function agentEnrollForm(){modal('Enrôlement manuel','<form id="agentEnrollForm
 
 function datacenters(){if(!roleAdmin())return title('Datacenters','Administration uniquement.');return title('Datacenters Proxmox','Inventaire en lecture seule des clusters indépendants.','<button class="btn primary" data-action="new-datacenter">＋ Déclarer un datacenter</button>')+`<div class="workflow-grid">${state.datacenters.map(d=>`<div class="job-card"><div class="job-card-head"><div class="job-icon">◈</div><span class="chip tag">Proxmox VE</span></div><h3>${e(d.name)}</h3><p>${e(d.url)}</p><div class="muted tinytext">Coffre #${d.credential_id}</div><div class="actions"><button class="btn primary tiny" data-action="discover-datacenter" data-id="${d.id}">⌕ Découvrir les ressources</button><button class="btn tiny danger" data-action="delete-datacenter" data-id="${d.id}">Supprimer</button></div></div>`).join('')||empty('Aucun datacenter','Déclarez votre premier cluster avec un compte API dédié.')}</div><div class="notice">Les opérations sensibles sont désactivées par défaut. Les migrations et réplications entre clusters restent au stade du plan d’architecture.</div>`}
 function openDatacenterForm(){modal('Ajouter un datacenter Proxmox',`<form id="datacenterForm"><div class="form-grid">${field('Nom','dc_name')}${field('URL HTTPS, ex. https://pve.exemple:8006','dc_url')}${selectField('Token API Proxmox', 'dc_credential',[['','— Sélectionner —'],...state.credentials.map(c=>[c.id,c.name])],'')}</div><p class="hint">Configurer PROXMOX_ALLOWED_HOSTS avant l’enregistrement. API token dédié au moindre privilège ; certificat TLS vérifié.</p><button class="btn primary" type="submit">Enregistrer</button></form>`)}
-function updates(){return title('Versions & mises à jour','Mises à jour Git déclenchées depuis l’interface, exécutées par un service de maintenance séparé.')+`<div class="panel"><div class="panel-title"><h2>OrigamiTasks v0.3.3-rc2</h2><span class="status success">Installé</span></div><p class="muted">Branche suivie : <span class="code-inline">main</span> · Origine Git configurée sur l’hôte</p><div class="tool-row"><button class="btn" data-action="update-request" data-value="check">⌕ Rechercher des mises à jour</button><button class="btn primary" data-action="update-request" data-value="apply">⇣ Installer la dernière version Git</button><button class="btn" data-action="refresh-updates">↻</button></div><div class="notice">Sécurité : la mise à jour est <b>approuvée manuellement</b> par un administrateur. Un service hôte indépendant effectue un <b>git fetch + fast-forward</b>, une sauvegarde et le redéploiement Docker. Aucun accès Docker n'est accordé au conteneur web. Installer le service <span class="code-inline">ops/update-worker.py</span> pour activer le bouton d’installation.</div></div><div class="panel"><div class="panel-title"><h2>Maintenance & tâches Git</h2></div><div id="updateStatus">Chargement...</div></div>`}
+function updates(){return title('Versions & mises à jour','Mises à jour Git déclenchées depuis l’interface, exécutées par un service de maintenance séparé.')+`<div class="panel"><div class="panel-title"><h2>OrigamiTasks v0.3.4-rc1</h2><span class="status success">Installé</span></div><p class="muted">Branche suivie : <span class="code-inline">main</span> · Origine Git configurée sur l’hôte</p><div class="tool-row"><button class="btn" data-action="update-request" data-value="check">⌕ Rechercher des mises à jour</button><button class="btn primary" data-action="update-request" data-value="apply">⇣ Installer la dernière version Git</button><button class="btn" data-action="refresh-updates">↻</button></div><div class="notice">Sécurité : la mise à jour est <b>approuvée manuellement</b> par un administrateur. Un service hôte indépendant effectue un <b>git fetch + fast-forward</b>, une sauvegarde et le redéploiement Docker. Aucun accès Docker n'est accordé au conteneur web. Installer le service <span class="code-inline">ops/update-worker.py</span> pour activer le bouton d’installation.</div></div><div class="panel"><div class="panel-title"><h2>Maintenance & tâches Git</h2></div><div id="updateStatus">Chargement...</div></div>`}
 function audit(){return title('Journal d’audit','Traçabilité des connexions, modifications, exécutions et opérations Git.')+`<div class="panel" id="auditTable">Chargement...</div>`}
 function modal(title,body,footer='',wide=false){$('#modalRoot').innerHTML=`<div class="modal-overlay"><div class="modal ${wide?'xl':''}" role="dialog" aria-modal="true"><div class="modal-head"><h2>${title}</h2><button class="close" data-action="modal-close" aria-label="Fermer">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div></div>`}
 function closeModal(){$('#modalRoot').innerHTML='';state.editor=null}
@@ -152,13 +231,13 @@ const FIELDS={
  directory:[['action','Opération LDAP/AD','select:search|get_user|create_user|modify_user|group_add|group_remove|enable_user|disable_user|unlock_user|reset_password'],['uri','Serveur LDAP (facultatif si configuré en administration)','text'],['starttls','Utiliser STARTTLS','checkbox'],['base_dn','Base DN autorisée','text'],['target_dn','DN de compte ciblé','text'],['group_dn','DN de groupe ciblé','text'],['lookup_attribute','Rechercher par','select:sAMAccountName|uid|cn|mail|userPrincipalName'],['lookup_value','Valeur exacte recherchée','text'],['read_attributes','Attributs affichés (virgules)','text'],['attributes','Attributs JSON (création/modification)','textarea'],['member_attribute','Attribut de groupe','select:member|uniqueMember'],['credential_id','Compte LDAP du coffre (facultatif avec Administration / LDAP)','credential'],['password_credential_id','Secret nouveau mot de passe (reset)','credential'],['approved','Confirmer écriture annuaire','checkbox']],
 
  matrix:[['homeserver','Homeserver HTTPS','text'],['room_id','Room ID Matrix (!...:serveur)','text'],['message','Message (variables possibles)','textarea'],['credential_id','Token bot Matrix','credential']],
- ansible:[['host','Runner Ansible SSH','text'],['port','Port SSH','number'],['playbook','Playbook dans /opt/origamitasks/ansible/playbooks','text'],['inventory','Inventaire dans /opt/origamitasks/ansible/inventories','text'],['limit','Limite de groupes / hôtes','text'],['extra_vars','Variables JSON','textarea'],['check','Mode --check','checkbox'],['credential_id','Identifiant SSH du runner','credential']],
+ ansible:[['ssh_server_id','Serveur SSH du runner (inventaire)','ssh-target'],['host','Runner Ansible SSH (ancienne configuration)','text'],['port','Port SSH','number'],['playbook','Playbook dans /opt/origamitasks/ansible/playbooks','text'],['inventory','Inventaire dans /opt/origamitasks/ansible/inventories','text'],['limit','Limite de groupes / hôtes','text'],['extra_vars','Variables JSON','textarea'],['check','Mode --check','checkbox'],['credential_id','Identifiant SSH du runner','credential']],
  proxmox:[['datacenter_id','Datacenter déclaré','datacenter'],['action','Opération','select:inventory|start|shutdown|reboot'],['node','Nœud cible (actions uniquement)','text'],['vmid','VMID (actions uniquement)','number'],['approved','Autoriser explicitement cette action','checkbox']],
 
  shell:[['script','Script bash','textarea'],['timeout','Timeout (s)','number'],['credential_id','Identifiant','credential']],
  powershell:[['script','Script PowerShell','textarea'],['timeout','Timeout (s)','number'],['credential_id','Identifiant','credential']],
- ssh:[['host','Hôte / FQDN','text'],['port','Port SSH','number'],['platform','Système distant','select:linux|windows'],['script','Script distant','textarea'],['timeout','Timeout (s)','number'],['credential_id','Identifiant SSH','credential']],
- sftp:[['host','Hôte / FQDN','text'],['port','Port SSH','number'],['remote_path','Fichier distant','text'],['local_path','Fichier local (transfers/)','text'],['direction','Sens','select:get|put'],['credential_id','Identifiant','credential']],
+ ssh:[['ssh_server_id','Serveur cible (inventaire SSH)','ssh-target'],['host','Hôte manuel (ancienne configuration)','text'],['port','Port SSH','number'],['platform','Système distant','select:linux|windows'],['script','Script distant','textarea'],['timeout','Timeout (s)','number'],['credential_id','Identifiant SSH','credential']],
+ sftp:[['ssh_server_id','Serveur cible (inventaire SSH)','ssh-target'],['host','Hôte manuel (ancienne configuration)','text'],['port','Port SSH','number'],['remote_path','Fichier distant','text'],['local_path','Fichier local (transfers/)','text'],['direction','Sens','select:get|put'],['credential_id','Identifiant','credential']],
  ftp:[['host','Hôte FTP','text'],['port','Port FTP','number'],['remote_path','Fichier distant','text'],['local_path','Fichier local (transfers/)','text'],['direction','Sens','select:get|put'],['allow_plaintext','Autoriser FTP non chiffré (déconseillé)','checkbox'],['credential_id','Identifiant','credential']],
  http:[['url','URL','text'],['method','Méthode','select:GET|POST|PUT|PATCH|DELETE'],['body','Corps','textarea'],['timeout','Timeout (s)','number'],['credential_id','Token Bearer','credential']],
  file:[['action','Opération','select:list|read|write|copy|move|mkdir|delete'],['path','Chemin cible sous transfers/','text'],['source','Source copy/move sous transfers/','text'],['content','Contenu (write)','textarea'],['approved','Confirmer la suppression (delete)','checkbox']],
@@ -181,6 +260,7 @@ const sidebarIcons={
  runs:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
  vault:'<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15" r="1"/>',
  agents:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 2v3m8-3v3M8 19v3m8-3v3M1 9h3m-3 6h3m16-6h3m-3 6h3"/><circle cx="12" cy="12" r="3"/>',
+ 'ssh-inventory':'<rect x="2" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="8" height="7" rx="1"/><path d="M5 15h14v6H5zM9 6h5m-4 0v9M9 18h6"/>',
  datacenters:'<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><circle cx="7" cy="6.5" r=".7"/><circle cx="7" cy="17.5" r=".7"/><path d="M11 6.5h7m-7 11h7"/>',
  users:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 4 5"/>',
  updates:'<path d="M12 3v12m-5-5 5 5 5-5M4 18v3h16v-3"/>',
@@ -289,8 +369,7 @@ const connectionSchemas={
   ['from_address','Adresse expéditeur par défaut','email','noreply@exemple.fr']
  ],
  ssh:[
-  ['host','Serveur SSH / FQDN','text','server.example.org'],['port','Port SSH','number','22'],
-  ['username','Utilisateur SSH','text','root'],['password','Mot de passe SSH','password',''],
+  ['username','Login SSH (identité réutilisable)','text','deploy'],['password','Mot de passe SSH','password',''],
   ['private_key','Clé privée OpenSSH','textarea',''],['passphrase','Phrase secrète de la clé','password','']
  ],
  ftp:[
@@ -346,7 +425,8 @@ function credentialProfileFields(kind,credential){
   const cls=typ==='textarea'?'field full':typ==='checkbox'?'field checkbox':'field';
   return '<label class="'+cls+'" '+(kind==='smtp'&&['username','password'].includes(key)?'data-smtp-auth-field':'')+'><span>'+e(label)+'</span>'+control+'</label>';
  }).join('')+'</div>'
- +(kind==='smtp'?'<div class="notice">Pour le SMTP, configure le serveur, le port, la sécurité et l’authentification. La tâche utilise automatiquement ces paramètres lorsque sa connexion est sélectionnée.</div>':'');
+ +(kind==='smtp'?'<div class="notice">Pour le SMTP, configure le serveur, le port, la sécurité et l’authentification. La tâche utilise automatiquement ces paramètres lorsque sa connexion est sélectionnée.</div>':'')
+ +(kind==='ssh'?'<div class="notice">Identité SSH indépendante des serveurs : indique le login et un mot de passe ou une clé privée. Ajoute tes FQDN dans <b>Administration → Serveurs & groupes SSH</b>, puis choisis le serveur dans le test ou la tâche. '+(profile.host?'Cette ancienne identité conserve son serveur historique ('+e(profile.host)+') pour compatibilité.':'')+'</div>':'');
 }
 function credentialKindForStep(){
  const type=state.editor?.steps_json[state.selectedStep]?.type;
@@ -424,7 +504,10 @@ function credentialTestFields(entry){
    +'<p class="hint">Expéditeur configuré : '+e(publicData.from_address||(String(publicData.username||'').includes('@')?publicData.username:'à renseigner dans le profil SMTP'))+'</p>';
  }
  if(kind==='ssh'){
-  return '<p>Test de connexion et d’authentification SSH avec vérification stricte de la clé d’hôte.</p>'
+  return '<p>Cette identité SSH peut être utilisée sur plusieurs serveurs. Choisir la cible du test : le coffre contient le login et le mot de passe ou la clé, **pas la machine**.</p>'
+   +sshTargetPicker('server_id','',!publicData.host)
+   +(publicData.host?'<div class="hint">Compatibilité : si aucun serveur n’est sélectionné, le test utilisera l’ancien hôte '+e(publicData.host)+'.</div>':'')
+   +'<div class="tool-row"><button type="button" class="btn tiny" data-action="ssh-goto-inventory">Gérer les serveurs / groupes</button></div>'
    +testOptionCheck('check_sftp','Tester également le sous-système SFTP','Lit uniquement les métadonnées du répertoire courant.')
    +testOptionCheck('check_whoami','Exécuter la commande de diagnostic whoami','Commande fixe, en lecture seule. Aucune autre commande n’est autorisée par ce test.');
  }
@@ -503,6 +586,7 @@ function collectCredentialTestOptions(form,kind){
                  api:['method','path','expected_status']};
  (boolKeys[kind]||[]).forEach(k=>options[k]=data.has(k));
  (textKeys[kind]||[]).forEach(k=>{const value=String(data.get(k)||'').trim();if(value)options[k]=value});
+ if(kind==='ssh'&&data.get('server_id'))options.server_id=Number(data.get('server_id'));
  if(options.send_email||options.send_message)options.confirm_send=true;
  return options;
 }
@@ -565,7 +649,7 @@ function drawGroupBrowser(){
  openLayer('groupLayer','Sélection des groupes — '+({view:'Lecture',run:'Exécution',edit:'Modification'}[state.groupRole]||''),body);
 }
 
-function stepConfigFields(step){return (FIELDS[step.type]||[]).map(([key,label,type])=>{const value=step.config?.[key]??'';if(type==='textarea')return `<div class="field full"><span>${label}</span><textarea name="cfg_${key}">${e(value)}</textarea></div>`;if(type==='checkbox')return field(label,'cfg_'+key,value,'checkbox');if(type==='agent'){return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.agents.filter(a=>a.enrolled&&!a.revoked).map(a=>[a.id,a.name+' ('+a.platform+')'])],value)}if(type==='datacenter'){return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.datacenters.map(d=>[d.id,d.name])],value)}if(type==='credential')return credentialField(label,key,value);if(type.startsWith('select:'))return selectField(label,'cfg_'+key,type.slice(7).split('|').map(x=>[x,x]),value);return field(label,'cfg_'+key,value,type) }).join('')}
+function stepConfigFields(step){return (FIELDS[step.type]||[]).map(([key,label,type])=>{const value=step.config?.[key]??'';if(type==='textarea')return `<div class="field full"><span>${label}</span><textarea name="cfg_${key}">${e(value)}</textarea></div>`;if(type==='checkbox')return field(label,'cfg_'+key,value,'checkbox');if(type==='agent'){return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.agents.filter(a=>a.enrolled&&!a.revoked).map(a=>[a.id,a.name+' ('+a.platform+')'])],value)}if(type==='datacenter'){return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.datacenters.map(d=>[d.id,d.name])],value)}if(type==='ssh-target')return sshTargetPicker('cfg_'+key,value,false);if(type==='credential')return credentialField(label,key,value);if(type.startsWith('select:'))return selectField(label,'cfg_'+key,type.slice(7).split('|').map(x=>[x,x]),value);return field(label,'cfg_'+key,value,type) }).join('')}
 function branches(step){const s=state.editor.steps_json;const targets=[['','Automatique (étape suivante)'],['END','Fin avec succès'],['FAIL','Fin avec échec'],...s.filter(x=>x.id!==step.id).map(x=>[x.id,x.name])];return `${selectField('Si réussite','on_success',targets,step.on_success||'')}${selectField('Si échec','on_failure',[['','Arrêt en échec'],...targets.slice(1)],step.on_failure||'')}`}
 function renderEditor(){const j=state.editor;const selected=j.steps_json[state.selectedStep];const body=`<div class="editor-meta">${field('Nom du workflow','job_name',j.name)}${folderEditorField(j.folder)}${field('Tags (séparés par des virgules)','job_tags',j.tags_json.join(', '))}</div><div class="editor-meta"><div class="field"><span>Description</span><input name="job_description" value="${e(j.description)}"></div>${scheduleFields(j.schedule_json||{})}</div><div class="editor-meta">${groupEditorField('Groupes lecture','view',j.acl_json.view)}${groupEditorField('Groupes exécution','run',j.acl_json.run)}${groupEditorField('Groupes modification','edit',j.acl_json.edit)}</div><div class="field checkbox"><input type="checkbox" name="job_enabled" ${j.enabled?'checked':''}><span>Workflow actif</span></div><div class="editor-columns"><section class="editor-graph"><div class="panel-title"><h2>Graphe d’exécution</h2><span class="hint">Succès / échec</span></div><div class="graph-legend"><span>Succès</span><span>Échec</span></div><div class="graph-surface" id="workflowGraph">${renderGraph(j.steps_json,state.selectedStep)}</div><div class="step-list">${j.steps_json.map((s,i)=>`<button class="step-pill ${i===state.selectedStep?'selected':''}" data-action="select-step" data-index="${i}">${i+1}. ${e(s.name)}<small>${e(kindLabel[s.type])}</small></button>`).join('')}</div></section><section class="editor-side"><div class="panel-title"><h2>Configurer l’étape ${state.selectedStep+1}</h2><span class="hint">${j.steps_json.length} étapes</span></div><div class="editor-actions"><button class="btn tiny" data-action="add-step">＋ Ajouter</button><button class="btn tiny" data-action="step-up">↑</button><button class="btn tiny" data-action="step-down">↓</button><button class="btn tiny danger" data-action="delete-step">Supprimer</button></div><div class="form-grid">${field('Nom de l’étape','step_name',selected.name)}${selectField('Type','step_type',kinds.map(k=>[k,kindLabel[k]]),selected.type)}</div><div class="subheading">Paramètres de la tâche</div><div class="step-config">${stepConfigFields(selected)}</div><div class="divider"></div><div class="subheading">Gestion des erreurs</div><div class="form-grid">${field('Nouvelles tentatives (0–5)','step_retries',selected.retries||0,'number')}${field('Attente entre tentatives (s)','step_retry_delay',selected.retry_delay??2,'number')}</div><div class="divider"></div><div class="subheading">Branches conditionnelles</div><div class="form-grid">${branches(selected)}</div><div class="divider"></div><div class="subheading">Condition avant exécution</div><div class="field checkbox"><input name="cond_enabled" type="checkbox" ${selected.condition?.enabled?'checked':''}><span>Activer cette condition</span></div><div class="form-grid">${selectField('Source','cond_source',[['last_status','État de la précédente étape'],['last_exit_code','Code retour précédent'],['last_output','Sortie précédente'],['variable','Variable']],selected.condition?.source||'last_status')}${selectField('Comparaison','cond_operator',[['equals','Égal'],['not_equals','Différent'],['contains','Contient'],['not_contains','Ne contient pas'],['exists','Existe']],selected.condition?.operator||'equals')}${field('Valeur attendue','cond_value',selected.condition?.value||'')}${field('Nom de la variable','cond_key',selected.condition?.key||'')}</div></section></div>`;
 modal(j.id?'Modifier le workflow':'Nouveau workflow',body,`<button class="btn" data-action="modal-close">Annuler</button>${j.id&&roleAdmin()?`<button class="btn danger" data-action="delete-job" data-id="${j.id}">Supprimer</button>`:''}<button class="btn primary" data-action="save-job">✓ Enregistrer</button>`,true);showScheduleMode()}
@@ -580,6 +664,21 @@ async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users
 function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP()}
 async function refresh(){await load();render()}
 async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='layer-close'){closeLayer(b.dataset.layer);return}
+ if(a==='ssh-goto-inventory'){closeLayer('credentialTestLayer');closeLayer('credentialLayer');showPage('ssh-inventory');return}
+ if(a==='ssh-group-new'){sshGroupForm();return}
+ if(a==='ssh-group-edit'){sshGroupForm(id);return}
+ if(a==='ssh-server-new'){sshServerForm();return}
+ if(a==='ssh-server-edit'){sshServerForm(id);return}
+ if(a==='ssh-group-remove'){
+  if(!confirm('Supprimer ce groupe SSH ? Les serveurs resteront dans l’inventaire.'))return;
+  await api('/ssh/groups/'+id,'DELETE');
+  toast('Groupe supprimé, serveurs conservés');await refresh();return
+ }
+ if(a==='ssh-server-remove'){
+  if(!confirm('Retirer ce serveur de l’inventaire ? Les workflows qui le référencent doivent être modifiés avant suppression.'))return;
+  await api('/ssh/servers/'+id,'DELETE');
+  toast('Serveur retiré de l’inventaire');await refresh();return
+ }
  if(a==='folder-manage'){foldersBrowser();return}
  if(a==='folder-filter'){state.folderFilter=b.dataset.path||'';render();return}
  if(a==='folder-select'){state.folderSelected=b.dataset.path;drawFolderBrowser();return}
@@ -611,6 +710,29 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git autorisée et redémarrer les services ?'))return;await api('/updates/request','POST',{action:b.dataset.value});toast('Demande envoyée au service de maintenance');hydrateAdmins();return}if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='sshGroupForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id),name=String(f.get('name')||'').trim();
+  if(!name)return toast('Renseigner un nom de groupe',false);
+  const payload={name,description:String(f.get('description')||'').trim(),
+                 servers:String(f.get('servers')||'').split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean)};
+  try{
+   await api(id?'/ssh/groups/'+id:'/ssh/groups',id?'PUT':'POST',payload);
+   closeLayer('sshInventoryLayer');toast('Groupe SSH enregistré');await refresh();
+  }catch(ex){toast(ex.message,false)}return
+ }
+ if(ev.target.id==='sshServerForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id);
+  const payload={fqdn:String(f.get('fqdn')||'').trim(),port:Number(f.get('port')||22),
+                 label:String(f.get('label')||'').trim(),
+                 group_ids:f.getAll('group_id').map(Number)};
+  try{
+   await api(id?'/ssh/servers/'+id:'/ssh/servers',id?'PUT':'POST',payload);
+   closeLayer('sshInventoryLayer');toast('Serveur SSH enregistré');await refresh();
+  }catch(ex){toast(ex.message,false)}return
+ }
+
  if(ev.target.id==='credentialTestForm'){ev.preventDefault();await submitCredentialTest(ev.target);return}
 
  if(ev.target.id==='ldapAdminForm'){ev.preventDefault();
@@ -658,8 +780,14 @@ async function handleSubmit(ev){
 function initTheme(){let theme=localStorage.getItem('origami-theme')||'dark';document.body.className='theme-'+theme;$('#themeToggle').textContent={dark:'☾',light:'☀',cyber:'✧'}[theme]||'☾'}
 async function bootstrap(){document.addEventListener('submit',handleSubmit);try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initialisation:',ex)}try{const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);$('#userAvatar').textContent=initials();await load();showPage('dashboard')}catch{$('#auth').hidden=false;$('#application').hidden=true}document.addEventListener('click',handleClick);document.addEventListener('input',ev=>{
  if(ev.target.id==='credentialSearch'){state.credentialSearch=ev.target.value;filterCredentialRows()}
+ if(ev.target.matches('[data-ssh-filter-search]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
+ if(ev.target.id==='sshInventorySearch'){state.sshInventorySearch=ev.target.value;
+  $('.ssh-server-row[data-ssh-search]').forEach(row=>row.hidden=!row.dataset.sshSearch.includes(ev.target.value.toLowerCase()));
+ }
  if(ev.target.id==='groupSearch'){state.groupQuery=ev.target.value;clearTimeout(state.groupTimer);state.groupTimer=setTimeout(searchGroups,250)}
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',ev=>{
+ if(ev.target.matches('[data-ssh-filter-group]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
+ if(ev.target.id==='sshInventoryGroupFilter'){state.sshInventoryGroupFilter=ev.target.value;render();}
  if(ev.target.closest('#credentialTestForm'))updateCredentialTestVisibility();
  if(ev.target.name==='kind'&&ev.target.closest('#credentialManageForm')){
   document.getElementById('credentialProfile').innerHTML=credentialProfileFields(ev.target.value);

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.4-rc1 — 2026-11-16
+
+- Decoupled **SSH identities** (login, password or private key, optional passphrase) from server addresses in the encrypted vault.
+- Added **Administration → SSH servers & groups** with FQDN inventory, ports, labels, reusable group membership, bulk FQDN entry and search.
+- SSH credential test now accepts an explicit inventory server target and verifies host key plus the saved identity.
+- SSH, SFTP and Ansible runner workflow steps can select an inventory server without duplicating secrets.
+- Preserved legacy host-bound SSH credentials and protected removal of inventory servers still referenced by jobs.
+- Added regression tests and updated bilingual documentation.
+
+
 ## 0.3.3-rc2 — 2026-11-16
 
 - Fixed protocol diagnostic checkboxes inheriting the global 100% text input width.

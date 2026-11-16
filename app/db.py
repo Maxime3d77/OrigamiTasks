@@ -77,6 +77,21 @@ CREATE TABLE IF NOT EXISTS credentials (
  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, kind TEXT NOT NULL,
  encrypted_payload TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ssh_server_groups (
+ id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+ description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ssh_servers (
+ id INTEGER PRIMARY KEY, fqdn TEXT NOT NULL COLLATE NOCASE UNIQUE,
+ port INTEGER NOT NULL DEFAULT 22 CHECK(port BETWEEN 1 AND 65535),
+ label TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ssh_server_group_members (
+ group_id INTEGER NOT NULL REFERENCES ssh_server_groups(id) ON DELETE CASCADE,
+ server_id INTEGER NOT NULL REFERENCES ssh_servers(id) ON DELETE CASCADE,
+ PRIMARY KEY (group_id,server_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ssh_server_members ON ssh_server_group_members(server_id);
 CREATE TABLE IF NOT EXISTS datacenters (
  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, url TEXT NOT NULL,
  credential_id INTEGER NOT NULL REFERENCES credentials(id), created_at TEXT NOT NULL

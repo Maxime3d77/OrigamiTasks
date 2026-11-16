@@ -13,7 +13,7 @@ import time
 from email.message import EmailMessage
 from pathlib import Path
 import httpx
-from . import db, config, security, integrations, agents, directory, connections, ldap_settings
+from . import db, config, security, integrations, agents, directory, connections, ldap_settings, ssh_inventory
 
 
 class StepError(Exception):
@@ -105,7 +105,20 @@ def _ssh(command, opts, cred, timeout):
     user = cred.get('username') or opts.get('username')
     if not user:
         raise StepError('Utilisateur SSH manquant')
-    kwargs = dict(hostname=opts.get('host') or cred.get('host'), port=int(opts.get('port') or cred.get('port') or 22), username=user,
+    # A selected inventory target takes precedence over the optional legacy host
+    # embedded in old vault profiles; never log private key/password material.
+    if opts.get('ssh_server_id'):
+        try:
+            target=ssh_inventory.server(opts['ssh_server_id'])
+        except ssh_inventory.InventoryError as exc:
+            raise StepError(str(exc)) from None
+        target_host, target_port=target['fqdn'],target['port']
+    else:
+        target_host=opts.get('host') or cred.get('host')
+        target_port=opts.get('port') or cred.get('port') or 22
+    if not target_host:
+        raise StepError('Serveur SSH manquant : sélectionner un serveur dans l’inventaire')
+    kwargs = dict(hostname=target_host, port=int(target_port), username=user,
                   timeout=min(timeout, 30), auth_timeout=min(timeout, 30), look_for_keys=False, allow_agent=False)
     if cred.get('private_key'):
         key = cred['private_key']

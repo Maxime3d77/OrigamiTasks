@@ -1,5 +1,15 @@
 # Historique des modifications
 
+## 0.3.4-rc1 — 16 novembre 2026
+
+- **Identités SSH indépendantes** des serveurs dans le coffre : login, mot de passe ou clé privée (avec phrase secrète facultative).
+- Nouvel écran **Administration → Serveurs & groupes SSH** : FQDN, port, libellé, groupes multiples, saisie de listes de FQDN et recherche.
+- Diagnostic de clé SSH ciblé : choix d'un serveur de l'inventaire comme paramètre de test, vérification stricte de son empreinte.
+- Sélecteur de serveur cible dans les blocs SSH, SFTP et runner Ansible, sans dupliquer les secrets du coffre.
+- Compatibilité avec les anciennes connexions SSH contenant un serveur ; suppression protégée si un workflow référence encore l'inventaire.
+- Tests de non-régression et documentation bilingue mis à jour.
+
+
 ## 0.3.3-rc2 — 16 novembre 2026
 
 - Correctif de mise en page pour les assistants de diagnostic : les cases à cocher héritaient de la largeur 100 % des champs texte.
