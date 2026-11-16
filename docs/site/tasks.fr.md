@@ -1,9 +1,11 @@
-# Référence des tâches disponibles (v0.2)
+# Référence des tâches disponibles (v0.3.0-rc1)
 
 Cette page liste les **adaptateurs réellement intégrés**, pas toute la liste VisualCron. La configuration de chaque étape accepte de nombreuses chaînes interpolées.
 
 | Type | Paramètres | Précisions |
 |---|---|---|
+| `agent` | `agent_id`, `action`, `script` / `service`, `timeout`, `approved` | Agent Linux/Windows sortant en HTTPS, lectures et opérations encadrées. |
+| `directory` | `action`, `uri`, `base_dn`, `target_dn`, `group_dn`, `credential_id`, `attributes`, `approved` | LDAP/AD, recherche, comptes, groupes, mots de passe, écritures encadrées. |
 | `ssh` | `host`, `port`, `platform=linux/windows`, `script`, `credential_id`, `timeout` | Empreinte hôte vérifiée ; Windows via PowerShell encodé. |
 | `shell` | `script`, `timeout` | Exécution locale **désactivée** par défaut. |
 | `powershell` | `script`, `timeout` | `pwsh` local, désactivé par défaut. |
@@ -28,3 +30,11 @@ Cette page liste les **adaptateurs réellement intégrés**, pas toute la liste 
 ```
 
 **Credentials :** références numériques au coffre, jamais de valeur en clair. `ssh` vérifie strictement les clés hôtes. SMTP `ssl=true` correspond à TLS implicite, `ssl=false` à STARTTLS. FTP `allow_plaintext=true` n'est utilisable qu'en cas de nécessité. Pour Proxmox, `inventory` est en lecture seule ; les autres actions sont soumises à deux validations.
+
+## Tâches LDAP / Active Directory
+
+Les identifiants de service doivent être dans le Coffre-fort (`username` = bind DN, `password` = mot de passe). Connexion `ldaps://` ou `ldap://` avec `starttls=true`, contrôle de certificat et `LDAP_CA_CERT` facultatif. Les DN doivent rester sous `base_dn`, et les recherches utilisent une valeur exacte échappée.
+
+Actions : `search`, `get_user`, `create_user`, `modify_user`, `group_add`, `group_remove`, `enable_user`, `disable_user`, `unlock_user`, `reset_password`. Pour `create_user`, `attributes` contient du JSON (ex. `{"cn":"Alice Exemple","sn":"Exemple","sAMAccountName":"aexemple"}`), les comptes AD sont créés désactivés. `reset_password` utilise un **secret distinct** du coffre dans `password_credential_id` avec `password` de 12 caractères au moins, jamais le mot de passe en clair dans le workflow. LDAPS est obligatoire.
+
+Toutes les écritures nécessitent **ALLOW_DIRECTORY_WRITES=true**, une case **approved=true**, un compte de service aux droits limités et une recette sur annuaire de test. Seuls les attributs usuels de profil sont modifiables. Voir [Sécurité](security.md).

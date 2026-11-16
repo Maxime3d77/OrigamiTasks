@@ -23,3 +23,9 @@ OrigamiTasks is an **automation control plane**. Running a script is a powerful 
 Dedicated management VLAN, upstream allow-lists, no Docker socket mounts, TLS termination, mandatory code review, restricted SSH principals, no administrator/root service account for routine jobs, protected Git branch, audited production updates, secrets rotation and immutable external audit log.
 
 See the detailed [security threat model](https://github.com/Maxime3d77/OrigamiTasks/blob/main/docs/SECURITY.md).
+
+## Agent and directory task security
+
+Preview agents use distinct revocable, long-lived tokens (no mTLS yet); enrollment tokens are single-use and expire after 15 minutes. Remote provisioning uses pinned SSH host keys and allow-listed targets. The Windows scheduled task runs as SYSTEM; Linux runs unprivileged. Script execution is still privileged trusted automation.
+
+LDAP/AD writes are disabled by default, confined by base DN, TLS certificate validation and explicit step approval. Use least-privilege service credentials, a test directory and external domain controller audit logs.

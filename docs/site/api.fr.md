@@ -1,6 +1,6 @@
 # Référence de l'API HTTP
 
-L'API web est sous `/api`. Les sessions interactives utilisent `origami_session` et `origami_csrf` ; toute mutation doit envoyer `X-CSRF-Token` égal au cookie CSRF. Les accès anonymes sont limités à health, login et aux webhooks possédant leur token.
+L'API web est sous `/api`. Les sessions interactives utilisent `origami_session` et `origami_csrf` ; toute mutation doit envoyer `X-CSRF-Token` égal au cookie CSRF. Les accès hors session concernent health, login, webhooks et API agents authentifiées par leurs tokens propres.
 
 | Méthode | Endpoint | Fonction | Rôle |
 |---|---|---|---|
@@ -32,3 +32,17 @@ Les erreurs HTTP sont JSON avec `detail`. Conserver le lien vers le ticket de ch
 ```
 
 Préférer un gestionnaire de secrets ou une saisie sécurisée.
+
+## API agents
+
+| Méthode | Endpoint | Accès |
+|---|---|---|
+| GET | `/api/agents` | Admin |
+| POST | `/api/agents/enrollments` | Admin + CSRF |
+| POST | `/api/agents/deploy` | Admin + CSRF + liste hôtes |
+| POST | `/api/agents/{id}/revoke` | Admin + CSRF |
+| POST | `/api/agent/enroll` | Jeton unique 15 min |
+| POST | `/api/agent/poll` | Agent Bearer + `X-Origami-Agent-ID` |
+| POST | `/api/agent/report` | Agent Bearer + lease |
+
+Les agents communiquent exclusivement en HTTPS et les jetons sont enregistrés sous forme de hash sur le serveur.

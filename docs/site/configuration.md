@@ -31,3 +31,16 @@ A system-verified `known_hosts` entry is required. Add the fingerprint **after i
 ## Network policy
 
 Allow outbound traffic only to explicit integration endpoints (Matrix HTTPS, Proxmox HTTPS, SMTP submission, SSH/SFTP, FTPS). Limit API token privileges and restrict reverse-proxy access where possible.
+
+## Agents and directory automation
+
+| Variable | Purpose |
+|---|---|
+| `AGENT_SERVER_URL` | HTTPS origin for outbound agents |
+| `AGENT_DEPLOY_ALLOWED_HOSTS` | Allow-listed SSH deployment targets |
+| `ALLOW_AGENT_REMOTE_DEPLOY` | Remote SSH deployment (default false) |
+| `ALLOW_AGENT_SCRIPTS` | Agent scripts (false) |
+| `ALLOW_AGENT_MUTATIONS` | Mutating agent service actions (false) |
+| `ALLOW_DIRECTORY_WRITES` | LDAP/AD changes (false) |
+
+For setup and safety, refer to [Agents](agents.md) and [Tasks](tasks.md).

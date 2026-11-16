@@ -1,33 +1,43 @@
-# Windows and Linux agents — architecture specification
+# Linux and Windows agents — v0.3.0-rc1 preview
 
-**Status: designed, not implemented in v0.2.** The SSH runner supports initial Linux/Windows script execution without an agent. Native agents become useful when SSH cannot expose OS events and when inbound management ports must stay closed.
+OrigamiTasks includes **portable script agents**, not signed native binaries: Python 3.9+ on Linux with systemd (`agents/linux/agent.py`) and Windows PowerShell 5.1+ on Windows 10/11 or Server 2016+ (`agents/windows/agent.ps1`). Test on dedicated machines first. Agents make **outbound HTTPS** connections; they do not listen for inbound connections.
 
-## Planned agent capabilities
+## Server configuration
 
-| Linux | Windows |
-|---|---|
-| Bash, Python, `systemctl`, `journalctl`, package managers | PowerShell 5.1/7, Windows services, Event Logs |
-| inotify/file watchers, process and disk checks | FileSystemWatcher, scheduled tasks, WMI/CIM |
-| SSH/SFTP and controlled service elevation | SMB/UNC, Windows Credential Manager integration |
-| Application user and service-account execution | Service session and optionally interactive session via separate broker |
+Set these variables in `.env` and recreate the application container:
 
-## Trust and lifecycle
+```dotenv
+AGENT_SERVER_URL=https://tasks.example.org
+ALLOW_AGENT_REMOTE_DEPLOY=true
+AGENT_DEPLOY_ALLOWED_HOSTS=linux-test.example.org,win-test.example.org
+ALLOW_AGENT_SCRIPTS=false
+ALLOW_AGENT_MUTATIONS=false
+ALLOW_DIRECTORY_WRITES=false
+```
 
-1. Admin generates a **single-use enrollment token** with expiry and assigned resource group.
-2. Agent authenticates outbound over **TLS/mTLS** and obtains a distinct short-lived identity; never expose a master vault key.
-3. Agent advertises signed/validated OS and capability inventory.
-4. Control plane authorizes each job by agent group, action type, credential scope and approval level.
-5. Agent polls/streams jobs, reserves durable leases, performs bounded execution without shell interpolation, returns structured stdout/stderr/exit code and audit identifiers.
-6. Token/certificate rotation and revocation are supported. Updating agent binaries requires signed releases and rollback.
+All three enable flags default to **false**. `AGENT_SERVER_URL` must be a trusted HTTPS origin. `AGENT_DEPLOY_ALLOWED_HOSTS` is an exact hostname/IP list. Agent enrollment uses a **one-use 15-minute token** and then a distinct long-lived per-agent bearer token that can be revoked; mTLS and signed packages are not implemented.
 
-## Safety properties
+## Deploy from the UI
 
-- Use non-admin service identity by default; elevate via scoped policy on the target only.
-- Authenticate commands and do not accept arbitrary internet requests on agent machines.
-- Prevent duplicate execution using lease IDs and idempotency keys. Stop/reconcile expired leases rather than blindly replaying reboot or VM operations.
-- Redact secrets at the source and keep logs short. Do not send unbounded artifacts into the control-plane database.
-- Keep cross-platform packages separately versioned; test Windows Server and supported Linux distributions in CI/VM labs.
+1. Add a scoped SSH credential in **Vault**. Prepare a trusted `SSH_KNOWN_HOSTS` file (default `data/known_hosts`) in the control-plane container. Unknown or changed SSH keys are rejected.
+2. Choose **Administration → Agents Linux / Windows → Deploy via SSH**. Set the target hostname from the allow-list, Linux/Windows, group, SSH port and credential, and explicitly confirm installation.
+3. The server pushes the matching agent and `config.json` by SFTP, creates the enrollment, and installs the service. Linux requires Python 3, systemd and root or noninteractive `sudo -n`; the installed service runs as unprivileged `origamitasks-agent`. Windows requires administrative OpenSSH Server/SFTP and PowerShell 5.1; its installed Scheduled Task runs as **SYSTEM**.
+4. The agent calls the HTTPS API, enrolls and starts sending heartbeats. Refresh the admin page; **online** means a heartbeat within 90 seconds.
 
-## Deployment roadmap
+If the machine lacks SSH, select **Manual enrollment** and copy the token immediately. Place the agent script and a restricted `config.json` in the same folder, e.g.:
 
-v0.4 is the first planned version for real agent enrollment, authenticated polling and native system actions. At this release, **do not install a placeholder agent** or treat this chapter as installation instructions for a finished binary.
+```json
+{"server":"https://tasks.example.org","agent_id":12,"enrollment_token":"ONE_USE_TOKEN"}
+```
+
+For an interactive smoke test, run `python3 agent.py` on Linux or `powershell.exe -NoProfile -File agent.ps1` on Windows. To persist a manual install, configure your own systemd unit or Scheduled Task. On enrollment, the token is replaced in `config.json` with the operational token. Revocation in the UI invalidates access but does **not** uninstall remote files/services.
+
+## Workflow blocks
+
+Select **Agent Linux / Windows** in the workflow editor and choose `agent_id`, `action`, optional `script` or `service`, `timeout`, `approved`. Actions: `inventory`, `disk`, `processes`, `service_status` (read only); `script` (requires `ALLOW_AGENT_SCRIPTS=true`); `service_start`, `service_stop`, `service_restart` (require `ALLOW_AGENT_MUTATIONS=true` and `approved=true` plus OS permissions). Linux uses Bash and Windows uses PowerShell.
+
+Each task has a unique lease, bounded execution time and capped output. **Never automatically retry a non-idempotent action:** on a timeout, the agent may have executed it but failed to deliver the result. Disable workflow retries for such actions. The preview has no binary signing, auto-update, GPO deployment, multi-tenant sandbox, OS event listener, interactive Windows popup or mTLS certificate rotation.
+
+## Troubleshooting
+
+Linux: `systemctl status origamitasks-agent`, `journalctl -u origamitasks-agent -n 100`. Windows: `Get-ScheduledTask OrigamiTasksAgent`, Task Scheduler Operational log. Check HTTPS trust, outbound 443, SSH known-hosts, restricted `config.json`, token expiration and agent identity. See [Tasks](tasks.md) and [Security](security.md).

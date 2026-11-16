@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0-rc1 — 2026-11-15
+
+- Restored the original official logo in README and bilingual documentation.
+- Added Linux Python/systemd and Windows PowerShell portable outbound HTTPS agents with enrollment, revocation, heartbeat, queue and leases.
+- Added SSH/SFTP installation from the administration page with explicit host allow-list and SSH key pinning.
+- Added `agent` and `directory` workflow task adapters; LDAP/AD changes require opt-in approval.
+- Updated English/French documentation and prepared test coverage. Real Windows/LDAP lab acceptance remains required.
+
 ## 0.2.0 — 2026-11-15
 
 - Matrix plain text message task with encrypted token.

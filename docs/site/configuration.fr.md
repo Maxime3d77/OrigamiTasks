@@ -31,3 +31,16 @@ Une entrée `known_hosts` vérifiée est obligatoire. Contrôler l'empreinte **p
 ## Règles réseau
 
 Limiter les sorties aux destinations explicitement autorisées : Matrix HTTPS, Proxmox HTTPS, SMTP submission, SSH/SFTP, FTPS. Restreindre les droits des tokens et l'accès au proxy.
+
+## Agents et annuaire
+
+| Variable | Rôle |
+|---|---|
+| `AGENT_SERVER_URL` | Origine HTTPS utilisée par les agents |
+| `AGENT_DEPLOY_ALLOWED_HOSTS` | FQDN/IP de déploiement SSH autorisés |
+| `ALLOW_AGENT_REMOTE_DEPLOY` | Déploiement SSH distant (false par défaut) |
+| `ALLOW_AGENT_SCRIPTS` | Scripts agent (false) |
+| `ALLOW_AGENT_MUTATIONS` | Actions d'écriture sur services (false) |
+| `ALLOW_DIRECTORY_WRITES` | Écritures LDAP/AD (false) |
+
+Pour la procédure complète et les précautions, consulter [Agents](agents.md) et [Tâches](tasks.md).

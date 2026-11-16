@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations
+from . import config, db, engine, scheduler, security, integrations, agents
 
 
 @asynccontextmanager
@@ -103,7 +103,65 @@ def logout(request: Request, response: Response):
     return {'ok':True}
 
 
-VALID_TYPES = {'shell','powershell','ssh','sftp','ftp','email','http','delay','set_variable','matrix','ansible','proxmox','file'}
+
+# Administration endpoints require session + CSRF; agent endpoints are bearer-only.
+@app.get('/api/agents')
+def list_agents(request:Request):
+    security.require(request,role='admin')
+    with db.session() as con:
+        rows=con.execute('SELECT id,name,platform,group_name,hostname,version,enrolled,revoked,last_seen,created_at FROM agents ORDER BY id DESC').fetchall()
+    cutoff=agents.utc_plus(-90)
+    return {'items':[dict(r,status=('revoked' if r['revoked'] else 'pending' if not r['enrolled'] else
+        'online' if r['last_seen'] and r['last_seen']>=cutoff else 'offline')) for r in rows]}
+
+
+@app.post('/api/agents/enrollments')
+def create_agent_enrollment(payload:dict[str,Any], request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    result=agents.register(str(payload.get('name') or ''),str(payload.get('platform') or ''),
+                           str(payload.get('group') or 'default'))
+    db.audit(user['username'],'agent.registration',result['id'])
+    return result  # token visible exactly once
+
+
+@app.post('/api/agents/deploy')
+def deploy_agent(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=agents.deploy(payload)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Do not leak paths, SSH passwords or remote command output to browsers.
+        raise HTTPException(502,'Installation distante échouée : '+type(exc).__name__)
+    db.audit(user['username'],'agent.deploy',result['id'],result['name'])
+    return result
+
+
+@app.post('/api/agents/{agent_id}/revoke')
+def revoke_agent(agent_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    agents.revoke(agent_id)
+    db.audit(user['username'],'agent.revoke',agent_id)
+    return {'ok':True}
+
+
+@app.post('/api/agent/enroll')
+def agent_enroll(payload:dict[str,Any]):
+    return agents.enroll(payload)
+
+
+@app.post('/api/agent/poll')
+def agent_poll(payload:dict[str,Any],request:Request):
+    return agents.poll(agents.authenticate(request),payload)
+
+
+@app.post('/api/agent/report')
+def agent_report(payload:dict[str,Any],request:Request):
+    return agents.report(agents.authenticate(request),payload)
+
+
+VALID_TYPES = {'shell','powershell','ssh','sftp','ftp','email','http','delay','set_variable','matrix','ansible','proxmox','file','agent','directory'}
 
 
 def validate_job(payload):
@@ -173,6 +231,8 @@ def task_catalog(request: Request):
       {'type':'ansible','category':'Infrastructure','name':'Ansible Playbook sur runner SSH'},
       {'type':'matrix','category':'Messagerie','name':'Message Matrix'},
       {'type':'proxmox','category':'Infrastructure','name':'Proxmox inventaire et actions encadrées'},
+      {'type':'agent','category':'Agents','name':'Agent Linux/Windows : scripts, services, inventaire, disques, processus'},
+      {'type':'directory','category':'Annuaire','name':'LDAP / Active Directory : lecture, utilisateurs, groupes et comptes'},
       {'type':'email','category':'Messagerie','name':'SMTP'},
       {'type':'sftp','category':'Transferts','name':'SFTP'},
       {'type':'file','category':'Fichiers','name':'Opérations fichiers dans transfers/'},
@@ -292,7 +352,7 @@ def update_job(job_id: int,payload:dict[str,Any],request: Request):
         if not security.can_job(user,old,'edit'): raise HTTPException(403,'Modification interdite')
         # Operators cannot grant new ACLs or edit existing ACLs, only admins.
         if user['role'] != 'admin':
-            if any(s.get('type')=='proxmox' for s in old['steps_json']+payload['steps_json']):
+            if any(s.get('type') in ('proxmox','agent','directory') for s in old['steps_json']+payload['steps_json']):
                 raise HTTPException(403,'Seul un administrateur peut modifier les étapes Proxmox')
             fields['acl_json']=json.dumps(old['acl_json'],ensure_ascii=False)
             existing_creds={step['id']:str(step.get('config',{}).get('credential_id') or '') for step in old['steps_json']}

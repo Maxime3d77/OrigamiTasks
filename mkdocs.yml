@@ -23,6 +23,8 @@ nav:
   - Changelog: changelog.md
 theme:
   name: material
+  logo: assets/logo.png
+  favicon: assets/logo.png
   language: en
   palette:
     - scheme: slate

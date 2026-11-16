@@ -23,3 +23,7 @@
 - **v1.0** : durcissement, conception HA, tests d'intégration/sécurité et API publiques stabilisées.
 
 Chaque nouvelle fonctionnalité exige la mise à jour EN/FR, des tests et du changelog.
+
+## Ajouts expérimentaux v0.3
+
+Les blocs `agent` et `directory` sont désormais disponibles en préversion avec installation SSH ciblée et gestion LDAP/AD courante. Les binaires natifs signés, certificats mTLS, déploiement GPO, événements OS et workflows DAG parallèles restent dans la feuille de route.

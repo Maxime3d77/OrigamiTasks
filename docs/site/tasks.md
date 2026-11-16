@@ -1,9 +1,11 @@
-# Available task reference (v0.2)
+# Available task reference (v0.3.0-rc1)
 
 This page lists **implemented adapters**, not all VisualCron features. All task settings are entered in the step configuration; most strings support variable interpolation.
 
 | Type | Core settings | Notes |
 |---|---|---|
+| `agent` | `agent_id`, `action`, `script` / `service`, `timeout`, `approved` | Linux/Windows outbound agent; read only by default, scripts/services gated. |
+| `directory` | `action`, `uri`, `base_dn`, `target_dn`, `group_dn`, `credential_id`, `attributes`, `approved` | LDAP/AD search/users/groups/password tasks; writes gated. |
 | `ssh` | `host`, `port`, `platform=linux/windows`, `script`, `credential_id`, `timeout` | Host fingerprint must be known; Windows uses encoded PowerShell. |
 | `shell` | `script`, `timeout` | Local execution **disabled** by default. |
 | `powershell` | `script`, `timeout` | Local `pwsh`, disabled by default. |
@@ -28,3 +30,11 @@ This page lists **implemented adapters**, not all VisualCron features. All task 
 ```
 
 **Credentials** are numeric references to entries stored in Vault, never cleartext values. `ssh` uses strict SSH host-key verification. SMTP `ssl=true` is implicit TLS, `ssl=false` uses STARTTLS. FTP `allow_plaintext=true` must be explicitly set for insecure legacy endpoints. A Proxmox `inventory` action is read-only; its destructive/power-related operations are separately gated.
+
+## LDAP / Active Directory tasks
+
+Directory service credentials must be stored in Vault (`username` = bind DN, `password` = password). Connect using `ldaps://` or `ldap://` + `starttls=true`, with certificate validation and optional `LDAP_CA_CERT`. Restrict all target DNs to the `base_dn` and search only by exact escaped lookup values.
+
+Actions: `search`, `get_user`, `create_user`, `modify_user`, `group_add`, `group_remove`, `enable_user`, `disable_user`, `unlock_user`, `reset_password`. For `create_user`, `attributes` is a JSON object, e.g. `{"cn":"Alice Example","sn":"Example","sAMAccountName":"aexample"}`; AD accounts are created disabled. `reset_password` uses a **different Vault secret** specified by `password_credential_id` containing `password` (at least 12 characters), never an inline password. LDAPS is mandatory for AD reset.
+
+All writes require **ALLOW_DIRECTORY_WRITES=true**, per-step **approved=true**, an appropriately limited service account and a laboratory verification. The adapter only permits routine profile attribute changes, not arbitrary protected account attributes. See [Security](security.md).

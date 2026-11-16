@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.0-rc1 — 15 novembre 2026
+
+- Logo officiel d'origine rétabli dans README et la documentation bilingue.
+- Agents portables Linux Python/systemd et Windows PowerShell, HTTPS sortant, enrôlement, révocation, heartbeat, file et leases.
+- Déploiement par SSH/SFTP depuis l'administration avec liste d'hôtes autorisés et clés SSH vérifiées.
+- Blocs de workflow `agent` et `directory` ; les écritures LDAP/AD exigent une autorisation explicite.
+- Documentation EN/FR actualisée. Une recette sur Windows et LDAP/AD réels reste nécessaire.
+
 ## 0.2.0 — 15 novembre 2026
 
 - Bloc Matrix texte utilisant un token chiffré.

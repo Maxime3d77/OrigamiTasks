@@ -23,3 +23,7 @@
 - **v1.0**: operational hardening, HA design, thorough integration/security tests, stable public APIs.
 
 Implementations must ship with a bilingual change to these docs, tests, and a changelog entry.
+
+## Experimental v0.3 implementations
+
+The `agent` and `directory` blocks are now preview implementations with targeted SSH installation and common LDAP/AD actions. Signed native agents, mTLS, GPO deployments, OS event triggers and parallel DAGs remain planned.

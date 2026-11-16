@@ -1,6 +1,6 @@
 # HTTP API reference
 
-The browser API lives under `/api`. Interactive sessions use `origami_session` and `origami_csrf` cookies; mutation requests must send `X-CSRF-Token` matching the CSRF cookie. Anonymous endpoints are only the health endpoint, login and authenticated webhook entry points.
+The browser API lives under `/api`. Interactive sessions use `origami_session` and `origami_csrf` cookies; mutation requests must send `X-CSRF-Token` matching the CSRF cookie. Endpoints without browser sessions include health, login, authenticated webhooks and agent-token endpoints.
 
 | Method | Endpoint | Function | Role |
 |---|---|---|---|
@@ -32,3 +32,17 @@ Client API errors are JSON with `detail`. Audit-sensitive mutation requests shou
 ```
 
 Avoid passing passwords in shell history; use a secret manager or non-interactive secure input.
+
+## Agent API
+
+| Method | Endpoint | Authorization |
+|---|---|---|
+| GET | `/api/agents` | Admin |
+| POST | `/api/agents/enrollments` | Admin + CSRF |
+| POST | `/api/agents/deploy` | Admin + CSRF + host allow-list |
+| POST | `/api/agents/{id}/revoke` | Admin + CSRF |
+| POST | `/api/agent/enroll` | One-use 15 min token |
+| POST | `/api/agent/poll` | Agent Bearer + `X-Origami-Agent-ID` |
+| POST | `/api/agent/report` | Agent Bearer + task lease |
+
+Agents communicate over HTTPS; stored server-side tokens are hashed.

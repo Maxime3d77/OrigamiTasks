@@ -13,7 +13,7 @@ import time
 from email.message import EmailMessage
 from pathlib import Path
 import httpx
-from . import db, config, security, integrations
+from . import db, config, security, integrations, agents, directory
 
 
 class StepError(Exception):
@@ -178,6 +178,20 @@ def execute(step, ctx):
         else:
             cmd = 'bash -lc ' + shlex.quote(script)
         code, output = _ssh(cmd, opts, cred, timeout)
+    elif typ == 'agent':
+        try:
+            # Keep the engine's current graph step ID for durable remote audit.
+            return agents.execute(opts, dict(ctx,step_id=step['id']), timeout)
+        except (ValueError,TypeError) as exc:
+            raise StepError('Agent : '+str(exc))
+    elif typ == 'directory':
+        if not opts.get('credential_id'):
+            raise StepError('LDAP/AD : choisir un identifiant de coffre dédié')
+        try:
+            output = directory.execute(opts,cred)
+        except (directory.DirectoryError,ValueError) as exc:
+            raise StepError('LDAP/AD : '+str(exc))
+        code = 0
     elif typ == 'matrix':
         try:
             output = integrations.matrix_message(opts,cred,ctx['run_id'],step['id'],timeout)

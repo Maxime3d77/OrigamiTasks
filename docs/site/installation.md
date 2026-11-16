@@ -53,3 +53,7 @@ Replace domains/certificates with yours; do not expose :8080 directly. Keep `COO
 ## Updating installed packages
 
 Use the [Operations](operations.md) procedure. Do not blindly run `git pull` over a modified working tree or share the application data directory with a public web server.
+
+## Agent staging test
+
+After verifying HTTPS and SSH host-key pinning, follow [Agents](agents.md) to deploy on one Linux and one Windows lab VM. Keep `ALLOW_AGENT_SCRIPTS`, `ALLOW_AGENT_MUTATIONS` and `ALLOW_DIRECTORY_WRITES` false for the read-only smoke tests.
