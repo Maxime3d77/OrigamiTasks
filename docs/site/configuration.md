@@ -14,6 +14,7 @@ The `.env.example` file is the normative list of settings. Restart the container
 | `PROXMOX_ALLOWED_HOSTS` | Proxmox REST API endpoints and read-only credential tests | e.g. `pve.example.org:8006` |
 | `CONNECTION_TEST_ALLOWED_HOSTS` | Exact allow-listed HTTPS hosts for generic API credential GET diagnostics | Empty by default; set only trusted hosts |
 | `PROXMOX_CA_CERT` | Trusted PEM CA file inside container | Optional if system CA trusted |
+| `SSH_HOST_KEY_POLICY` | SSH server public key enrollment | `accept-new` by default; `strict` for manual verification |
 | `ALLOW_PROXMOX_ACTIONS` | Allow gated VM power actions | `false` until reviewed |
 | `GIT_ALLOWED_ORIGIN` | Updater's exact permitted Git URL | Protected origin only |
 
@@ -38,25 +39,24 @@ Use **Administration → LDAP / Active Directory** to configure URI and port, LD
 Create **protocol-specific vault profiles** for SMTP (server, port, STARTTLS / implicit SSL / unencrypted relay, optional authentication and default sender), SSH/SFTP, FTP/FTPS, LDAP, API, Matrix and Proxmox. The editor changes fields when you select a connection type. **Test SMTP** verifies TLS and optional credentials without sending mail. Use the **Administration → LDAP** test for the directory itself. Grant workflow editing rights only to trusted operators. Non-sensitive settings can be reviewed by administrators; passwords, tokens and SSH keys are never re-displayed. Blank secret fields retain their existing encrypted values. Old hostless credentials remain compatible with tasks that define their own host.
 
 
-### Approve a server's SSH host key from the browser
+### Automatic trust-on-first-use for new SSH servers
 
-An SSH user private key imported from another computer can be reused unchanged in **Vault → SSH identity**. The user private key and the SSH **server's public host key** are unrelated.
+An SSH identity stored in the Vault can be used unchanged on every Linux or Windows server where its matching **user public key** is authorized. The private SSH key is **not tied to a server**.
 
-Under **Vault → SSH connection test**, select a manual FQDN or inventory host, then **Inspect server host key**. OrigamiTasks displays the algorithm, SHA256 fingerprint and known/unknown/changed status. **Independently compare the fingerprint against the target server console**, for example using `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256`. Type the independently verified fingerprint and explicitly confirm its verification; only then does the server persist the **public host key** in `/app/data/known_hosts` (host volume `data/known_hosts`).
+With `SSH_HOST_KEY_POLICY=accept-new` (default), OrigamiTasks **automatically records** each new server public host key in persistent `/app/data/known_hosts` during a connection test, workflow, or agent deployment. Subsequent connections require the same key and reject unexpected changes. There is no per-server fingerprint entry.
 
-The offered host key is fetched again before approval and must match the confirmed SHA256 fingerprint. An existing changed host key cannot be overwritten from the browser. Unknown hosts are **never silently trusted**, and user private keys are **not transmitted** by this operation.
+First-use auto trust does not authenticate the server independently: an attacker controlling that first connection could present a false key. For strict environments, set `SSH_HOST_KEY_POLICY=strict` in `.env` and restart. Manual browser host-key inspection and independently verified SHA256 approval remain available.
 
 ### Import LDAP CA chains from CRT
 
 A `.crt` file may contain several X.509 certificates. The importer accepts PEM and DER; for a PEM bundle containing both CAs and server-leaf certificates, it **keeps only CA certificates** and reports any non-CA certificates ignored. A `CA:TRUE` CA is retained, while a leaf-only bundle is rejected. After import, **save the LDAP configuration** with the resulting CA path and test LDAPS/STARTTLS. A greyed-out skip-verification checkbox means the host-level `ALLOW_INSECURE_LDAP_TLS` permission is disabled. With the correct CA, leave this bypass turned off.
 
 
-### SSH diagnostics: user private keys and trusted host keys
+### SSH diagnostics: user private key versus server host key
 
-The SSH vault stores **a user authentication private key** (OpenSSH or RSA/EC PEM), not a server identity key. The user's matching public key must be in the target server's \`authorized_keys\`; never import \`/etc/ssh/ssh_host_*_key\` as a user credential.
+The Vault stores a **user authentication private key** (OpenSSH/PEM, optionally passphrase protected). The matching user public key must be in each target's `authorized_keys`; never import a server's `/etc/ssh/ssh_host_*` private key.
 
-The trusted server-host-key file is \`data/known_hosts\` on the OrigamiTasks Docker host, mounted as \`/app/data/known_hosts\`. For the fictional example \`serveur.fr\`, read the presented fingerprint with \`ssh-keyscan -T 5 -p 22 -t ed25519 serveur.fr 2>/dev/null | ssh-keygen -lf - -E sha256\`. **Compare it with the fingerprint obtained directly on the target console** using \`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256\` before trusting the key. Diagnostics distinguish unknown keys (SHA-256 fingerprint shown, never automatically trusted), changed host keys, failed user authentication and incompatible SSH handshakes.
-
+A manual FQDN connection test does not register the server in inventory. In `accept-new` mode, it only registers the **public server host key** in `known_hosts`. The optional fingerprint inspection button can still be used to investigate a host-key change.
 
 ### Test SSH credentials against a temporary manual host
 
@@ -79,7 +79,7 @@ Open **Administration → SSH servers & groups** to:
 
 **SSH**, **SFTP** and **Ansible runner** workflow steps can select an inventoried server while referencing a reusable vault identity. The selected host and port override any legacy host stored in the old credential. Groups **organize and filter targets**; they do not silently run a task across every member. Legacy host-bound SSH credentials remain supported.
 
-SSH host-key verification remains strict via `known_hosts` to prevent server impersonation. Independently verify a host fingerprint before adding it to `SSH_KNOWN_HOSTS`. Basic authentication tests do not run remote commands.
+The first host key is automatically pinned in `known_hosts` under `accept-new`, while any unexpected later change is rejected. Use `strict` to require manual verification. Basic authentication tests do not run remote commands.
 
 ### Connection diagnostic wizard
 
@@ -98,7 +98,7 @@ By default, diagnostics **never send messages** or change remote data. Email/Mat
 
 ## Remote SSH
 
-A system-verified `known_hosts` entry is required. Add the fingerprint **after independently verifying it**; do not automatically trust the first key seen in production. Windows targets need Windows OpenSSH Server and an authorized PowerShell-capable service account; Linux targets need an SSH service account.
+In `accept-new`, new server keys are automatically stored and later substitutions are blocked. Set `strict` to require independent host-key verification for higher-assurance environments. Windows targets need Windows OpenSSH Server and an authorized PowerShell-capable service account; Linux targets need an SSH service account.
 
 ## Network policy
 
