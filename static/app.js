@@ -106,6 +106,85 @@ function readLDAPForm(){
  return {settings:data,test_user:String(f.get('test_user')||'').trim()};
 }
 
+
+function sshServerOptions(selected='',query='',group=''){
+ const list=state.sshInventory.servers||[];
+ return [['','— Choisir un serveur SSH —'],...list
+  .filter(s=>(!group||s.group_ids.includes(Number(group)))&&
+      (!query||(s.fqdn+' '+s.label).toLowerCase().includes(query.toLowerCase())))
+  .map(s=>[s.id,s.fqdn+' : '+s.port+(s.label?' · '+s.label:'')])];
+}
+function sshTargetPicker(prefix,selected='',required=false){
+ const groups=state.sshInventory.groups||[];
+ const count=(state.sshInventory.servers||[]).length;
+ return '<div class="ssh-target-picker" data-ssh-picker="'+e(prefix)+'">'
+  +'<div class="form-grid"><div class="field"><span>Filtrer par groupe</span><select data-ssh-filter-group>'
+  +option([['','Tous les groupes'],...groups.map(g=>[g.id,g.name+' ('+g.server_count+')'])],'')+'</select></div>'
+  +'<div class="field"><span>Rechercher un FQDN</span><input data-ssh-filter-search placeholder="server.infra.example.org" autocomplete="off"></div></div>'
+  +'<div class="field"><span>Serveur cible'+(required?' *':'')+'</span><select name="'+e(prefix)+'" data-ssh-target-select '+(required?'required':'')+'>'
+  +option(sshServerOptions(selected),selected)+'</select></div>'
+  +'<p class="hint">'+count+' serveur(s) enregistré(s) · Gérer les FQDN dans <b>Administration → Serveurs & groupes SSH</b>.</p></div>';
+}
+function sshRefreshPicker(container){
+ if(!container)return;
+ const selected=container.querySelector('[data-ssh-target-select]');
+ if(!selected)return;
+ const value=selected.value,query=container.querySelector('[data-ssh-filter-search]')?.value||'';
+ const group=container.querySelector('[data-ssh-filter-group]')?.value||'';
+ selected.innerHTML=option(sshServerOptions(value,query,group),value);
+ if(value&&!Array.from(selected.options).some(x=>x.value===value))selected.value='';
+}
+function sshInventoryPage(){
+ if(!roleAdmin())return title('Serveurs SSH','Administration uniquement');
+ const groups=state.sshInventory.groups||[],servers=state.sshInventory.servers||[];
+ const selected=state.sshInventoryGroupFilter||'',term=(state.sshInventorySearch||'').toLowerCase();
+ const filtered=servers.filter(x=>(!selected||x.group_ids.includes(Number(selected)))&&
+      (!term||(x.fqdn+' '+x.label).toLowerCase().includes(term)));
+ const groupCards=groups.map(g=>'<div class="ssh-group-card"><div><b>'+e(g.name)+'</b><p class="hint">'+e(g.description||'')+' · '+g.server_count+' serveur(s)</p></div>'
+  +'<div class="credential-actions"><button class="btn tiny" data-action="ssh-group-edit" data-id="'+g.id+'">Modifier</button>'
+  +'<button class="btn tiny danger" data-action="ssh-group-remove" data-id="'+g.id+'">Supprimer</button></div></div>').join('');
+ const rows=filtered.map(x=>'<div class="ssh-server-row"><div><strong>'+e(x.fqdn)+'</strong><small>Port '+e(x.port)+(x.label?' · '+e(x.label):'')+'</small>'
+  +'<div class="ssh-server-tags">'+x.group_ids.map(gid=>{const group=groups.find(g=>g.id===gid);return group?'<span class="chip">'+e(group.name)+'</span>':''}).join('')+'</div></div>'
+  +'<div class="credential-actions"><button class="btn tiny" data-action="ssh-server-edit" data-id="'+x.id+'">Modifier</button>'
+  +'<button class="btn tiny danger" data-action="ssh-server-remove" data-id="'+x.id+'">Supprimer</button></div></div>').join('');
+ return title('Serveurs & groupes SSH','Inventaire des cibles indépendant des identités chiffrées du coffre-fort.',
+   '<button class="btn primary" data-action="ssh-group-new">＋ Groupe</button><button class="btn" data-action="ssh-server-new">＋ Serveur</button>')
+  +'<div class="notice">Créer une identité <b>SSH</b> dans le Coffre-fort, puis sélectionner un serveur de cet inventaire lors du test ou dans une tâche. Un même serveur peut appartenir à plusieurs groupes. Supprimer un groupe ne supprime pas les serveurs.</div>'
+  +'<div class="section-grid ssh-inventory-layout"><section class="panel"><div class="panel-title"><h2>Groupes de serveurs</h2><span class="hint">'+groups.length+' groupe(s)</span></div>'
+  +(groupCards||'<p class="hint">Aucun groupe. Crée un groupe et ajoute tes FQDN, un par ligne.</p>')+'</section>'
+  +'<section class="panel"><div class="panel-title"><h2>Serveurs enregistrés</h2><span class="hint">'+filtered.length+' / '+servers.length+'</span></div>'
+  +'<div class="form-grid"><div class="field"><span>Groupe</span><select id="sshInventoryGroupFilter">'+option([['','Tous les groupes'],...groups.map(g=>[g.id,g.name])],selected)+'</select></div>'
+  +'<div class="field"><span>Rechercher</span><input id="sshInventorySearch" placeholder="FQDN ou libellé…" value="'+e(state.sshInventorySearch||'')+'"></div></div>'
+  +'<div class="ssh-server-list">'+(rows||'<p class="hint">Aucun serveur correspondant.</p>')+'</div></section></div>';
+}
+function sshGroupForm(groupId=null){
+ const group=(state.sshInventory.groups||[]).find(g=>g.id===groupId);
+ const servers=group?(state.sshInventory.servers||[]).filter(s=>group.server_ids.includes(s.id)):[];
+ const lines=servers.map(x=>x.fqdn+(x.port!==22?':'+x.port:'')).join('\n');
+ const body='<form id="sshGroupForm" data-id="'+(group?.id||'')+'">'
+  +'<div class="form-grid">'+field('Nom du groupe','name',group?.name||'')
+  +field('Description','description',group?.description||'')+'</div>'
+  +'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="au-server01.infra.example.org&#10;sd-server01.infra.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>'
+  +'<small class="hint">Ajouter ou retirer des lignes modifie l’appartenance au groupe. Les serveurs retirés restent dans l’inventaire. Port 22 par défaut, préciser :2222 si nécessaire. Max. 250 serveurs.</small></div>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">'+(group?'Enregistrer le groupe':'Créer le groupe')+'</button>'
+  +'<button class="btn" data-action="layer-close" data-layer="sshInventoryLayer" type="button">Annuler</button></div></form>';
+ openLayer('sshInventoryLayer',group?'Modifier le groupe SSH':'Créer un groupe SSH',body);
+}
+function sshServerForm(serverId=null){
+ const server=(state.sshInventory.servers||[]).find(x=>x.id===serverId);
+ const groups=state.sshInventory.groups||[];
+ const boxes=groups.map(g=>'<label class="ssh-group-option"><input type="checkbox" name="group_id" value="'+g.id+'" '+(server?.group_ids.includes(g.id)?'checked':'')+'><span>'+e(g.name)+'</span></label>').join('');
+ const body='<form id="sshServerForm" data-id="'+(server?.id||'')+'"><div class="form-grid">'
+  +'<div class="field"><span>FQDN *</span><input name="fqdn" value="'+e(server?.fqdn||'')+'" '+(server?'readonly':'required')+' placeholder="server01.infra.example.org"></div>'
+  +'<div class="field"><span>Port SSH</span><input type="number" min="1" max="65535" name="port" value="'+(server?.port||22)+'" required></div></div>'
+  +field('Libellé / environnement','label',server?.label||'')
+  +'<div class="field"><span>Groupes du serveur</span><div class="ssh-group-checkboxes">'+(boxes||'<span class="hint">Aucun groupe créé</span>')+'</div></div>'
+  +'<p class="hint">Le FQDN est immuable sur une fiche existante : cela évite de rediriger silencieusement des workflows vers une autre machine.</p>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">'+(server?'Enregistrer le serveur':'Ajouter le serveur')+'</button>'
+  +'<button class="btn" type="button" data-action="layer-close" data-layer="sshInventoryLayer">Annuler</button></div></form>';
+ openLayer('sshInventoryLayer',server?'Modifier le serveur SSH':'Ajouter un serveur SSH',body);
+}
+
 function users(){return title('Utilisateurs & permissions','Identités LDAP et groupes affectés aux autorisations des workflows.')+`<div class="panel"><div class="panel-title"><h2>Comptes connectés</h2><span class="hint">Les rôles sont attribués à la connexion LDAP</span></div><div id="userTable">Chargement...</div></div><div class="notice">Groupes par workflow : <b>Lecture</b>, <b>Exécution</b>, <b>Modification</b>. Un utilisateur non membre d'un groupe explicitement autorisé n'accède pas au workflow. Les administrateurs disposent de tous les droits. Les groupes et rôles LDAP sont configurés dans .env.</div>`}
 const plannedCatalog=[
  ['Déclencheurs','Fichier créé/modifié, email reçu, trap SNMP, seuil Zabbix, événement Windows, dépendance entre jobs'],
