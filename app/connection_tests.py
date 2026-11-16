@@ -453,7 +453,7 @@ def api(values, options=None):
         "?" in path or "#" in path or "\\" in path or
         ".." in path.split("/") or len(path) > 180):
         raise ConnectionTestError("API : chemin de test invalide")
-    method = _short(options, "method", 5).upper() or "GET"
+    method = _short(options, "method", 6).upper() or "GET"
     if method not in ("GET", "HEAD"):
         raise ConnectionTestError("API : seules les méthodes GET et HEAD sont permises")
     expected = _short(options, "expected_status", 3) or "2xx"
