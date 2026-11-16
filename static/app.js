@@ -205,13 +205,28 @@ function agentsPage(){
  '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button><button class="btn primary" data-action="agent-deploy-form">⇣ Un serveur</button><button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')+
  '<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2><span class="hint">'+state.agents.length+' agent(s)</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Plateforme</th><th>Groupe</th><th>État</th><th>Dernier contact</th><th></th></tr></thead><tbody>'+
  state.agents.map(a=>'<tr><td class="name-cell">'+e(a.name)+'<div class="muted tinytext">'+e(a.hostname||'Non enrôlé')+'</div></td><td>'+e(a.platform)+' · '+e(a.version||'—')+'</td><td>'+e(a.group_name)+'</td><td>'+labelStatus(a.status)+'</td><td>'+dt(a.last_seen)+'</td><td>'+(a.revoked?'—':'<button class="btn tiny danger" data-action="agent-revoke" data-id="'+a.id+'">Révoquer</button>')+'</td></tr>').join('')+
- '</tbody></table></div></div><div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2><button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button></div>${agentBatchPanel()}</div><div class="notice">Déploiement SSH : compte privilégié, clé d’hôte connue, AGENT_SERVER_URL HTTPS, ALLOW_AGENT_REMOTE_DEPLOY=true et liste AGENT_DEPLOY_ALLOWED_HOSTS. Les écritures sont désactivées par défaut. Linux utilise un compte non privilégié ; Windows utilise une tâche SYSTEM.</div>'}
+ '</tbody></table></div></div><div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2><button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button></div><div id="agentBatchList">'+agentBatchPanel()+'</div></div><div class="notice">Déploiement SSH : compte privilégié, clé d’hôte connue, AGENT_SERVER_URL HTTPS, ALLOW_AGENT_REMOTE_DEPLOY=true et liste AGENT_DEPLOY_ALLOWED_HOSTS. Les écritures sont désactivées par défaut. Linux utilise un compte non privilégié ; Windows utilise une tâche SYSTEM.</div>'}
 function agentDeployForm(){modal('Déployer un agent via SSH','<form id="agentDeployForm"><div class="form-grid">'+
  field('Nom de l’agent','name')+selectField('Système','platform',[['linux','Linux (Python 3 + systemd)'],['windows','Windows (PowerShell 5.1+)']],'linux')+
  field('Hôte / FQDN autorisé','host')+field('Port SSH','port',22,'number')+field('Groupe','group','default')+
  selectField('Compte SSH (coffre)','credential_id',[['','— Sélectionner une identité SSH —'],...state.credentials.filter(c=>c.kind==='ssh').map(c=>[c.id,c.name])],'')+
  '</div><div class="field checkbox"><input type="checkbox" name="approved" required><span>Je confirme l’installation d’un service ou d’une tâche planifiée sur cet hôte.</span></div><p class="hint">Le serveur doit joindre l’hôte par SSH et l’agent joindre OrigamiTasks par HTTPS.</p><button class="btn primary" type="submit">Déployer l’agent</button></form>', '', true)}
 
+let agentBatchPollTimer=null;
+function scheduleAgentBatchPoll(){
+ if(agentBatchPollTimer||state.page!=='agents'||!roleAdmin())return;
+ if(!(state.agentDeployBatches||[]).some(x=>x.status==='queued'||x.status==='running'))return;
+ agentBatchPollTimer=setTimeout(async()=>{
+  agentBatchPollTimer=null;
+  if(state.page!=='agents'||!roleAdmin())return;
+  try{
+   state.agentDeployBatches=(await api('/agents/deploy/batches')).items;
+   const panel=document.getElementById('agentBatchList');
+   if(panel)panel.innerHTML=agentBatchPanel();
+  }catch(ex){console.warn('Statut des déploiements agents non disponible',ex?.message)}
+  scheduleAgentBatchPoll();
+ },3500);
+}
 function agentBatchPanel(){
  const batches=state.agentDeployBatches||[];
  if(!batches.length)return '<p class="hint">Aucun déploiement groupé pour le moment.</p>';
@@ -805,7 +820,7 @@ async function saveEditor(){captureEditor();const j=state.editor;if(!j.name.trim
 async function runJob(id){try{const r=await api('/jobs/'+id+'/run','POST');toast('Exécution #'+r.run_id+' mise en file');await refresh();showPage('runs');await openRun(r.run_id)}catch(ex){toast(ex.message,false)}}
 async function openRun(id){try{const r=await api('/runs/'+id);state.selectedRun=r;modal('Exécution #'+r.id+' — '+e(r.job_name),`<div class="tool-row">${labelStatus(r.status)}<span class="hint">Déclenché par ${e(r.requested_by)} · ${dt(r.queued_at)}</span></div>${r.error?`<div class="notice error">${e(r.error)}</div>`:''}<h3>Résultats par étape</h3>${r.steps.map(s=>`<div class="step-log"><div class="step-header">${labelStatus(s.status)}<b>${e(s.name)}</b><span class="muted">${e(s.type)} · essai ${s.attempt} · code ${s.exit_code??'—'}</span></div><pre>${e(s.output||'(aucune sortie)')}</pre></div>`).join('')||'<p class="muted">Exécution en attente. Réactualisez dans quelques secondes.</p>'}`,`<button class="btn" data-action="run-detail" data-id="${id}">↻ Actualiser</button><button class="btn primary" data-action="modal-close">Fermer</button>`,true)}catch(ex){toast(ex.message,false)}}
 async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit')).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateVersionSummary').innerHTML=renderUpdateVersion(u);$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
-function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP()}
+function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP();if(state.page==='agents')scheduleAgentBatchPoll()}
 async function refresh(){await load();render()}
 async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='layer-close'){closeLayer(b.dataset.layer);return}
  if(a==='ssh-goto-inventory'){closeLayer('credentialTestLayer');closeLayer('credentialLayer');showPage('ssh-inventory');return}
