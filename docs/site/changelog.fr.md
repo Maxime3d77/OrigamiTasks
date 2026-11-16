@@ -1,5 +1,15 @@
 # Historique des modifications
 
+
+## 0.3.7-rc1 — 16 novembre 2026
+
+- **SSH :** import d'une clé privée utilisateur OpenSSH/PEM dans le coffre, erreurs différenciées (clé illisible, empreinte d'hôte inconnue avec SHA-256, hôte différent, authentification refusée, incompatibilité de protocole) ; aucune confiance automatique d'un hôte inconnu.
+- **LDAP :** dérogation explicite de certificat SSL/TLS via Administration → LDAP, conditionnée par ALLOW_INSECURE_LDAP_TLS=true sur l'hôte, désactivée par défaut et clairement signalée comme risquée. Import CA CRT/DER/PEM toujours recommandé.
+- **Mises à jour :** nouveau précontrôle sans installation depuis le navigateur, indicateur de présence du service de maintenance hôte, vérification Git/Docker Compose et données.
+- **GitHub :** workflow de release automatique sur tags de version vX.Y.Z ou vX.Y.Z-rcN, avec validation de version, CI, tests et documentation avant publication. Aucun tag ni release créé par simple commit.
+- **Confidentialité :** exemples de serveurs remplacés par des FQDN génériques, documentation sécurité EN/FR et tests de non-régression.
+
+
 ## 0.3.6-rc1 — 16 novembre 2026
 
 - **Test SSH** sur FQDN/port saisis manuellement, sans enregistrement préalable dans l’inventaire, avec vérification stricte de la clé d’hôte.
