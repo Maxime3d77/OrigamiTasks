@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS jobs (
  id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
  folder TEXT NOT NULL DEFAULT 'Général', tags_json TEXT NOT NULL DEFAULT '[]',
  acl_json TEXT NOT NULL DEFAULT '{}', steps_json TEXT NOT NULL DEFAULT '[]',
- schedule_json TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+ schedule_json TEXT NOT NULL DEFAULT '{}', notification_json TEXT NOT NULL DEFAULT '{}',
+ enabled INTEGER NOT NULL DEFAULT 1,
  next_run_at TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS workflow_folders (
@@ -98,7 +99,9 @@ CREATE TABLE IF NOT EXISTS datacenters (
 );
 CREATE TABLE IF NOT EXISTS runs (
  id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
- job_name TEXT NOT NULL, steps_snapshot TEXT NOT NULL, variables_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'queued',
+ job_name TEXT NOT NULL, steps_snapshot TEXT NOT NULL, variables_json TEXT NOT NULL DEFAULT '{}',
+ notification_json TEXT NOT NULL DEFAULT '{}', notification_status TEXT NOT NULL DEFAULT '',
+ notification_error TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued',
  trigger TEXT NOT NULL, requested_by TEXT NOT NULL, queued_at TEXT NOT NULL,
  started_at TEXT, finished_at TEXT, error TEXT NOT NULL DEFAULT ''
 );
@@ -157,6 +160,16 @@ def initialize():
     config.TRANSFER_ROOT.mkdir(parents=True, exist_ok=True)
     with session() as con:
         con.executescript(SCHEMA)
+        # Idempotent migration: preserve existing workflows and execution history.
+        for table, column, definition in (
+            ("jobs", "notification_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("runs", "notification_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("runs", "notification_status", "TEXT NOT NULL DEFAULT ''"),
+            ("runs", "notification_error", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
+            if column not in existing:
+                con.execute("ALTER TABLE "+table+" ADD COLUMN "+column+" "+definition)
         con.execute("INSERT OR IGNORE INTO workflow_folders (path,created_at) VALUES ('Général',?)", (now(),))
         # Never silently replay a claimed remote action after a server restart.
         con.execute("UPDATE agent_tasks SET status='interrupted', lease_hash=NULL WHERE status IN ('queued','claimed')")
