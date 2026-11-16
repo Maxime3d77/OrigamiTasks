@@ -62,7 +62,11 @@ def normalize(kind, updates, previous=None, *, is_new=False):
         if values.get('host'):
             values['host'] = safe_host(values.get('host'))
         defaults = {'smtp': 587, 'ftp': 21, 'ssh': 22}
-        values.setdefault('port', defaults[kind])
+        if kind != 'ssh' or values.get('host'):
+            values.setdefault('port', defaults[kind])
+    if kind == 'ssh' and is_new:
+        if not values.get('username') or not (values.get('password') or values.get('private_key')):
+            raise ConnectionError('Identité SSH : login et mot de passe ou clé privée obligatoires')
     if kind == 'smtp':
         values.setdefault('tls_mode', 'starttls')
         if values['tls_mode'] not in ('ssl', 'starttls', 'none'):
