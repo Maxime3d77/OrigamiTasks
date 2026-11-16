@@ -24,7 +24,7 @@ LDAP/AD administration settings are encrypted in SQLite; service-account passwor
 
 LDAP/AD settings saved via the admin UI are encrypted in SQLite. LDAP tests perform read-only bind/search operations and never return service credentials. SMTP tests do not send mail, verify TLS certificates and reject authentication without TLS. Only administrators can run connection tests; enforce network egress restrictions.
 
-Credential tests are administrator-only and audited. They never execute SSH commands, transfer files, send mail or modify directory objects. FTP without TLS does not transmit credentials. Generic API diagnostics require an explicit allow-list (`CONNECTION_TEST_ALLOWED_HOSTS`) and use GET only, without following redirects. A successful HTTP status is not a universal proof of token validity. Network egress restrictions are still necessary.
+Credential tests are administrator-only and audited. **By default**, they do not execute remote commands or send messages. Explicit opt-in allows a real SMTP email, a Matrix room message, or only the fixed read-only `whoami` command over SSH. No file transfers or directory modifications are performed. Message sending is limited to one destination and throttled to once per 30 seconds per profile; SMTP acceptance is not delivery proof. FTP without TLS does not transmit credentials. Generic API diagnostics require an explicit allow-list (`CONNECTION_TEST_ALLOWED_HOSTS`) and use GET only, without following redirects. A successful HTTP status is not a universal proof of token validity. Network egress restrictions are still necessary.
 
 ## Recommended deployment controls
 
