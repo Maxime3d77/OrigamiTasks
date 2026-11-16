@@ -482,7 +482,7 @@ def get_admin_ldap(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
         saved=con.execute('SELECT 1 FROM ldap_settings WHERE id=1').fetchone() is not None
-    return dict(ldap_settings.public(), source='administration' if saved else '.env')
+    return dict(ldap_settings.public(), source='administration' if saved else '.env', insecure_tls_allowed=config.ALLOW_INSECURE_LDAP_TLS)
 
 
 @app.put('/api/admin/ldap')
