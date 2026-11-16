@@ -2,6 +2,15 @@
 
 ## 0.3.2-rc1 — 16 novembre 2026
 
+- Menu **Administration → LDAP / Active Directory** : configuration persistante chiffrée, TLS, DN, attributs de login et groupes de rôles ; test en lecture seule.
+- Connexions du coffre-fort avec formulaires spécifiques au protocole (SMTP, SSH/SFTP, FTP/FTPS, LDAP, API, Matrix, Proxmox).
+- SMTP : hôte, port, STARTTLS/SSL, authentification facultative, expéditeur par défaut, test de connexion sans envoi.
+- Les tâches e-mail récupèrent les paramètres SMTP du coffre ; les secrets existants restent compatibles.
+- Nouveaux tests automatisés et documentation EN/FR actualisée.
+
+
+## 0.3.2-rc1 — 16 novembre 2026
+
 - Ajout du menu **Administration → LDAP / Active Directory** : configuration persistante chiffrée, URI/port, TLS, bases DN, attribut de connexion, groupes de rôles et test en lecture seule.
 - Gestion des connexions propre au protocole : SMTP, SSH/SFTP, FTP/FTPS, LDAP, API, Matrix, Proxmox, générique.
 - SMTP : hôte/port, SSL ou STARTTLS, relais sans authentification, identifiants facultatifs, expéditeur par défaut et bouton de test sans envoi d'e-mail.
