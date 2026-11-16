@@ -288,7 +288,7 @@ def ldap(values, options=None):
         raise ConnectionTestError("LDAP : DN et mot de passe de liaison obligatoires")
     try:
         settings=ldap_settings.current()
-        server = Server(uri, tls=ldap_settings.tls_for(settings),
+        server = Server(uri, tls=ldap_settings.tls_for(settings,uri=uri),
                         connect_timeout=TIMEOUT)
         conn = Connection(server, user=username, password=password,
                           receive_timeout=TIMEOUT, auto_bind=not starttls)
