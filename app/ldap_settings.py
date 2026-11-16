@@ -153,14 +153,16 @@ def check_settings(data):
     return data
 
 
-def tls_for(settings):
-    """Create LDAP TLS policy. Insecure exception requires env gate AND saved opt-in.
+def tls_for(settings, uri=None):
+    """LDAP TLS: saved override is limited to its exact configured LDAP URI.
 
-    Encryption remains mandatory: this only disables chain/hostname checking.
-    Never silently downgrade or bypass verification in other integrations.
+    No certificate checking bypass is inherited by other vault directory URLs
+    or a workflow with a different LDAP server.
     """
     from ldap3 import Tls
-    insecure=bool(settings.get('skip_cert_verification'))
+    saved_uri=str(settings.get('uri') or '').rstrip('/').lower()
+    selected_uri=str(uri or settings.get('uri') or '').rstrip('/').lower()
+    insecure=bool(settings.get('skip_cert_verification')) and selected_uri==saved_uri
     if insecure and not config.ALLOW_INSECURE_LDAP_TLS:
         raise LDAPSettingsError(
             'Exception TLS non autorisée : ALLOW_INSECURE_LDAP_TLS=false'
