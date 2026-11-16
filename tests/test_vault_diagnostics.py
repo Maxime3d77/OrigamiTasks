@@ -143,7 +143,8 @@ def test_ldap_bind_uses_ldaps_certificate_and_base_search(monkeypatch):
     import ldap3
     events=[]
     class FakeConnection:
-        def __init__(self,server,user,password,receive_timeout,auto_bind):
+        def __init__(self,server,user,password,receive_timeout,auto_bind,check_names=False):
+                assert check_names is False
             assert auto_bind and user=="cn=read,dc=example,dc=org"
             events.append("bind")
         def search(self,base,filter,scope,attributes,size_limit):
