@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.2-rc2 — 16 novembre 2026
+
+- Bouton **Tester** sur toutes les connexions du coffre avec fenêtre de diagnostic détaillée et contrôles non effectués clairement identifiés.
+- SSH : clé d’hôte vérifiée et authentification sans commande ; FTPS : TLS et authentification sans transfert ; FTP clair : connectivité uniquement, aucun mot de passe transmis.
+- LDAP : TLS, bind, lecture facultative ; Matrix : `whoami` ; Proxmox : lecture des permissions. API HTTPS générique : GET autorisé uniquement et avertissement si l’identité du jeton ne peut pas être prouvée.
+- Liste `CONNECTION_TEST_ALLOWED_HOSTS` pour les tests d’API génériques ; tests automatisés supplémentaires et documentation EN/FR.
+
+
 ## 0.3.2-rc1 — 16 novembre 2026
 
 - Menu **Administration → LDAP / Active Directory** : configuration persistante chiffrée, TLS, DN, attributs de login et groupes de rôles ; test en lecture seule.
