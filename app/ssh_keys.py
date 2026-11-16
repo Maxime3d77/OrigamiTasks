@@ -80,3 +80,23 @@ def strict_host_key_policy():
                 "avant de l'autoriser. Aucune clé n'a été acceptée automatiquement."
             )
     return RejectWithFingerprint()
+
+def configured_host_key_policy():
+    """Use strict checking or persistent automatic trust-on-first-use."""
+    import paramiko
+    from . import config, host_keys
+    if config.SSH_HOST_KEY_POLICY == "strict":
+        return strict_host_key_policy()
+    if config.SSH_HOST_KEY_POLICY != "accept-new":
+        raise SSHKeyError("SSH_HOST_KEY_POLICY doit être 'accept-new' ou 'strict'")
+
+    class PersistentAcceptNewPolicy(paramiko.MissingHostKeyPolicy):
+        def missing_host_key(self, client, hostname, key):
+            try:
+                created = host_keys.accept_new(hostname, key)
+            except host_keys.HostKeyError as exc:
+                raise SSHUnknownHostKey(str(exc)) from None
+            client._origami_added_host_key = bool(created)
+            client.get_host_keys().add(hostname, key.get_name(), key)
+
+    return PersistentAcceptNewPolicy()
