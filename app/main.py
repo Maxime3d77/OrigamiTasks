@@ -903,6 +903,8 @@ def test_credential(credential_id:int,request:Request,payload:dict[str,Any]|None
             if manual_host is not None or manual_port is not None:
                 if not isinstance(manual_host,str):
                     raise connection_tests.ConnectionTestError('Saisir un FQDN SSH pour le test manuel')
+                if manual_port is None:
+                    manual_port=22
                 if not isinstance(manual_port,(int,str)) or isinstance(manual_port,bool):
                     raise connection_tests.ConnectionTestError('Port SSH manuel invalide')
                 values.update(host=ssh_inventory.fqdn(manual_host),port=ssh_inventory.port(manual_port))
