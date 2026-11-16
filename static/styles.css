@@ -186,3 +186,22 @@
 .agent-batch-host small{flex-basis:100%;line-height:1.4}
 #agentBulkDeployForm .field textarea{max-width:100%;min-height:190px}
 @media(max-width:730px){.version-comparison{grid-template-columns:1fr}.agent-batch summary{flex-direction:column;align-items:flex-start}.agent-batch summary span{text-align:left}}
+
+/* 0.3.6: readable, navigable workflow graph at any number of steps */
+.graph-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 0 6px}
+.graph-toolbar .btn{min-height:30px;padding:6px 10px;white-space:nowrap}
+.graph-toolbar output{display:inline-flex;align-items:center;justify-content:center;min-width:52px;padding:5px 6px;border-radius:7px;border:1px solid var(--stroke);color:var(--text);background:var(--panel);font-size:12px;font-variant-numeric:tabular-nums}
+.graph-help{color:var(--muted);font-size:11px;margin:2px 0 6px}
+.graph-surface{height:clamp(330px,55vh,620px);min-height:330px;max-height:620px;overflow:auto;overscroll-behavior:contain;touch-action:pan-x pan-y;cursor:grab;position:relative}
+.graph-surface.graph-panning{cursor:grabbing;user-select:none}
+.graph-surface svg.workflow-svg{display:block;min-width:0!important;max-width:none!important;flex:none}
+.graph-surface .step-node{cursor:pointer}
+.ssh-test-mode[hidden]{display:none!important}
+.ssh-test-mode{width:100%;min-width:0}
+.ssh-test-mode .form-grid{grid-template-columns:minmax(0,1fr) minmax(105px,.35fr)}
+@media(max-width:680px){
+ .graph-toolbar{gap:4px}
+ .graph-toolbar .btn{padding:6px 8px;font-size:11px}
+ .graph-surface{height:50vh;min-height:290px;max-height:none}
+ .ssh-test-mode .form-grid{grid-template-columns:minmax(0,1fr)}
+}
