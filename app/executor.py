@@ -194,7 +194,7 @@ def execute(step, ctx):
         code = 0
     elif typ == 'matrix':
         try:
-            output = integrations.matrix_message(opts,cred,ctx['run_id'],step['id'],timeout)
+            output = integrations.matrix_message(dict(opts,homeserver=opts.get('homeserver') or cred.get('homeserver')),cred,ctx['run_id'],step['id'],timeout)
         except (integrations.IntegrationError,httpx.HTTPError,ValueError) as exc:
             raise StepError('Matrix : '+type(exc).__name__+' (vérifier URL, accès room et coffre)')
         code = 0
@@ -225,7 +225,7 @@ def execute(step, ctx):
             headers['Authorization'] = 'Bearer ' + cred['token']
         try:
             with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-                r = client.request(opts.get('method', 'GET').upper(), opts['url'],
+                r = client.request(opts.get('method', 'GET').upper(), opts.get('url') or cred.get('base_url') or '',
                                    headers=headers, content=opts.get('body') or None)
             code = 0 if 200 <= r.status_code < 400 else 1
             output = f'HTTP {r.status_code}\n{r.text[:config.MAX_LOG_BYTES]}'
