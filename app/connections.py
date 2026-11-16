@@ -10,7 +10,7 @@ KIND_FIELDS = {
     'smtp': {'host', 'port', 'tls_mode', 'auth', 'from_address', 'username', 'password'},
     'ssh': {'host', 'port', 'username', 'password', 'private_key', 'passphrase'},
     'ftp': {'host', 'port', 'tls_mode', 'username', 'password'},
-    'api': {'base_url', 'username', 'password', 'token'},
+    'api': {'base_url', 'test_path', 'username', 'password', 'token'},
     'ldap': {'uri', 'starttls', 'base_dn', 'group_base_dn', 'username', 'password'},
     'matrix': {'homeserver', 'username', 'token'},
     'proxmox': {'url', 'username', 'token'},
@@ -18,7 +18,7 @@ KIND_FIELDS = {
 }
 PUBLIC_KEYS = {'host', 'port', 'tls_mode', 'auth', 'from_address', 'username',
                'base_url', 'uri', 'starttls', 'base_dn', 'group_base_dn',
-               'homeserver', 'url'}
+               'homeserver', 'url', 'test_path'}
 
 
 class ConnectionError(Exception):
