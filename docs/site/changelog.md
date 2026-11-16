@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1-rc1 — 2026-11-16
+
+- Fixed ignored sidebar clicks (`data-page` buttons now reach delegated navigation).
+- Replaced sidebar glyphs with consistent SVG icons and refined responsive editor layout.
+- Added persistent nested workflow folders with create/rename/delete (without deleting jobs), filtering and assignment.
+- Added graphical once-only and repeating minute/hour/day/week schedules alongside advanced cron.
+- Added searchable LDAP/AD group selector and OpenLDAP `posixGroup/memberUid` and `groupOfNames/member` resolution.
+- Added credential vault search/select/create/edit/clone/protected-delete flows inside task configuration.
+- Added regression tests and bilingual documentation; real-browser and real-directory acceptance is still required.
+
+
 ## 0.3.0-rc1 — 2026-11-15
 
 - Restored the original official logo in README and bilingual documentation.

@@ -1,5 +1,16 @@
 # Historique des modifications
 
+## 0.3.1-rc1 — 16 novembre 2026
+
+- Correction du menu latéral inopérant : les boutons `data-page` sont maintenant gérés.
+- Icônes SVG cohérentes et ergonomie responsive de l'éditeur.
+- Arborescence de dossiers persistante : création, renommage, suppression sans perte de workflows, filtrage et sélection.
+- Planification graphique « une seule fois » et « répéter toutes les N minutes/heures/jours/semaines », avec maintien du cron avancé.
+- Sélection des groupes existants LDAP/AD via recherche ; compatibilité OpenLDAP `posixGroup/memberUid` et `groupOfNames/member`.
+- Coffre depuis les blocs de tâches : recherche, sélection, création, édition sans réexposition, clonage et suppression protégée.
+- Tests de non-régression, documentation EN/FR. La recette navigateur et LDAP réels reste nécessaire.
+
+
 ## 0.3.0-rc1 — 15 novembre 2026
 
 - Logo officiel d'origine rétabli dans README et la documentation bilingue.

@@ -18,6 +18,8 @@ OrigamiTasks is an **automation control plane**. Running a script is a powerful 
 - Proxmox VM power actions are off by default and are not a substitute for safe DR fencing.
 - Backup/restore and upgrade rollback must be tested before production.
 
+Credential editing and cloning are server-side operations: existing secret values never return to the browser. Credentials referenced by a task or datacenter cannot be deleted. Creating credentials from a workflow step still encrypts them in the vault and stores only the credential ID in the workflow.
+
 ## Recommended deployment controls
 
 Dedicated management VLAN, upstream allow-lists, no Docker socket mounts, TLS termination, mandatory code review, restricted SSH principals, no administrator/root service account for routine jobs, protected Git branch, audited production updates, secrets rotation and immutable external audit log.

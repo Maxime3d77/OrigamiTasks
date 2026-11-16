@@ -18,7 +18,7 @@ Le fichier `.env.example` constitue la liste de référence des paramètres. Red
 
 ## LDAP / Active Directory
 
-Utiliser LDAPS (`ldaps://dc.example.org:636`) ou LDAP+STARTTLS ; éviter LDAP clair sur un réseau non fiable. Le compte de liaison doit être en lecture seule. Paramètres : `LDAP_URI`, `LDAP_BASE_DN`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_USER_ATTRIBUTE`, `LDAP_GROUP_BASE_DN`, groupes et `LDAP_CA_CERT` facultatif. Pour les groupes AD imbriqués, activer `LDAP_NESTED_GROUPS=true` et tester les comptes réels. Voir [Sécurité](security.md).
+Utiliser LDAPS (`ldaps://dc.example.org:636`) ou LDAP+STARTTLS ; éviter LDAP clair sur un réseau non fiable. Le compte de liaison doit être en lecture seule. Paramètres : `LDAP_URI`, `LDAP_BASE_DN`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_USER_ATTRIBUTE`, `LDAP_GROUP_BASE_DN`, groupes et `LDAP_CA_CERT` facultatif. Pour OpenLDAP, utiliser généralement `LDAP_USER_ATTRIBUTE=uid` (et non `sAMAccountName`) ; les groupes `posixGroup/memberUid` et `groupOfNames/member` sont recherchés sous `LDAP_GROUP_BASE_DN`. La fenêtre de sélection des ACL nécessite la lecture de ces groupes. Pour les groupes AD imbriqués, activer `LDAP_NESTED_GROUPS=true` et tester les comptes réels. Voir [Sécurité](security.md).
 
 ## Identifiants
 

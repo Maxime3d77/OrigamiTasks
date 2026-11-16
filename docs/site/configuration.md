@@ -18,7 +18,7 @@ The `.env.example` file is the normative list of settings. Restart the container
 
 ## LDAP / Active Directory
 
-Use LDAPS (`ldaps://dc.example.org:636`) or LDAP+STARTTLS; never use plain LDAP on untrusted networks. Bind account must be read-only. Configure `LDAP_URI`, `LDAP_BASE_DN`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_USER_ATTRIBUTE`, `LDAP_GROUP_BASE_DN`, group names and optional `LDAP_CA_CERT`. For nested AD groups, set `LDAP_NESTED_GROUPS=true` and test memberships with actual users. See [Security](security.md).
+Use LDAPS (`ldaps://dc.example.org:636`) or LDAP+STARTTLS; never use plain LDAP on untrusted networks. Bind account must be read-only. Configure `LDAP_URI`, `LDAP_BASE_DN`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_USER_ATTRIBUTE`, `LDAP_GROUP_BASE_DN`, group names and optional `LDAP_CA_CERT`. For OpenLDAP, `LDAP_USER_ATTRIBUTE=uid` is typically correct (not `sAMAccountName`); `posixGroup/memberUid` and `groupOfNames/member` memberships are resolved under `LDAP_GROUP_BASE_DN`. The ACL picker requires read access to the group subtree. For nested AD groups, set `LDAP_NESTED_GROUPS=true` and test memberships with actual users. See [Security](security.md).
 
 ## Credentials
 

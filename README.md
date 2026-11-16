@@ -6,7 +6,7 @@
 
 **OrigamiTasks** is an open-source, self-hosted Linux workflow scheduler and automation control plane with an editable web UI, a credential vault, LDAP role mapping, and remote integrations. Inspired by the **workflow concepts** of VisualCron, it is an independent implementation, not a compatible VisualCron clone.
 
-> **Pre-production v0.3.0-rc1.** Production deployment requires integration/security review. **Not all VisualCron features are implemented**; signed native agent binaries and cross-cluster real-time replication are not available yet.
+> **Pre-production v0.3.1-rc1.** Production deployment requires integration/security review. **Not all VisualCron features are implemented**; signed native agent binaries and cross-cluster real-time replication are not available yet.
 
 ![OrigamiTasks dark dashboard](docs/screenshots/dashboard-dark.png)
 
@@ -45,12 +45,12 @@ See `mkdocs.yml` for navigation, languages, search, and theme. Do not confuse do
 
 ## Implemented today
 
-- Browser dashboard, search, folders/tags, three visual themes (melon-yellow/anthracite, white/melon and cyberpunk purple/neon).
-- Workflow graph with sequential success/failure branches, condition sets, variables, retries, timeouts, manual/cron/webhook triggers and run history/audit.
+- Browser dashboard, searchable nested folder tree with CRUD, tags, accessible SVG navigation icons, three visual themes (melon-yellow/anthracite, white/melon and cyberpunk purple/neon).
+- Workflow graph with sequential success/failure branches, condition sets, variables, retries, timeouts, manual/once/interval/cron/webhook triggers and run history/audit.
 - Remote Linux Bash / Windows PowerShell through SSH; optional local scripts **disabled by default**.
 - FTPS/SFTP transfer, SMTP with HTML/attachments, HTTP, file operations restricted to transfer storage, Matrix room messages, Ansible playbooks via a dedicated SSH runner.
 - Proxmox inventory/discovery across independently configured clusters, **read-only DR/storage assessment**, explicitly gated power actions.
-- Fernet-encrypted credential vault, LDAPS/STARTTLS with group access control, admin/operator/viewer job ACLs, host-side Git updater.
+- Fernet-encrypted credential vault with in-task picker/create/edit/clone, searchable LDAP groups, LDAPS/STARTTLS with group access control, admin/operator/viewer job ACLs, host-side Git updater.
 - Preview Linux (Python) and Windows (PowerShell) HTTPS polling agents; SSH deployment from the UI and single-use enrollment.
 - Directory workflow actions for LDAP and Active Directory search, user creation, groups, account state and password resets, with opt-in write gates.
 
