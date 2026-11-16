@@ -5,6 +5,8 @@ entered in the account vault. Public keys belong in remote authorized_keys.
 """
 import io
 import re
+import hashlib
+import base64
 
 
 class SSHKeyError(ValueError):
@@ -56,3 +58,25 @@ def load_private_key(private_key, passphrase=None):
         "Clé privée illisible : vérifier la copie complète, l'algorithme et la phrase secrète. "
         "La clé du compte ne doit pas être une clé d'hôte ssh_host_*"
     )
+
+
+class SSHUnknownHostKey(Exception):
+    """The remote host key was presented but has no trusted known_hosts entry."""
+    pass
+
+
+def strict_host_key_policy():
+    """Reject first use and report the offered public host fingerprint (not secret)."""
+    import paramiko
+    class RejectWithFingerprint(paramiko.MissingHostKeyPolicy):
+        def missing_host_key(self, client, hostname, key):
+            fp="SHA256:"+base64.b64encode(
+                hashlib.sha256(key.asbytes()).digest()
+            ).decode("ascii").rstrip("=")
+            raise SSHUnknownHostKey(
+                "Clé d'hôte SSH inconnue dans known_hosts. "
+                "Empreinte présentée par le serveur ("+key.get_name()+") : "+fp+
+                ". Comparer cette empreinte à celle obtenue directement sur le serveur "
+                "avant de l'autoriser. Aucune clé n'a été acceptée automatiquement."
+            )
+    return RejectWithFingerprint()
