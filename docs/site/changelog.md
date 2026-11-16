@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.10-rc1 — 2026-11-16
+
+- **Proxmox:** register and manage datacenters and API tokens in the web UI without `PROXMOX_ALLOWED_HOSTS` in `.env`; searchable datacenter list, ensure vault token and DC URL match, actionable HTTP 401/403/TLS/network diagnostics.
+- **LDAP:** accept standard OpenSSL PEM certificate exports with Bag Attributes/friendlyName/subject/issuer metadata; reject arbitrary content and private keys.
+- **Email:** per-workflow HTML/plaintext completion reports with SUCCESS/FAILURE subject, encrypted SMTP vault profile, conditional sends, per-step results and redacted error excerpts; delivery status retained.
+- **Reliability:** backward-compatible SQLite migrations, regression tests, bilingual documentation.
+
 ## 0.3.9-rc1 — 2026-11-16
 
 - **SSH:** the default host-key policy is now persistent trust-on-first-use (`SSH_HOST_KEY_POLICY=accept-new`): new public host keys are stored automatically; changed keys are blocked. `strict` remains available for manual approval.
