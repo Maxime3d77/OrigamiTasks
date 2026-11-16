@@ -227,3 +227,62 @@ def test_test_option_validation_never_accepts_unknown_keys_or_unconfirmed_side_e
         t.run("smtp",{"host":"smtp.example.org"},{"password":"leak"})
     with pytest.raises(t.ConnectionTestError,match="invalide"):
         t.run("smtp",{"host":"smtp.example.org"},{"send_email":"true"})
+
+
+def test_api_smtp_wizard_send_receipt_reference_and_audit(monkeypatch):
+    """The real HTTP flow must send via the vault, require CSRF/confirmation and avoid logging PII."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app import db
+
+    captured=[]
+    class FakeSMTP:
+        def send_message(self,msg,from_addr,to_addrs):
+            captured.append((msg,to_addrs))
+            return {}
+        def quit(self):pass
+        def close(self):pass
+    monkeypatch.setattr(connections,"open_smtp",lambda values,timeout:FakeSMTP())
+    with TestClient(app) as c:
+        login=c.post("/api/login",json={
+            "username":"admin","password":"test-admin-password-over-12"})
+        assert login.status_code==200
+        headers={"X-CSRF-Token":c.cookies["origami_csrf"]}
+        created=c.post("/api/credentials",headers=headers,json={
+            "name":"CI wizard mail delivery","kind":"smtp","payload":{
+                "host":"smtp.example.org","port":587,"tls_mode":"starttls",
+                "auth":False,"from_address":"noreply@example.org"
+            }})
+        assert created.status_code==200,created.text
+        cid=created.json()["id"]
+        path=f"/api/credentials/{cid}/test"
+        options={"send_email":True,"confirm_send":True,
+                 "recipient":"alice@example.org","subject":"Test","message":"Bonjour"}
+        try:
+            no_csrf=c.post(path,json={"options":options})
+            assert no_csrf.status_code==403
+            no_confirmation=c.post(path,headers=headers,json={
+                "options":dict(options,confirm_send=False)})
+            assert no_confirmation.status_code==422
+            assert captured==[]
+            response=c.post(path,headers=headers,json={"options":options})
+            assert response.status_code==200,response.text
+            result=response.json()
+            assert result["reference"].startswith("<")
+            assert result["elapsed_ms"] >= 0
+            assert len(captured)==1
+            assert captured[0][1]==["alice@example.org"]
+            assert any(x["status"]=="not_tested" and x["name"]=="Réception en boîte"
+                       for x in result["checks"])
+            with db.session() as con:
+                rows=con.execute(
+                    "SELECT action,target,detail FROM audit WHERE target=? AND action LIKE 'vault.test.send%'",
+                    (str(cid),)).fetchall()
+            assert any(x["action"]=="vault.test.send.attempt" for x in rows)
+            assert any(x["action"]=="vault.test.send" for x in rows)
+            for row in rows:
+                assert "alice@example.org" not in str(dict(row))
+                assert "Bonjour" not in str(dict(row))
+        finally:
+            t._LAST_MAIL_SEND.pop(cid,None)
+            assert c.delete(f"/api/credentials/{cid}",headers=headers).status_code==200
