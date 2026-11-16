@@ -1,5 +1,11 @@
 # Workflows et planification
 
+### Rapports de fin de workflow par e-mail HTML
+
+Dans l'éditeur d'un workflow (administrateur), section **Rapport e-mail HTML du workflow**, choisir une **connexion SMTP du coffre**, jusqu'à **5 adresses destinataires** et les événements à notifier (**réussite**, **échec** ou les deux). Les envois sont réalisés automatiquement après la fin d'une exécution manuelle, planifiée ou webhook.
+
+L'objet indique `[OrigamiTasks] [SUCCÈS]` ou `[OrigamiTasks] [ÉCHEC]`, le nom du workflow et le numéro de l'exécution. Le mail HTML comporte le résultat, le demandeur, la date UTC et le tableau des étapes, codes de retour, tentatives et extraits d'erreur. Les secrets connus du coffre sont masqués. L'historique complet reste dans **Exécutions** ; l'échec SMTP n'altère jamais le résultat du workflow. Les opérateurs ne peuvent pas réattribuer un SMTP du coffre.
+
 ### Zoom et navigation dans le graphe
 
 L’éditeur de workflows dispose des contrôles **−**, **＋**, **100 %**, **Adapter largeur** et **Vue globale**. Il est possible de zoomer de 8 à 250 % avec les boutons ou **Ctrl + molette**. Glisser le **fond du graphe** déplace la vue horizontalement et verticalement ; les clics sur les étapes les sélectionnent toujours. La position et le niveau de zoom sont conservés lors du passage d’une étape à une autre dans le même workflow. La zone du graphe est limitée en hauteur pour ne pas étendre toute la fenêtre.
