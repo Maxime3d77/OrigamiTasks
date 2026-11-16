@@ -139,9 +139,11 @@ def test_smtp(values):
     try:
         conn=open_smtp(values,timeout=8)
         try:
-            return {'ok':True,'message':'Connexion SMTP, sécurité et authentification vérifiées. Aucun e-mail envoyé.',
-                    'tls_mode':values.get('tls_mode','starttls'),
-                    'authenticated':bool(values.get('auth',bool(values.get('username'))))}
+            authenticated=bool(values.get('auth',bool(values.get('username'))))
+            message=('Connexion SMTP, TLS et authentification validés. Aucun e-mail envoyé.'
+                     if authenticated else 'Connexion SMTP et mode de transport validés, sans authentification. Aucun e-mail envoyé.')
+            return {'ok':True,'message':message,'tls_mode':values.get('tls_mode','starttls'),
+                    'authenticated':authenticated}
         finally:
             try:
                 conn.quit()
