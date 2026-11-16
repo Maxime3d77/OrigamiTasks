@@ -87,3 +87,16 @@ Allow outbound traffic only to explicit integration endpoints (Matrix HTTPS, Pro
 | `ALLOW_DIRECTORY_WRITES` | LDAP/AD changes (false) |
 
 For setup and safety, refer to [Agents](agents.md) and [Tasks](tasks.md).
+
+
+## Importing an LDAP TLS CA certificate
+
+Open **Administration → LDAP / Active Directory**, select **Import CA** and upload the public PEM certificate(s) for the authority that signed your LDAP server certificate (`.crt` / `.pem`, up to 128 KiB). The validated PEM bundle is stored in the persistent `/app/data/ldap-cas` directory and its path is inserted into **TLS CA path**. **Save settings**, then **Test LDAP connection**.
+
+LDAPS:636 with strict TLS certificate verification is preferred; LDAP:389 with verified STARTTLS is also supported. There is **no skip-certificate switch** because it would expose LDAP service-account credentials to interception. If your LDAP endpoint has a self-signed chain, import the corresponding trusted **CA certificate**, not a private key, and verify the server certificate's DNS SAN matches the FQDN.
+
+## Installed and available versions
+
+The **Updates** screen compares the running container `APP_VERSION` with the version stored in the latest commit on the pinned `GIT_BRANCH` from the trusted `GIT_ALLOWED_ORIGIN`. The separate host-side `ops/update-worker.py` checks once on start and at most hourly, reporting installed/latest version, **latest commit date** (not necessarily a release date), commit count behind and last checked time.
+
+`GIT_ALLOWED_ORIGIN` must match exactly `git remote get-url origin`. When deploying a recipe branch, set `GIT_BRANCH` accordingly. If the trusted origin is not configured, the worker is missing, or the local commit does not fast-forward to the tracked branch, the UI reports **Check unavailable**, never a false up-to-date status. Applying updates always requires explicit administrator approval.
