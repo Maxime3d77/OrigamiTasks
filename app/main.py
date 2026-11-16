@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory
 
 
 @asynccontextmanager
@@ -185,6 +185,11 @@ def validate_job(payload):
             raise HTTPException(422,'Type d’étape inconnu')
         if not isinstance(step.get('config'),dict) or len(json.dumps(step['config']))>50_000:
             raise HTTPException(422,'Configuration d’étape invalide')
+        if step.get('type') in ('ssh','sftp','ansible') and step['config'].get('ssh_server_id'):
+            try:
+                ssh_inventory.server(step['config']['ssh_server_id'])
+            except ssh_inventory.InventoryError as exc:
+                raise HTTPException(422,str(exc)) from None
         if not 1 <= len(str(step.get('name',''))) <= 120:
             raise HTTPException(422,'Nom d’étape invalide')
         if int(step.get('retries',0)) not in range(0,6):
@@ -656,6 +661,80 @@ def summary(request:Request):
             'failed':sum(x['status'] in ('failed','interrupted') for x in records[:100])}
 
 
+
+# SSH inventory is separate from the encrypted login/key vault.
+@app.get('/api/ssh/inventory')
+def get_ssh_inventory(request:Request):
+    security.require(request,role='admin')
+    return ssh_inventory.inventory()
+
+
+@app.post('/api/ssh/groups')
+def add_ssh_group(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        gid=ssh_inventory.create_group(payload)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.group.create',gid,str(payload.get('name',''))[:80])
+    return {'id':gid}
+
+
+@app.put('/api/ssh/groups/{group_id}')
+def edit_ssh_group(group_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        ssh_inventory.update_group(group_id,payload)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.group.update',group_id,str(payload.get('name',''))[:80])
+    return {'ok':True}
+
+
+@app.delete('/api/ssh/groups/{group_id}')
+def remove_ssh_group(group_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        ssh_inventory.delete_group(group_id)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(404,str(exc)) from None
+    db.audit(user['username'],'ssh.group.delete',group_id,'Serveurs conservés')
+    return {'ok':True}
+
+
+@app.post('/api/ssh/servers')
+def add_ssh_server(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        sid=ssh_inventory.create_server(payload)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.server.create',sid,str(payload.get('fqdn',''))[:150])
+    return {'id':sid}
+
+
+@app.put('/api/ssh/servers/{server_id}')
+def edit_ssh_server(server_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        ssh_inventory.update_server(server_id,payload)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.server.update',server_id,'Configuration serveur')
+    return {'ok':True}
+
+
+@app.delete('/api/ssh/servers/{server_id}')
+def remove_ssh_server(server_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        ssh_inventory.delete_server(server_id)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(409,str(exc)) from None
+    db.audit(user['username'],'ssh.server.delete',server_id,'Entrée retirée de l’inventaire')
+    return {'ok':True}
+
+
 @app.get('/api/credentials')
 def list_credentials(request:Request):
     security.require(request,role='admin')
@@ -743,8 +822,20 @@ def test_credential(credential_id:int,request:Request,payload:dict[str,Any]|None
         db.audit(user['username'],'vault.test.send.attempt',credential_id,row['kind'])
     started=time.monotonic()
     try:
-        result=connection_tests.run(row['kind'],security.decrypt(row['encrypted_payload']),
+        values=security.decrypt(row['encrypted_payload'])
+        if row['kind']=='ssh':
+            target_id=options.get('server_id')
+            if target_id:
+                target=ssh_inventory.server(target_id)
+                values.update(host=target['fqdn'],port=target['port'])
+                options={k:v for k,v in options.items() if k!='server_id'}
+            elif not values.get('host'):
+                raise connection_tests.ConnectionTestError('Sélectionner un serveur de l’inventaire pour tester cette identité SSH')
+        result=connection_tests.run(row['kind'],values,
                                     options=options,credential_id=credential_id)
+    except ssh_inventory.InventoryError as exc:
+        db.audit(user['username'],action+'.failed',credential_id,'ssh target')
+        raise HTTPException(422,str(exc)) from None
     except connection_tests.ConnectionTestError as exc:
         db.audit(user['username'],action+'.failed',credential_id,row['kind'])
         raise HTTPException(422,str(exc)) from None
