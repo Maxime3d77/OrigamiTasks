@@ -39,7 +39,7 @@ Create **protocol-specific vault profiles** for SMTP (server, port, STARTTLS / i
 
 ### Test SSH credentials against a temporary manual host
 
-In **Vault → SSH identity → Test**, select **Manual FQDN**, enter a server hostname (such as `vl-exploittools-01.infra.aday.fr`) and SSH port (22 by default). The vault private key or password is tested against the specified host, without creating an inventory entry or modifying the identity. **Inventory SSH** and **Legacy host** are still available. SSH host-key pinning through `SSH_KNOWN_HOSTS` remains mandatory.
+In **Vault → SSH identity → Test**, select **Manual FQDN**, enter a server hostname (such as `serveur.fr`) and SSH port (22 by default). The vault private key or password is tested against the specified host, without creating an inventory entry or modifying the identity. **Inventory SSH** and **Legacy host** are still available. SSH host-key pinning through `SSH_KNOWN_HOSTS` remains mandatory.
 
 ### LDAP public CA certificates in CRT, DER, or PEM
 
