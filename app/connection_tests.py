@@ -403,54 +403,86 @@ def matrix(values, options=None, credential_id=None):
     return ok("matrix", "Jeton Matrix validé ; tests demandés effectués.", checks)
 
 
-def proxmox(values):
-    """Read-only access/permissions route: validates token without VM actions."""
+def proxmox(values, options=None):
+    """Read-only token, node inventory and optional named-node status."""
+    options = options or {}
     base = _allowed_origin(values.get("url"), config.PROXMOX_ALLOWED_HOSTS)
     try:
-        data = integrations.proxmox_request(base, values, "/api2/json/access/permissions",
-                                            timeout=TIMEOUT)
+        data = integrations.proxmox_request(
+            base, values, "/api2/json/access/permissions", timeout=TIMEOUT
+        )
         if not isinstance(data, dict):
-            raise ConnectionTestError("Proxmox : réponse API inattendue")
-        return ok("proxmox", "Token Proxmox accepté ; aucune action sur les VM.",
-                  [check("HTTPS", "API accessible avec certificat vérifié"),
-                   check("Token API", "Requête de lecture autorisée")])
+            raise ConnectionTestError("Proxmox : réponse de permissions inattendue")
+        checks = [check("HTTPS", "Certificat API vérifié"),
+                  check("Token API", "Requête authentifiée de permissions acceptée")]
+        if _bool(options, "check_nodes"):
+            nodes = integrations.proxmox_request(base, values, "/api2/json/nodes",
+                                                 timeout=TIMEOUT)
+            if not isinstance(nodes, list):
+                raise ConnectionTestError("Proxmox : inventaire de nœuds inattendu")
+            checks.append(check("Lecture nœuds", str(len(nodes))+" nœud(s) accessibles"))
+        name = _short(options, "node", 90)
+        if name:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,89}", name):
+                raise ConnectionTestError("Proxmox : nom de nœud invalide")
+            status = integrations.proxmox_request(
+                base, values, "/api2/json/nodes/"+quote(name, safe="")+"/status",
+                timeout=TIMEOUT
+            )
+            if not isinstance(status, dict):
+                raise ConnectionTestError("Proxmox : statut de nœud inattendu")
+            checks.append(check("Statut nœud", "Lecture du nœud autorisée (aucune action VM)"))
+        return ok("proxmox", "Token Proxmox validé ; lectures demandées effectuées sans modification.",
+                  checks)
     except ConnectionTestError:
         raise
     except (httpx.HTTPError, integrations.IntegrationError, ValueError, KeyError, TypeError) as exc:
-        raise ConnectionTestError("Proxmox : refus API/TLS ou token invalide ("+
-                                  type(exc).__name__+")") from None
-
-
-def api(values):
-    """GET only to allow-listed HTTPS API. A 2xx response does not prove identity."""
-    if not config.CONNECTION_TEST_ALLOWED_HOSTS.strip():
         raise ConnectionTestError(
-            "API : renseigner CONNECTION_TEST_ALLOWED_HOSTS dans .env avant le test"
-        )
+            "Proxmox : refus API/TLS ou token invalide ("+type(exc).__name__+")"
+        ) from None
+
+
+def api(values, options=None):
+    """GET/HEAD only to allow-listed HTTPS API with configurable expected status."""
+    options = options or {}
+    if not config.CONNECTION_TEST_ALLOWED_HOSTS.strip():
+        raise ConnectionTestError("API : renseigner CONNECTION_TEST_ALLOWED_HOSTS dans .env")
     base = _allowed_origin(values.get("base_url"), config.CONNECTION_TEST_ALLOWED_HOSTS)
-    path = str(values.get("test_path") or "/")
+    path = _short(options, "path", 180) or str(values.get("test_path") or "/")
     if (not path.startswith("/") or path.startswith("//") or
         "?" in path or "#" in path or "\\" in path or
         ".." in path.split("/") or len(path) > 180):
         raise ConnectionTestError("API : chemin de test invalide")
+    method = _short(options, "method", 5).upper() or "GET"
+    if method not in ("GET", "HEAD"):
+        raise ConnectionTestError("API : seules les méthodes GET et HEAD sont permises")
+    expected = _short(options, "expected_status", 3) or "2xx"
+    if expected != "2xx" and (not expected.isdigit() or
+                              int(expected)<200 or int(expected)>599):
+        raise ConnectionTestError("API : code HTTP attendu invalide")
     headers = {}
     if values.get("token"):
         headers["Authorization"] = "Bearer "+values["token"]
     elif values.get("username") and values.get("password"):
-        # Basic authentication only over verified HTTPS.
         import base64
         raw = (values["username"]+":"+values["password"]).encode()
         headers["Authorization"] = "Basic "+base64.b64encode(raw).decode()
     try:
         with httpx.Client(timeout=TIMEOUT, follow_redirects=False, trust_env=False) as client:
-            response = client.get(base+path, headers=headers)
-        if response.status_code not in range(200, 300):
-            raise ConnectionTestError("API : réponse HTTP "+str(response.status_code)+
-                                      " ; accès non confirmé")
-        return ok("api", "GET HTTPS autorisé ; la validité métier du token dépend de l'endpoint choisi.",
+            if method=="HEAD":
+                response = client.head(base+path, headers=headers)
+            else:
+                response = client.get(base+path, headers=headers)
+        status = response.status_code
+        accepted = (200 <= status < 300) if expected=="2xx" else status==int(expected)
+        if not accepted:
+            raise ConnectionTestError(
+                "API : HTTP "+str(status)+" ; attendu "+expected+" (accès non confirmé)"
+            )
+        return ok("api", "Requête "+method+" HTTPS terminée, statut attendu obtenu.",
                   [check("HTTPS", "Certificat TLS vérifié"),
-                   check("GET de diagnostic", "HTTP "+str(response.status_code)),
-                   untested("Identité", "Une réponse 2xx ne garantit pas que le serveur a contrôlé le token")])
+                   check("Requête de diagnostic", method+" : HTTP "+str(status)),
+                   untested("Identité", "Le code HTTP ne garantit pas que le jeton a été validé")])
     except ConnectionTestError:
         raise
     except httpx.HTTPError:
