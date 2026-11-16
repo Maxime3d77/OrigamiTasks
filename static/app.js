@@ -632,13 +632,13 @@ function credentialTestFields(entry){
    +'<div class="ssh-test-mode" data-ssh-test-mode="manual"><div class="form-grid">'
    +testOptionInput('manual_host','FQDN du serveur à tester','serveur.fr')
    +'<div class="field"><span>Port SSH</span><input name="manual_port" type="number" min="1" max="65535" value="22"></div></div>'
-   +'<p class="hint">Connexion ponctuelle ; aucune création de serveur dans l’inventaire. L’empreinte SSH doit être approuvée dans known_hosts.</p></div>'
+   +'<p class="hint">Connexion ponctuelle : pas de création dans l’inventaire. La première clé publique du serveur est automatiquement mémorisée avec accept-new ; toute clé différente est refusée.</p></div>'
    +'<div class="ssh-test-mode" data-ssh-test-mode="inventory" hidden>'
    +sshTargetPicker('server_id','',false)
    +'<div class="tool-row"><button type="button" class="btn tiny" data-action="ssh-goto-inventory">Gérer les serveurs / groupes</button></div></div>'
    +(publicData.host?'<div class="ssh-test-mode" data-ssh-test-mode="legacy" hidden><p class="hint">Ancien serveur du coffre : '+e(publicData.host)+'. Aucun enregistrement modifié.</p></div>':'')
-   +'<div class="ssh-trust-section"><button type="button" class="btn" data-action="ssh-hostkey-inspect">Vérifier la clé d’hôte du serveur</button>'
-   +'<p class="hint">Une clé privée importée d’un autre poste fonctionne normalement. Ce contrôle concerne uniquement la clé publique du SERVEUR, indépendante de ton compte SSH.</p>'
+   +'<div class="ssh-trust-section"><button type="button" class="btn" data-action="ssh-hostkey-inspect">Afficher l’empreinte SSH (facultatif)</button>'
+   +'<p class="hint">Identité SSH réutilisable. La validation manuelle n’est pas obligatoire en mode accept-new ; ce contrôle facultatif concerne uniquement la clé publique du serveur.</p>'
    +'<div id="sshHostTrustPanel" aria-live="polite"></div></div>'
    +testOptionCheck('check_sftp','Tester également le sous-système SFTP','Lit uniquement les métadonnées du répertoire courant.')
    +testOptionCheck('check_whoami','Exécuter la commande de diagnostic whoami','Commande fixe, en lecture seule ; aucune autre commande autorisée.');
@@ -1067,12 +1067,14 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    const result=await api('/admin/ldap/ca','POST',payload);
    const input=document.querySelector('#ldapAdminForm [name="ca_cert"]');
    if(input)input.value=result.path;
+   const bypass=document.querySelector('#ldapAdminForm [name="skip_cert_verification"]');
+   if(bypass)bypass.checked=false;
    toast(result.certificate_count+' certificat(s) CA importé(s).'+(result.ignored_non_ca_count?' '+result.ignored_non_ca_count+' certificat(s) serveur ignoré(s).':'')+' Enregistrer la configuration LDAP.');
    const output=document.getElementById('ldapTestResult');
    if(output)output.innerHTML='<div class="notice"><strong>CA importée</strong> : '+e(result.certificate_count)+' certificat(s) de confiance'
      +(result.ignored_non_ca_count?' · '+e(result.ignored_non_ca_count)+' certificat(s) serveur ignoré(s)':'')
      +'<p class="hint">'+(result.ca_subjects||[]).map(e).join(' · ')+'</p>'
-     +'<strong>Enregistrer la configuration</strong> puis lancer le test de connexion LDAP.</div>';
+     +'<strong>Vérification TLS réactivée dans le formulaire.</strong> Enregistrer la configuration puis tester LDAP.</div>';
   }catch(ex){toast(ex.message,false)}
   finally{b.disabled=false;b.textContent=original}
   return
