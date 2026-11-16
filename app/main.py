@@ -501,7 +501,10 @@ def put_admin_ldap(payload:dict[str,Any],request:Request):
 def upload_ldap_ca(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
     try:
-        result=ldap_settings.import_ca(payload.get('pem'))
+        if set(payload)-{'pem','der_base64'}:
+            raise ldap_settings.LDAPSettingsError('Champs du certificat CA non reconnus')
+        result=ldap_settings.import_ca(pem_text=payload.get('pem'),
+                                       der_base64=payload.get('der_base64'))
     except ldap_settings.LDAPSettingsError as exc:
         raise HTTPException(422,str(exc)) from None
     db.audit(user['username'],'ldap.ca.import',result['fingerprint_sha256'][:16],
