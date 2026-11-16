@@ -383,18 +383,48 @@ function groupEditorField(label,key,groups){
 }
 function scheduleFields(schedule){
  const mode=schedule.mode||(schedule.cron?'cron':'manual');
- const modeOptions=[['manual','Manuel / événement'],['once','Une seule fois'],['interval','Répéter à intervalle'],['cron','Cron avancé']];
+ const modeOptions=[['manual','Manuel / évènement (aucune répétition)'],
+    ['once','Une seule exécution programmée'],
+    ['interval','Assistant de répétition'],
+    ['cron','Expression Cron avancée']];
  const units=[['minutes','minute(s)'],['hours','heure(s)'],['days','jour(s)'],['weeks','semaine(s)']];
- return '<div class="field"><span>Déclenchement</span><select name="job_schedule_mode">'+option(modeOptions,mode)+'</select></div>'
-  +'<div class="field" data-schedule-mode="once"><span>Date et heure d’exécution</span><input type="datetime-local" name="job_at" value="'+e(schedule.at||'')+'"></div>'
-  +'<div class="field" data-schedule-mode="interval"><span>Répéter toutes les</span><div class="inline-picker"><input type="number" name="job_every" min="1" max="100000" value="'+e(schedule.every||5)+'"><select name="job_unit">'+option(units,schedule.unit||'minutes')+'</select></div></div>'
-  +'<div class="field" data-schedule-mode="cron"><span>Cron (5 champs)</span><input name="job_cron" placeholder="*/5 * * * *" value="'+e(schedule.cron||'')+'"><small class="hint">Minutes · Heures · Jour · Mois · Jour de semaine</small></div>'
-  +field('Fuseau horaire','job_timezone',schedule.timezone||'Europe/Paris');
+ const presets=[['','Personnalisé'],['1:minutes','Toutes les minutes'],
+    ['5:minutes','Toutes les 5 minutes'],['10:minutes','Toutes les 10 minutes'],
+    ['15:minutes','Toutes les 15 minutes'],['30:minutes','Toutes les 30 minutes'],
+    ['1:hours','Toutes les heures'],['6:hours','Toutes les 6 heures'],
+    ['1:days','Chaque jour'],['1:weeks','Chaque semaine']];
+ const currentPreset=(schedule.every||5)+':'+(schedule.unit||'minutes');
+ return '<div class="field"><span>Planification</span><select name="job_schedule_mode">'+option(modeOptions,mode)+'</select></div>'
+  +'<div class="field schedule-detail" data-schedule-mode="once"><span>Date et heure de la seule exécution</span><input type="datetime-local" name="job_at" value="'+e(schedule.at||'')+'"></div>'
+  +'<div class="schedule-detail field full" data-schedule-mode="interval"><span>Assistant de répétition</span><select name="job_interval_preset">'
+  +option(presets,presets.some(x=>x[0]===currentPreset)?currentPreset:'')+'</select>'
+  +'<div class="inline-picker"><input type="number" name="job_every" min="1" max="100000" value="'+e(schedule.every||5)+'">'
+  +'<select name="job_unit">'+option(units,schedule.unit||'minutes')+'</select></div>'
+  +'<small class="hint">Exécution récurrente suivant l’intervalle choisi.</small></div>'
+  +'<div class="field schedule-detail" data-schedule-mode="cron"><span>Expression Cron (5 champs)</span><input name="job_cron" placeholder="*/5 * * * *" value="'+e(schedule.cron||'')+'">'
+  +'<small class="hint">Minute · Heure · Jour du mois · Mois · Jour de semaine</small></div>'
+  +'<div class="field schedule-timezone"><span>Fuseau horaire</span><input name="job_timezone" value="'+e(schedule.timezone||'Europe/Paris')+'"></div>'
+  +'<div class="schedule-info hint">En mode manuel, le workflow est lancé à la demande ou par webhook, sans calendrier.</div>';
 }
 function showScheduleMode(){
- const mode=document.querySelector('.modal select[name="job_schedule_mode"]')?.value||'manual';
- $('[data-schedule-mode]',document.querySelector('.modal')||document).forEach(el=>el.hidden=el.dataset.scheduleMode!==mode);
+ const root=document.querySelector('.modal');
+ if(!root)return;
+ const mode=root.querySelector('[name="job_schedule_mode"]')?.value||'manual';
+ $$('[data-schedule-mode]',root).forEach(el=>el.hidden=el.dataset.scheduleMode!==mode);
+ $$('.schedule-timezone',root).forEach(el=>el.hidden=mode==='manual');
+ $$('.schedule-info',root).forEach(el=>el.hidden=mode!=='manual');
 }
+function applySchedulePreset(){
+ const form=document.querySelector('.modal');
+ if(!form)return;
+ const preset=form.querySelector('[name="job_interval_preset"]')?.value;
+ if(!preset)return;
+ const [every,unit]=preset.split(':');
+ const fieldEvery=form.querySelector('[name="job_every"]'),fieldUnit=form.querySelector('[name="job_unit"]');
+ if(fieldEvery)fieldEvery.value=every;
+ if(fieldUnit)fieldUnit.value=unit;
+}
+
 function captureSchedule(v){
  const mode=v('job_schedule_mode')||'manual', timezone=v('job_timezone')||'Europe/Paris';
  const schedule={mode,timezone};
@@ -906,5 +936,6 @@ async function bootstrap(){document.addEventListener('submit',handleSubmit);try{
   const port=ev.target.closest('form').elements.namedItem('port');
   if(port&&['25','465','587'].includes(port.value))port.value=ev.target.value==='ssl'?465:ev.target.value==='none'?25:587;
  }
+ if(ev.target.name==='job_interval_preset'){applySchedulePreset();return}
  if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config={};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
 bootstrap();
