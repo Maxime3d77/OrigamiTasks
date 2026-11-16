@@ -166,6 +166,29 @@ def _ssh(command, opts, cred, timeout):
 def execute(step, ctx):
     typ = step.get('type')
     opts = expand(step.get('config') or {}, ctx)
+    mode = opts.get('connection_mode')
+    if mode not in (None, 'manual', 'vault'):
+        raise StepError('Mode de connexion invalide')
+    # Explicit vault mode uses only vault endpoint settings; manual mode
+    # overrides the network target, but never places secrets inline.
+    if mode == 'vault':
+        hidden = {
+            'email': ('host','port','ssl','from'),
+            'ssh': ('host','port'),
+            'sftp': ('host','port'),
+            'ansible': ('host','port'),
+            'ftp': ('host','port','allow_plaintext'),
+            'directory': ('uri','starttls','base_dn'),
+            'matrix': ('homeserver',),
+            'http': ('url',)
+        }
+        for key in hidden.get(typ, ()):
+            opts.pop(key, None)
+    if mode == 'manual':
+        if typ in ('email','http'):
+            opts['credential_id'] = None
+        if typ in ('ssh','sftp','ansible'):
+            opts.pop('ssh_server_id', None)
     cred = credential(opts.get('credential_id'))
     timeout = min(max(int(opts.get('timeout') or 60), 1), config.MAX_STEP_SECONDS)
     if typ in ('shell', 'powershell'):
@@ -236,15 +259,28 @@ def execute(step, ctx):
         headers = dict(opts.get('headers') or {})
         if cred.get('token'):
             headers['Authorization'] = 'Bearer ' + cred['token']
+        url = opts.get('url') or cred.get('base_url') or ''
+        if mode == 'vault':
+            base=cred.get('base_url') or ''
+            if not base:
+                raise StepError('API : connexion du coffre avec URL HTTPS obligatoire')
+            path=str(opts.get('path') or '/')
+            if not path.startswith('/') or path.startswith('//') or '..' in path.split('/') or '\\' in path or '#' in path:
+                raise StepError('API : chemin relatif invalide')
+            url=base.rstrip('/')+path
+        if not url:
+            raise StepError('API : URL manquante')
         try:
             with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-                r = client.request(opts.get('method', 'GET').upper(), opts.get('url') or cred.get('base_url') or '',
+                r = client.request(opts.get('method', 'GET').upper(), url,
                                    headers=headers, content=opts.get('body') or None)
             code = 0 if 200 <= r.status_code < 400 else 1
             output = f'HTTP {r.status_code}\n{r.text[:config.MAX_LOG_BYTES]}'
         except httpx.RequestError as exc:
             raise StepError('HTTP : '+str(exc))
     elif typ == 'email':
+        if mode == 'vault' and not opts.get('credential_id'):
+            raise StepError('SMTP : choisir une connexion SMTP du coffre-fort')
         if not (opts.get('host') or cred.get('host')):
             raise StepError('SMTP : serveur manquant dans la tâche et le coffre')
         if not (opts.get('from') or cred.get('from_address')):
