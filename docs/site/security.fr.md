@@ -37,3 +37,10 @@ Lire le [modèle de sécurité détaillé](https://github.com/Maxime3d77/Origami
 En préversion, les jetons agents sont uniques et révocables, mais restent de longue durée (pas de mTLS). Les jetons d'enrôlement sont à usage unique et expirent après 15 min. Le déploiement distant repose sur SSH avec empreintes vérifiées et liste de cibles. La tâche Windows tourne sous SYSTEM et l'agent Linux sous un compte non privilégié. Les scripts restent des exécutions de confiance.
 
 Les écritures LDAP/AD sont désactivées par défaut, limitées par base DN, certificat TLS et confirmation explicite par bloc. Utiliser un compte de service à privilèges minimaux, un annuaire de test et conserver l'audit des contrôleurs de domaine.
+
+
+## Déploiements groupés et connexion LDAP
+
+Les lots d'agents nécessitent une session administrateur, une confirmation explicite et un compte SSH chiffré. Toutes les cibles doivent appartenir à `AGENT_DEPLOY_ALLOWED_HOSTS`. Une file persistante conserve un résultat par machine ; les installations interrompues ne sont pas rejouées automatiquement. Les réponses et l'audit n'exposent ni mot de passe, ni clé privée, ni sortie brute d'installation.
+
+L'import LDAP n'accepte que des certificats **CA publics** PEM, avec accès au fichier restreint. Le contournement de la vérification du certificat TLS n'est pas proposé. Le mode « connexion manuelle » des workflows ne doit jamais stocker de mot de passe ou de jeton en clair.
