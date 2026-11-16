@@ -4,6 +4,7 @@ import re
 import secrets
 import ssl
 import hmac
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -740,6 +741,7 @@ def test_credential(credential_id:int,request:Request,payload:dict[str,Any]|None
     if sending:
         # Log the action before attempting network I/O; never log recipient or message body.
         db.audit(user['username'],'vault.test.send.attempt',credential_id,row['kind'])
+    started=time.monotonic()
     try:
         result=connection_tests.run(row['kind'],security.decrypt(row['encrypted_payload']),
                                     options=options,credential_id=credential_id)
@@ -751,6 +753,7 @@ def test_credential(credential_id:int,request:Request,payload:dict[str,Any]|None
         # Never return raw exceptions, URLs with tokens, or decrypted credentials.
         raise HTTPException(422,'Test '+str(row['kind'])+' impossible ('+type(exc).__name__+')') from None
     db.audit(user['username'],action,credential_id,row['kind'])
+    result['elapsed_ms']=round((time.monotonic()-started)*1000)
     return result
 
 
