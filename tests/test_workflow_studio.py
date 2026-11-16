@@ -131,3 +131,51 @@ def test_navigation_buttons_have_single_delegated_handler():
     assert 'data-page="vault"' in markup
     assert "closest('[data-action], [data-page]')" in js
     assert "const a=b.dataset.action||'page'" in js
+
+
+def test_folder_names_do_not_leak_to_unprivileged_users():
+    c, h = logged_admin()
+    try:
+        created = c.post('/api/jobs', json={
+            'name': 'Private-folder-smoke', 'folder': 'ConfidentielUI/Secret',
+            'steps_json': [{'id': 'pause', 'name': 'Attente', 'type': 'delay',
+                            'config': {'seconds': 1}}],
+            'acl_json': {'view': ['security-team'], 'run': [], 'edit': []},
+            'schedule_json': {}, 'enabled': False}, headers=h)
+        assert created.status_code == 200, created.text
+        with db.session() as conn:
+            conn.execute('INSERT OR IGNORE INTO users(username,display_name,password_hash,source,role,groups_json,created_at) VALUES (?,?,?,?,?,?,?)',
+                         ('viewer-ui-ci', 'Viewer UI', security.ph.hash('viewer-password-long-123'),
+                          'local', 'viewer', '["unrelated-group"]', db.now()))
+        with TestClient(app) as viewer:
+            assert viewer.post('/api/login', json={
+                'username': 'viewer-ui-ci', 'password': 'viewer-password-long-123'
+            }).status_code == 200
+            folders = viewer.get('/api/folders').json()['items']
+            assert not any('ConfidentielUI' in f['path'] for f in folders)
+            jobs = viewer.get('/api/jobs').json()['items']
+            assert not any(j['id'] == created.json()['id'] for j in jobs)
+    finally:
+        c.__exit__(None, None, None)
+
+
+def test_in_use_vault_credential_cannot_be_deleted():
+    c, h = logged_admin()
+    try:
+        created = c.post('/api/credentials', json={
+            'name': 'CI-ui-vault-referenced', 'kind': 'smtp',
+            'payload': {'username': 'tester', 'password': 'secret'}}, headers=h)
+        assert created.status_code == 200, created.text
+        cid = created.json()['id']
+        job = c.post('/api/jobs', json={
+            'name': 'Vault reference guard', 'folder': 'Général',
+            'steps_json': [{'id': 'send', 'name': 'Mail', 'type': 'email',
+                            'config': {'credential_id': cid, 'host': 'example.org'}}],
+            'acl_json': {'view': [], 'run': [], 'edit': []},
+            'schedule_json': {}, 'enabled': False}, headers=h)
+        assert job.status_code == 200, job.text
+        assert c.delete(f'/api/credentials/{cid}', headers=h).status_code == 409
+        assert c.delete(f'/api/jobs/{job.json()["id"]}', headers=h).status_code == 200
+        assert c.delete(f'/api/credentials/{cid}', headers=h).status_code == 200
+    finally:
+        c.__exit__(None, None, None)
