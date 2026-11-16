@@ -2,6 +2,17 @@
 
 ## 0.3.5-rc1 — 16 novembre 2026
 
+- Déploiement d'agents sur une **liste de serveurs**, avec sélection d'un groupe SSH, file persistante, résultats indépendants par machine et limitation à 100 cibles.
+- Pour le déploiement, seuls les profils **SSH** sont affichés ; les autres sélecteurs de connexions suivent le protocole.
+- **Mises à jour** : version installée, version distante, date du dernier commit Git, nombre de commits en retard et état vérifié/non vérifiable.
+- **LDAP** : import de certificats CA PEM depuis le navigateur, vérification TLS conservée.
+- Renommage **DC Proxmox** ; l'API Proxmox n'exige pas d'agent sur les nœuds.
+- Workflows : mode **coffre ou réseau manuel**, champs adaptés, planification unique/assistant/cron sans champs inutiles et bouton **« ＋ Si échec »**.
+- Tests de non-régression pour agents, LDAP, SMTP et embranchements.
+
+
+## 0.3.5-rc1 — 16 novembre 2026
+
 - Déploiement d'agents Linux/Windows sur **une liste de FQDN**, avec ajout depuis les groupes de serveurs SSH ; file persistante et résultat distinct par machine.
 - Le choix du compte pour déployer les agents montre **uniquement les identités SSH** du coffre ; les sélecteurs SMTP/API/Proxmox sont filtrés par protocole.
 - Page **Mises à jour** : comparaison version installée/distante, date du dernier commit distant, nombre de commits d'écart, statut à jour/nouvelle version/vérification impossible et contrôle périodique via worker.
