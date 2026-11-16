@@ -994,14 +994,23 @@ def updates(request:Request):
     if state.exists():
         try: info=json.loads(state.read_text())
         except (OSError,ValueError): pass
-    return {'version':config.APP_VERSION,'git_branch':config.GIT_BRANCH,'worker':info,'requests':[dict(x) for x in rows]}
+    heartbeat_path=config.DATA/'update-worker-heartbeat.json'
+    worker_online=False
+    if heartbeat_path.is_file():
+        try:
+            worker_online=0<=time.time()-heartbeat_path.stat().st_mtime<25
+        except OSError:
+            pass
+    return {'version':config.APP_VERSION,'git_branch':config.GIT_BRANCH,
+            'worker':info,'worker_online':worker_online,
+            'requests':[dict(x) for x in rows]}
 
 
 @app.post('/api/updates/request')
 def request_update(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
     action=payload.get('action')
-    if action not in ('check','apply'):
+    if action not in ('check','preflight','apply'):
         raise HTTPException(422,'Action inconnue')
     with db.session() as con:
         queued=con.execute("SELECT COUNT(*) FROM updates WHERE status IN ('queued','running')").fetchone()[0]
