@@ -15,8 +15,8 @@ const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
 const badgeTags=tags=>tags.map(t=>`<span class="chip tag">#${e(t)}</span>`).join('');
-function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',updates:'Mises à jour',datacenters:'Datacenters',agents:'Agents Linux / Windows',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
-function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
+function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'Datacenters',agents:'Agents Linux / Windows',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
+function render(){const pages={dashboard, jobs, runs, vault,ldapPage,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
 function dashboard(){const s=state.summary;return title('Vue d’ensemble','Votre centre de contrôle de l’automatisation.','<button class="btn primary" data-action="create">＋ Nouveau workflow</button>')+`<div class="stats-grid">
  <div class="stat-card featured"><span class="label">Workflows disponibles</span><span class="stat-icon">◈</span><div class="value">${s.jobs||0}</div><div class="sub">${s.enabled||0} workflows actifs</div></div>
  <div class="stat-card"><span class="label">Exécutions réussies</span><span class="stat-icon">✓</span><div class="value">${s.success||0}</div><div class="sub">sur les 100 dernières</div></div>
@@ -51,6 +51,61 @@ function jobs(){
 }
 function runs(){return title('Journal d’exécution','Chaque événement, chaque branche et chaque sortie de script.')+`<div class="panel"><div class="panel-title"><h2>Historique (${state.runs.length})</h2><button class="btn tiny" data-action="refresh">↻ Actualiser</button></div>${runsTable(state.runs)}</div>`}
 function vault(){if(!roleAdmin())return title('Coffre-fort','Réservé aux administrateurs.')+`<div class="notice">Le coffre de secrets est accessible aux seuls administrateurs.</div>`;return title('Coffre-fort','Credentials chiffrés au repos. Les valeurs ne sont jamais renvoyées par l’API.','<button class="btn primary" data-action="new-credential">＋ Nouveau secret</button>')+`<div class="panel"><div class="panel-title"><h2>Identités et connexions</h2><span class="hint">${state.credentials.length} identifiants</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Type</th><th>Créé le</th><th></th></tr></thead><tbody>${state.credentials.map(c=>`<tr><td class="name-cell">◇ ${e(c.name)}</td><td>${e(c.kind)}</td><td class="muted">${dt(c.created_at)}</td><td><button class="btn tiny" data-action="credential-edit" data-id="${c.id}">Modifier</button> <button class="btn tiny" data-action="credential-clone" data-id="${c.id}">Cloner</button> <button class="btn tiny danger" data-action="delete-credential" data-id="${c.id}">Supprimer</button></td></tr>`).join('')}</tbody></table></div>${!state.credentials.length?empty('Coffre vide','Ajoutez un identifiant SSH, SFTP, SMTP ou API.'):''}</div><div class="notice">Les secrets sont chiffrés avec Fernet et la clé VAULT_KEY externe au dépôt. Pour les scripts, les valeurs de l'identifiant sélectionné sont fournies via ORIGAMI_USERNAME / ORIGAMI_PASSWORD / ORIGAMI_TOKEN. Un administrateur qui peut créer des scripts doit être considéré comme privilégié.</div>`}
+
+function ldapPage(){
+ if(!roleAdmin())return title('Configuration LDAP','Réservée aux administrateurs');
+ return title('LDAP / Active Directory','Configurer l’annuaire utilisé pour la connexion et rechercher les groupes.')
+ +'<div id="ldapAdminPanel" class="panel"><p class="hint">Chargement des paramètres LDAP…</p></div>';
+}
+function ldapInput(label,name,value='',type='text',helper=''){
+ return '<div class="field"><span>'+e(label)+'</span><input name="'+e(name)+'" type="'+type+'" value="'+e(value??'')+'" autocomplete="off" '+(type==='password'?'autocomplete="new-password"':'')+'>'
+ +(helper?'<small class="hint">'+e(helper)+'</small>':'')+'</div>';
+}
+function ldapCheck(label,name,on){
+ return '<label class="field checkbox"><input type="checkbox" name="'+e(name)+'" '+(on?'checked':'')+'><span>'+e(label)+'</span></label>';
+}
+function ldapSettingsForm(cfg){
+ const body='<div class="panel-title"><h2>Connexion de l’annuaire</h2><span class="chip">'+e(cfg.source==='administration'?'Configuration enregistrée':'Paramètres hérités du .env')+'</span></div>'
+ +'<p class="hint">Les paramètres enregistrés ici prennent priorité sur le .env. Le mot de passe de liaison est chiffré avec VAULT_KEY et n’est jamais réaffiché. Le compte admin local reste disponible.</p>'
+ +'<form id="ldapAdminForm"><div class="form-grid">'
+ +ldapCheck('Activer la connexion LDAP', 'enabled', cfg.enabled)
+ +ldapCheck('Activer STARTTLS (ldap://, généralement port 389)', 'starttls', cfg.starttls)
+ +ldapInput('Adresse de l’annuaire','uri',cfg.uri,'text','Ex. ldaps://serveur:636 ou ldap://serveur:389 avec STARTTLS')
+ +ldapInput('DN du compte de liaison','bind_dn',cfg.bind_dn,'text','Compte de service en lecture seule')
+ +ldapInput('Mot de passe du compte de liaison','bind_password','','password',cfg.has_bind_password?'Déjà configuré — laisser vide pour conserver':'Mot de passe requis si LDAP est activé')
+ +ldapInput('Base DN des utilisateurs','base_dn',cfg.base_dn,'text','Ex. dc=example,dc=org')
+ +ldapInput('Base DN des groupes','group_base_dn',cfg.group_base_dn)
+ +'<div class="field"><span>Attribut du login utilisateur</span><select name="user_attribute">'+option([['uid','uid — OpenLDAP/Linux'],['sAMAccountName','sAMAccountName — Active Directory'],['cn','cn'],['mail','mail'],['userPrincipalName','userPrincipalName']],cfg.user_attribute)+'</select></div>'
+ +ldapInput('Groupe des administrateurs','admin_group',cfg.admin_group)
+ +ldapInput('Groupe des opérateurs','operator_group',cfg.operator_group)
+ +ldapInput('Groupe des lecteurs','viewer_group',cfg.viewer_group)
+ +ldapInput('Chemin CA TLS (dans le conteneur)','ca_cert',cfg.ca_cert,'text','Optionnel : certificat CA de confiance, sous /etc/ssl ou /app/data')
+ +ldapCheck('Utiliser la recherche des groupes AD imbriqués','nested_groups',cfg.nested_groups)
+ +'</div><div class="divider"></div>'
+ +'<div class="form-grid">'+ldapInput('Utilisateur à rechercher (test facultatif)','test_user','','text','Test en lecture seule du login, sans tenter de l’authentifier')+'</div>'
+ +'<div class="tool-row"><button type="button" class="btn" data-action="ldap-test">Tester la connexion LDAP</button><button type="submit" class="btn primary">Enregistrer la configuration</button></div>'
+ +'<div id="ldapTestResult" class="hint">Le test vérifie TLS, le bind, la base DN et une recherche des groupes. Aucune modification de l’annuaire.</div></form>';
+ return body;
+}
+async function hydrateLDAP(){
+ const host=document.getElementById('ldapAdminPanel');
+ if(!host)return;
+ try{const cfg=await api('/admin/ldap');if(document.getElementById('ldapAdminPanel')!==host)return;
+ state.ldapSettings=cfg;host.innerHTML=ldapSettingsForm(cfg)}
+ catch(ex){host.innerHTML='<div class="notice error">'+e(ex.message)+'</div>'}
+}
+function readLDAPForm(){
+ const form=document.getElementById('ldapAdminForm');
+ if(!form)throw Error('Le formulaire LDAP est fermé');
+ const f=new FormData(form),data={};
+ for(const key of ['enabled','starttls','nested_groups'])data[key]=f.has(key);
+ for(const key of ['uri','bind_dn','bind_password','base_dn','group_base_dn','user_attribute','admin_group','operator_group','viewer_group','ca_cert']){
+  if(key==='bind_password'&&!f.get(key))continue;
+  data[key]=String(f.get(key)||'').trim();
+ }
+ return {settings:data,test_user:String(f.get('test_user')||'').trim()};
+}
+
 function users(){return title('Utilisateurs & permissions','Identités LDAP et groupes affectés aux autorisations des workflows.')+`<div class="panel"><div class="panel-title"><h2>Comptes connectés</h2><span class="hint">Les rôles sont attribués à la connexion LDAP</span></div><div id="userTable">Chargement...</div></div><div class="notice">Groupes par workflow : <b>Lecture</b>, <b>Exécution</b>, <b>Modification</b>. Un utilisateur non membre d'un groupe explicitement autorisé n'accède pas au workflow. Les administrateurs disposent de tous les droits. Les groupes et rôles LDAP sont configurés dans .env.</div>`}
 const plannedCatalog=[
  ['Déclencheurs','Fichier créé/modifié, email reçu, trap SNMP, seuil Zabbix, événement Windows, dépendance entre jobs'],
@@ -129,6 +184,7 @@ const sidebarIcons={
  datacenters:'<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><circle cx="7" cy="6.5" r=".7"/><circle cx="7" cy="17.5" r=".7"/><path d="M11 6.5h7m-7 11h7"/>',
  users:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 4 5"/>',
  updates:'<path d="M12 3v12m-5-5 5 5 5-5M4 18v3h16v-3"/>',
+ ldap:'<circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 12h5m0 0V5h5m-5 7v7h5"/>',
  audit:'<path d="M7 3h9l4 4v14H7z"/><path d="M16 3v5h4M10 12h7m-7 4h7m-7-8h2"/>'
 };
 function decorateSidebar(){
@@ -305,7 +361,7 @@ async function saveEditor(){captureEditor();const j=state.editor;if(!j.name.trim
 async function runJob(id){try{const r=await api('/jobs/'+id+'/run','POST');toast('Exécution #'+r.run_id+' mise en file');await refresh();showPage('runs');await openRun(r.run_id)}catch(ex){toast(ex.message,false)}}
 async function openRun(id){try{const r=await api('/runs/'+id);state.selectedRun=r;modal('Exécution #'+r.id+' — '+e(r.job_name),`<div class="tool-row">${labelStatus(r.status)}<span class="hint">Déclenché par ${e(r.requested_by)} · ${dt(r.queued_at)}</span></div>${r.error?`<div class="notice error">${e(r.error)}</div>`:''}<h3>Résultats par étape</h3>${r.steps.map(s=>`<div class="step-log"><div class="step-header">${labelStatus(s.status)}<b>${e(s.name)}</b><span class="muted">${e(s.type)} · essai ${s.attempt} · code ${s.exit_code??'—'}</span></div><pre>${e(s.output||'(aucune sortie)')}</pre></div>`).join('')||'<p class="muted">Exécution en attente. Réactualisez dans quelques secondes.</p>'}`,`<button class="btn" data-action="run-detail" data-id="${id}">↻ Actualiser</button><button class="btn primary" data-action="modal-close">Fermer</button>`,true)}catch(ex){toast(ex.message,false)}}
 async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit')).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
-function bindLocal(){hydrateAdmins()}
+function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP()}
 async function refresh(){await load();render()}
 async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='layer-close'){closeLayer(b.dataset.layer);return}
  if(a==='folder-manage'){foldersBrowser();return}
@@ -329,8 +385,20 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='group-browser'){await openGroupBrowser(b.dataset.role);return}
  if(a==='group-toggle'){const arr=state.editor.acl_json[state.groupRole]||[],group=b.dataset.name.toLowerCase();state.editor.acl_json[state.groupRole]=arr.includes(group)?arr.filter(x=>x!==group):[...arr,group];drawGroupBrowser();return}
  if(a==='group-done'){closeLayer('groupLayer');renderEditor();return}
+ if(a==='ldap-test'){
+  const data=readLDAPForm(),target=document.getElementById('ldapTestResult');
+  if(target)target.textContent='Test LDAP en cours…';
+  try{const result=await api('/admin/ldap/test','POST',data);
+   if(target)target.innerHTML='<span class="status success">Test réussi</span> '+e(result.message)+' · '+result.group_sample_count+' groupe(s) échantillonnés'+(result.user_tested?' · Utilisateur '+(result.user_found?'trouvé':'introuvable'):'');
+  }catch(ex){if(target)target.innerHTML='<div class="notice error">'+e(ex.message)+'</div>'}return
+ }
  if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git autorisée et redémarrer les services ?'))return;await api('/updates/request','POST',{action:b.dataset.value});toast('Demande envoyée au service de maintenance');hydrateAdmins();return}if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='ldapAdminForm'){ev.preventDefault();
+  try{const data=readLDAPForm();await api('/admin/ldap','PUT',data.settings);toast('Configuration LDAP enregistrée');await hydrateLDAP()}
+  catch(ex){toast(ex.message,false)}return
+ }
+ 
  if(ev.target.id==='credentialManageForm'){
   ev.preventDefault();const f=new FormData(ev.target),action=state.credentialAction,id=state.pickerCredentialId;
   try{
