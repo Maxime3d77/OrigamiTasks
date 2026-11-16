@@ -1,5 +1,9 @@
 # Workflows and scheduling
 
+### Zoom and navigation in the workflow graph
+
+The editor provides **−**, **＋**, **100%**, **Fit width**, and **Overview** controls. Zoom ranges from 8% to 250%, with buttons or **Ctrl + mouse wheel**. Drag the **graph background** to pan horizontally/vertically; clicking a node still selects the step. Zoom and scroll position persist when switching steps within the same workflow. The graph has a bounded viewport so it never stretches the whole editor window.
+
 ## Data model
 
 A **job** contains ordered **steps**; each step has a unique ID, type, JSON configuration, optional condition, retry policy and `on_success`/`on_failure` target. `END` exits successfully; `FAIL` terminates with failure. Up to 80 steps and 200 graph transitions are accepted per run. The engine snapshots steps when a run is queued, preserving that run against later edits.
