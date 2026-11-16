@@ -1,5 +1,9 @@
 # Workflows et planification
 
+### Zoom et navigation dans le graphe
+
+L’éditeur de workflows dispose des contrôles **−**, **＋**, **100 %**, **Adapter largeur** et **Vue globale**. Il est possible de zoomer de 8 à 250 % avec les boutons ou **Ctrl + molette**. Glisser le **fond du graphe** déplace la vue horizontalement et verticalement ; les clics sur les étapes les sélectionnent toujours. La position et le niveau de zoom sont conservés lors du passage d’une étape à une autre dans le même workflow. La zone du graphe est limitée en hauteur pour ne pas étendre toute la fenêtre.
+
 ## Modèle
 
 Un **workflow** contient des **étapes ordonnées** avec ID unique, type, configuration JSON, condition facultative, politique de reprise et destinations `on_success`/`on_failure`. `END` termine avec succès ; `FAIL` termine en erreur. Limites : 80 étapes et 200 transitions par exécution. Une copie des étapes est sauvegardée lors de l'enfilement ; les modifications ultérieures n'affectent pas ce run.
