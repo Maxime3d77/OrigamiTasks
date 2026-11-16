@@ -1,5 +1,11 @@
 # Historique des modifications
 
+## 0.3.1-rc2 — 16 novembre 2026
+
+- Correction prioritaire du formulaire de connexion : interdiction de soumettre le mot de passe par GET.
+- Chargement autonome du script `login.js`, POST JSON, cache-busting et listener enregistré tôt.
+- Régression de sécurité couverte en CI ; procédure de traitement des mots de passe exposés dans les journaux.
+
 ## 0.3.1-rc1 — 16 novembre 2026
 
 - Correction du menu latéral inopérant : les boutons `data-page` sont maintenant gérés.
