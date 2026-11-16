@@ -20,9 +20,15 @@ Le fichier `.env.example` constitue la liste de référence des paramètres. Red
 
 Utiliser LDAPS (`ldaps://dc.example.org:636`) ou LDAP+STARTTLS ; éviter LDAP clair sur un réseau non fiable. Le compte de liaison doit être en lecture seule. Paramètres : `LDAP_URI`, `LDAP_BASE_DN`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_USER_ATTRIBUTE`, `LDAP_GROUP_BASE_DN`, groupes et `LDAP_CA_CERT` facultatif. Pour OpenLDAP, utiliser généralement `LDAP_USER_ATTRIBUTE=uid` (et non `sAMAccountName`) ; les groupes `posixGroup/memberUid` et `groupOfNames/member` sont recherchés sous `LDAP_GROUP_BASE_DN`. La fenêtre de sélection des ACL nécessite la lecture de ces groupes. Pour les groupes AD imbriqués, activer `LDAP_NESTED_GROUPS=true` et tester les comptes réels. Voir [Sécurité](security.md).
 
+### Administration graphique LDAP / Active Directory
+
+L'administrateur dispose du menu **Administration → LDAP / Active Directory**. Les valeurs initiales proviennent de `.env`, mais une configuration enregistrée dans l'interface prend priorité sans modifier ce fichier. Le formulaire permet de définir l'URI et le port, LDAPS ou STARTTLS, les DN de liaison/utilisateurs/groupes, `uid` (OpenLDAP) ou `sAMAccountName` (AD), les groupes d'accès et le chemin d'une CA de confiance (accessible dans le conteneur sous `/etc/ssl` ou `/app/data`).
+
+**Tester la connexion** vérifie TLS/certificat, bind du compte de service, accès à la base DN, recherche des groupes et, facultativement, présence d'un compte par login. Test en lecture seule : aucun utilisateur n'est modifié et aucun mot de passe n'est affiché. La configuration est chiffrée dans SQLite avec `VAULT_KEY`. Conserver sa sauvegarde et limiter les droits de lecture. Le compte `admin` local reste indépendant du LDAP. Pour les tâches d'annuaire, les paramètres centraux sont les valeurs par défaut ; un compte de service séparé dans le coffre reste recommandé en cas d'écritures.
+
 ## Identifiants
 
-Créer dans **Coffre-fort** : SSH (`username`, `password` ou `private_key`), Matrix (`token`), SMTP (`username`, `password`), Proxmox (`username=user@realm!tokenid`, `token=secret`). Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Aucun secret n'est réexposé dans le navigateur.
+Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
 
 ## SSH distant
 
