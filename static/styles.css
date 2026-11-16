@@ -100,3 +100,21 @@
 .connection-test-mark{flex:0 0 23px;display:inline-flex;align-items:center;justify-content:center;font-weight:750;border-radius:50%;height:23px;font-size:14px}
 .connection-test-mark.passed{color:#59ddac;background:#143d32}
 .connection-test-mark.untested{color:var(--muted);background:var(--field)}
+
+/* 0.3.3 — contextual validation wizards for vault connections */
+.connection-test-intro{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:11px 13px;border:1px solid var(--stroke);border-radius:11px;background:var(--panel2)}
+.connection-test-intro strong{font-size:14px}
+.connection-test-intro .hint{overflow-wrap:anywhere}
+.connection-test-config{margin:17px 0;display:flex;flex-direction:column;gap:13px}
+.connection-test-config>p{margin:0;color:var(--muted);line-height:1.55;font-size:13px}
+.test-wizard-option{display:flex;align-items:flex-start;gap:11px;padding:12px 14px;border:1px solid var(--stroke);border-radius:11px;background:var(--panel2);cursor:pointer}
+.test-wizard-option input{flex:0 0 auto;margin:3px 0 0;accent-color:var(--yellow)}
+.test-wizard-option span{display:flex;flex-direction:column;gap:5px;min-width:0}
+.test-wizard-option strong{font-size:13px}
+.test-wizard-option small{font-size:11px;line-height:1.45;color:var(--muted)}
+.test-wizard-dependent{display:flex;flex-direction:column;gap:13px;border-left:2px solid var(--yellow);padding:8px 0 10px 14px}
+.test-wizard-dependent[hidden]{display:none!important}
+#credentialTestResult{margin-top:18px}
+#credentialTestResult .connection-test-list{margin-top:13px}
+.connection-test-mark.warning{background:#53360e;color:#f8c269}
+@media(max-width:720px){.test-wizard-dependent{padding-left:10px}}
