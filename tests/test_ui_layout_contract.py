@@ -13,10 +13,10 @@ JS = (ROOT / "static/app.js").read_text(encoding="utf-8")
 
 
 def css_rule(selector):
-    # Prefer the most recently defined rule for specificity-safe overrides.
+    # Check the base rule; later media query overrides may only set a subset.
     matches = re.findall(re.escape(selector) + r"\s*\{([^{}]+)\}", CSS, flags=re.S)
     assert matches, f"Missing CSS for {selector}"
-    return matches[-1]
+    return matches[0]
 
 
 def test_wizard_checkbox_cannot_stretch_with_global_input_width():
