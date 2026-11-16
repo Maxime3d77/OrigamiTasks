@@ -18,6 +18,8 @@ OrigamiTasks est un **poste de pilotage d'automatisation**. Exécuter du code re
 - Les opérations d'alimentation des VM Proxmox sont coupées par défaut et ne remplacent pas un mécanisme de fencing PRA.
 - La sauvegarde/restauration et le rollback doivent être testés avant la production.
 
+Le gestionnaire de connexions permet la modification et le clonage côté serveur : aucune ancienne valeur secrète ne quitte le serveur. La suppression est refusée lorsqu'une tâche ou un datacenter référence le secret. La fenêtre de création depuis une tâche chiffre les secrets dans le coffre, sans les stocker en clair dans le workflow.
+
 ## Mesures recommandées
 
 VLAN d'administration dédié, listes d'autorisation réseau, aucune socket Docker montée, terminaison TLS, revue de code des workflows, identités SSH limitées, aucun compte root/admin pour les tâches courantes, branche Git protégée, mises à jour PROD auditées, rotation des secrets et audit externe immuable.
