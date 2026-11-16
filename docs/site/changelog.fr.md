@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.6-rc1 — 16 novembre 2026
+
+- **Test SSH** sur FQDN/port saisis manuellement, sans enregistrement préalable dans l’inventaire, avec vérification stricte de la clé d’hôte.
+- **Certificats LDAP** : import de fichiers `.crt`, `.cer`, `.der` binaires ou PEM, conversion en CA PEM sans suppression des contrôles TLS.
+- **Graphe workflow** : zoom +/− (8 à 250 %), Ctrl + molette, déplacement, adapter largeur, vue globale, conservation de la position.
+- Tests API et non-régression et documentation bilingue.
+
+
 ## 0.3.5-rc1 — 16 novembre 2026
 
 - Déploiement d'agents sur une **liste de serveurs**, avec sélection d'un groupe SSH, file persistante, résultats indépendants par machine et limitation à 100 cibles.
