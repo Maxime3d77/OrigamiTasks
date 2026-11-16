@@ -1,5 +1,12 @@
 # Historique des modifications
 
+## 0.3.8-rc1 — 16 novembre 2026
+
+- **SSH :** approbation explicite depuis le navigateur d'une clé d'hôte publique, après comparaison indépendante et saisie exacte de l'empreinte SHA256. Les clés d'hôte déjà connues mais modifiées restent bloquées ; les identités SSH utilisateur et leurs clés privées ne sont pas modifiées.
+- **LDAP :** import des bundles CRT/PEM contenant une CA et des certificats serveur ; conservation des CA uniquement, comptage et affichage des certificats non-CA exclus.
+- **Interface :** affichage lisible des résultats de l'import et explication de la case de contournement TLS grisée. Tests de non-régression SSH/LDAP et documentation bilingue.
+
+
 
 ## 0.3.7-rc1 — 16 novembre 2026
 
