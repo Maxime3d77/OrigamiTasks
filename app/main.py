@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments
 
 
 @asynccontextmanager
@@ -24,9 +24,11 @@ async def lifespan(app):
     security.initialize_admin()
     engine.start()
     scheduler.start()
+    agent_deployments.start()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
+    agent_deployments.STOP.set()
 
 
 app = FastAPI(title='OrigamiTasks', version=config.APP_VERSION, docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -129,6 +131,12 @@ def create_agent_enrollment(payload:dict[str,Any], request:Request):
 @app.post('/api/agents/deploy')
 def deploy_agent(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
+    if payload.get('credential_id'):
+        with db.session() as con:
+            credential_kind=con.execute("SELECT kind FROM credentials WHERE id=?",
+                (payload['credential_id'],)).fetchone()
+        if not credential_kind or credential_kind['kind']!='ssh':
+            raise HTTPException(422,'Une identité SSH du coffre est obligatoire')
     try:
         result=agents.deploy(payload)
     except HTTPException:
@@ -138,6 +146,25 @@ def deploy_agent(payload:dict[str,Any],request:Request):
         raise HTTPException(502,'Installation distante échouée : '+type(exc).__name__)
     db.audit(user['username'],'agent.deploy',result['id'],result['name'])
     return result
+
+
+
+@app.post('/api/agents/deploy/batch')
+def batch_deploy_agents(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=agent_deployments.queue(payload,user['username'])
+    except (agent_deployments.DeploymentError,ssh_inventory.InventoryError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'agent.deploy.batch',result['batch_id'],
+             str(result['total'])+' serveur(s)')
+    return result
+
+
+@app.get('/api/agents/deploy/batches')
+def agent_deploy_batch_status(request:Request):
+    security.require(request,role='admin')
+    return agent_deployments.list_batches()
 
 
 @app.post('/api/agents/{agent_id}/revoke')
