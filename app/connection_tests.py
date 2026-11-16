@@ -1,11 +1,16 @@
-"""Read-only, bounded diagnostics for named encrypted vault connection types.
+"""Bounded, administrator-approved diagnostics; optional explicit sends/probes.
 
-No SSH commands, file transfers, mail sending or directory writes are performed.
-Never include credentials, raw URLs or server response bodies in errors or results.
+No credentials, URL query secrets or server response bodies are returned.
 """
 import io
 import re
 import ssl
+import time
+import threading
+import smtplib
+from datetime import datetime, timezone
+from email.message import EmailMessage
+from email.utils import make_msgid, format_datetime
 from urllib.parse import urlsplit
 
 import ftplib
@@ -14,6 +19,9 @@ import httpx
 from . import config, connections, integrations, ldap_settings
 
 TIMEOUT = 8
+_SEND_LOCK = threading.Lock()
+_LAST_MAIL_SEND = {}
+_MAIL_SEND_COOLDOWN_SECONDS = 30
 
 
 class ConnectionTestError(Exception):
@@ -30,6 +38,83 @@ def check(name, detail):
 
 def untested(name, detail):
     return {"name": name, "status": "not_tested", "detail": detail}
+
+
+
+def warning(name, detail):
+    return {"name": name, "status": "warning", "detail": detail}
+
+
+def _bool(options, key):
+    value = options.get(key, False)
+    if type(value) is not bool:
+        raise ConnectionTestError("Option de test invalide : "+key)
+    return value
+
+
+def _short(options, key, maximum, *, multiline=False):
+    value = options.get(key, "")
+    if not isinstance(value, str) or len(value) > maximum:
+        raise ConnectionTestError("Champ de test trop long ou invalide : "+key)
+    if not multiline and ("\r" in value or "\n" in value):
+        raise ConnectionTestError("Retour à la ligne interdit : "+key)
+    return value.strip()
+
+
+def _email(address):
+    # Exactly one mailbox: no header injection or bulk recipient lists.
+    if not re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}", address or ""):
+        raise ConnectionTestError("Adresse e-mail invalide : un seul destinataire est autorisé")
+    return address
+
+
+def _send_mail(values, options, credential_id):
+    if not _bool(options, "confirm_send"):
+        raise ConnectionTestError("Confirmer explicitement l'envoi de l'e-mail de test")
+    recipient = _email(_short(options, "recipient", 254))
+    sender = _email(str(values.get("from_address") or
+                        (values.get("username") if "@" in str(values.get("username") or "") else "")))
+    subject = _short(options, "subject", 120) or "[OrigamiTasks] Vérification de la messagerie"
+    body = _short(options, "message", 1500, multiline=True) or (
+        "Ceci est un e-mail de test envoyé depuis OrigamiTasks.\n"
+        "La présence du message dans la boîte valide sa réception."
+    )
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg["Date"] = format_datetime(datetime.now(timezone.utc))
+    msg["Message-ID"] = make_msgid(domain=sender.rsplit("@", 1)[1])
+    msg["X-OrigamiTasks-Test"] = "true"
+    msg.set_content(body+"\n\nRéférence de test : "+msg["Message-ID"]+"\n")
+
+    # Serialize send attempts per credential to prevent concurrent bypass.
+    with _SEND_LOCK:
+        if credential_id is not None:
+            last = _LAST_MAIL_SEND.get(credential_id, 0)
+            if last and time.monotonic() - last < _MAIL_SEND_COOLDOWN_SECONDS:
+                raise ConnectionTestError("Attendre 30 secondes entre deux e-mails de test pour cette connexion")
+        session = None
+        try:
+            session = connections.open_smtp(values, timeout=TIMEOUT)
+            refused = session.send_message(msg, from_addr=sender, to_addrs=[recipient])
+            if refused:
+                raise ConnectionTestError("Le serveur SMTP a refusé le destinataire du test")
+            if credential_id is not None:
+                _LAST_MAIL_SEND[credential_id] = time.monotonic()
+        except ConnectionTestError:
+            raise
+        except (OSError, TimeoutError, smtplib.SMTPException, ValueError) as exc:
+            raise ConnectionTestError(
+                "Envoi SMTP échoué ("+type(exc).__name__+") : vérifier l'expéditeur et les règles du relais"
+            ) from None
+        finally:
+            if session is not None:
+                try:
+                    session.quit()
+                except (OSError, smtplib.SMTPException):
+                    session.close()
+    return str(msg["Message-ID"])
 
 
 def _port(value, default):
