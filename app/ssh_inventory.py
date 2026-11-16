@@ -57,7 +57,12 @@ def normalize_hosts(items):
     result={}
     for item in items:
         if isinstance(item,str):
-            host,ssh_port=fqdn(item),22
+            raw=item.strip()
+            if ":" in raw:
+                hostname,raw_port=raw.rsplit(":",1)
+                host,ssh_port=fqdn(hostname),port(raw_port)
+            else:
+                host,ssh_port=fqdn(raw),22
         elif isinstance(item,dict) and set(item)<={"fqdn","port"}:
             host,ssh_port=fqdn(item.get("fqdn")),port(item.get("port",22))
         else:
