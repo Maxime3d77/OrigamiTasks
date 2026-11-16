@@ -59,7 +59,7 @@ def normalize(kind, updates, previous=None, *, is_new=False):
                 continue
             values[key] = value.strip() if key not in SECRET_KEYS else value
     if kind in ('smtp', 'ftp', 'ssh'):
-        if values.get('host') or is_new:
+        if values.get('host'):
             values['host'] = safe_host(values.get('host'))
         defaults = {'smtp': 587, 'ftp': 21, 'ssh': 22}
         values.setdefault('port', defaults[kind])
