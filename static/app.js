@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],sshInventory:{servers:[],groups:[]},folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,13 +10,13 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory')}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
 const badgeTags=tags=>tags.map(t=>`<span class="chip tag">#${e(t)}</span>`).join('');
-function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'Datacenters',agents:'Agents Linux / Windows',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
-function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
+function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'Datacenters',agents:'Agents Linux / Windows','ssh-inventory':'Serveurs & groupes SSH',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
+function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage,'ssh-inventory':sshInventoryPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
 function dashboard(){const s=state.summary;return title('Vue d’ensemble','Votre centre de contrôle de l’automatisation.','<button class="btn primary" data-action="create">＋ Nouveau workflow</button>')+`<div class="stats-grid">
  <div class="stat-card featured"><span class="label">Workflows disponibles</span><span class="stat-icon">◈</span><div class="value">${s.jobs||0}</div><div class="sub">${s.enabled||0} workflows actifs</div></div>
  <div class="stat-card"><span class="label">Exécutions réussies</span><span class="stat-icon">✓</span><div class="value">${s.success||0}</div><div class="sub">sur les 100 dernières</div></div>
@@ -181,6 +181,7 @@ const sidebarIcons={
  runs:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
  vault:'<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15" r="1"/>',
  agents:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 2v3m8-3v3M8 19v3m8-3v3M1 9h3m-3 6h3m16-6h3m-3 6h3"/><circle cx="12" cy="12" r="3"/>',
+ 'ssh-inventory':'<rect x="2" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="8" height="7" rx="1"/><path d="M5 15h14v6H5zM9 6h5m-4 0v9M9 18h6"/>',
  datacenters:'<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><circle cx="7" cy="6.5" r=".7"/><circle cx="7" cy="17.5" r=".7"/><path d="M11 6.5h7m-7 11h7"/>',
  users:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 4 5"/>',
  updates:'<path d="M12 3v12m-5-5 5 5 5-5M4 18v3h16v-3"/>',
@@ -289,8 +290,7 @@ const connectionSchemas={
   ['from_address','Adresse expéditeur par défaut','email','noreply@exemple.fr']
  ],
  ssh:[
-  ['host','Serveur SSH / FQDN','text','server.example.org'],['port','Port SSH','number','22'],
-  ['username','Utilisateur SSH','text','root'],['password','Mot de passe SSH','password',''],
+  ['username','Login SSH (identité réutilisable)','text','deploy'],['password','Mot de passe SSH','password',''],
   ['private_key','Clé privée OpenSSH','textarea',''],['passphrase','Phrase secrète de la clé','password','']
  ],
  ftp:[
@@ -346,7 +346,8 @@ function credentialProfileFields(kind,credential){
   const cls=typ==='textarea'?'field full':typ==='checkbox'?'field checkbox':'field';
   return '<label class="'+cls+'" '+(kind==='smtp'&&['username','password'].includes(key)?'data-smtp-auth-field':'')+'><span>'+e(label)+'</span>'+control+'</label>';
  }).join('')+'</div>'
- +(kind==='smtp'?'<div class="notice">Pour le SMTP, configure le serveur, le port, la sécurité et l’authentification. La tâche utilise automatiquement ces paramètres lorsque sa connexion est sélectionnée.</div>':'');
+ +(kind==='smtp'?'<div class="notice">Pour le SMTP, configure le serveur, le port, la sécurité et l’authentification. La tâche utilise automatiquement ces paramètres lorsque sa connexion est sélectionnée.</div>':'')
+ +(kind==='ssh'?'<div class="notice">Identité SSH indépendante des serveurs : indique le login et un mot de passe ou une clé privée. Ajoute tes FQDN dans <b>Administration → Serveurs & groupes SSH</b>, puis choisis le serveur dans le test ou la tâche. '+(profile.host?'Cette ancienne identité conserve son serveur historique ('+e(profile.host)+') pour compatibilité.':'')+'</div>':'');
 }
 function credentialKindForStep(){
  const type=state.editor?.steps_json[state.selectedStep]?.type;
