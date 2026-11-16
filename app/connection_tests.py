@@ -149,8 +149,9 @@ def _allowed_origin(url, allowlist):
         ) from None
 
 
-def ssh(values):
-    """Paramiko connect() authenticates and verifies the pinned known_hosts key."""
+def ssh(values, options=None):
+    """Validate host key and login, plus explicitly selected read-only probes."""
+    options = options or {}
     try:
         import paramiko
     except ImportError:
@@ -185,10 +186,27 @@ def ssh(values):
         params["password"] = values["password"]
     try:
         client.connect(**params)
-        return ok("ssh", "Connexion SSH et authentification vérifiées ; aucune commande exécutée.",
-                  [check("Connectivité TCP", "Connexion établie"),
-                   check("Clé de l'hôte", "Empreinte vérifiée dans known_hosts"),
-                   check("Authentification", "Compte SSH accepté")])
+        checks = [check("Connectivité TCP", "Connexion établie"),
+                  check("Clé de l'hôte", "Empreinte vérifiée dans known_hosts"),
+                  check("Authentification", "Compte SSH accepté")]
+        if _bool(options, "check_sftp"):
+            sftp = client.open_sftp()
+            try:
+                sftp.stat(".")  # read metadata, never list/upload/download/delete
+                checks.append(check("Sous-système SFTP", "Accès au répertoire courant validé"))
+            finally:
+                sftp.close()
+        if _bool(options, "check_whoami"):
+            # Only this fixed read-only command (Windows + Linux), never arbitrary text.
+            _, stdout, _ = client.exec_command("whoami", timeout=TIMEOUT)
+            channel = stdout.channel
+            end = time.monotonic()+TIMEOUT
+            while not channel.exit_status_ready() and time.monotonic()<end:
+                time.sleep(0.1)
+            if not channel.exit_status_ready() or channel.recv_exit_status()!=0:
+                raise ConnectionTestError("SSH : whoami a échoué ou dépassé le délai")
+            checks.append(check("Commande distante", "whoami terminé sans modification"))
+        return ok("ssh", "Clé d’hôte et authentification SSH vérifiées.", checks)
     except paramiko.BadHostKeyException:
         raise ConnectionTestError("SSH : empreinte d'hôte différente de la clé approuvée") from None
     except paramiko.AuthenticationException:
@@ -197,14 +215,15 @@ def ssh(values):
         raise ConnectionTestError(
             "SSH : protocole/clé d'hôte non validé. Vérifier known_hosts et l'algorithme de clé."
         ) from None
-    except (OSError, TimeoutError):
-        raise ConnectionTestError("SSH : serveur injoignable ou délai dépassé") from None
+    except (OSError, TimeoutError, EOFError):
+        raise ConnectionTestError("SSH : hôte injoignable, sous-système indisponible ou délai dépassé") from None
     finally:
         client.close()
 
 
-def ftp(values):
-    """FTPS explicit: login and TLS control/data negotiation, no FTP file operation."""
+def ftp(values, options=None):
+    """FTPS login plus optional read-only current-directory check."""
+    options = options or {}
     host = connections.safe_host(values.get("host"))
     port = _port(values.get("port"), 21)
     mode = str(values.get("tls_mode") or "explicit")
@@ -231,10 +250,13 @@ def ftp(values):
         client.login(values.get("username") or "anonymous",
                      values.get("password") or "")
         client.prot_p()
-        return ok("ftp", "Connexion FTPS et authentification validées ; aucun transfert effectué.",
-                  [check("Connectivité FTP", "Bannière reçue"),
-                   check("TLS", "Canal de commande sécurisé et données protégées"),
-                   check("Authentification", "Compte accepté")])
+        checks = [check("Connectivité FTP", "Bannière reçue"),
+                  check("TLS", "Canal de commande sécurisé et données protégées"),
+                  check("Authentification", "Compte accepté")]
+        if _bool(options, "check_directory"):
+            client.pwd()
+            checks.append(check("Accès répertoire", "Commande PWD autorisée, aucun fichier transféré"))
+        return ok("ftp", "Connexion FTPS et authentification validées ; aucun transfert effectué.", checks)
     except ftplib.all_errors as exc:
         raise ConnectionTestError("FTPS : échec du transport/TLS ou des identifiants ("+
                                   type(exc).__name__+")") from None
