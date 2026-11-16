@@ -172,7 +172,7 @@ def test_admin_only_test_endpoint_and_audit(monkeypatch):
         assert created.status_code == 200,created.text
         cid=created.json()["id"]
         called=[]
-        monkeypatch.setattr(t,"run",lambda kind,values: (
+        monkeypatch.setattr(t,"run",lambda kind,values,**kwargs: (
             called.append((kind,values.get("host"))),
             {"ok":True,"protocol":kind,"message":"Testé","checks":[]}
         )[1])
