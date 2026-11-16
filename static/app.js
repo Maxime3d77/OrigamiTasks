@@ -273,8 +273,14 @@ function updates(){
   +'<div class="panel"><div class="panel-title"><h2>Historique des opérations Git</h2></div><div id="updateStatus">Chargement…</div></div>';
 }
 function renderUpdateVersion(data){
- const w=data.worker||{},installed=data.version||'inconnue',
-       known=typeof w.available==='boolean'&&!!w.latest&&!!w.current;
+ const w=data.worker||{},installed=data.version||'inconnue';
+ const checkedTime=Date.parse(w.checked_at||'');
+ const fresh=Number.isFinite(checkedTime)&&Date.now()-checkedTime<26*3600*1000
+             &&Date.now()-checkedTime>=-5*60*1000;
+ const matchingBranch=w.branch===data.git_branch;
+ const matchingInstall=!w.current_version||w.current_version===installed;
+ const known=typeof w.available==='boolean'&&!!w.latest&&!!w.current&&fresh
+             &&matchingBranch&&matchingInstall;
  const branch=w.branch||data.git_branch||'non définie';
  let status,css;
  if(!known){status='Vérification indisponible';css='warning'}
@@ -285,11 +291,15 @@ function renderUpdateVersion(data){
   +'<strong>'+e(installed)+'</strong><small>Depuis le conteneur en cours</small></div>'
   +'<div class="version-entry"><span>Version distante</span>'
   +'<strong>'+e(w.latest_version||'non vérifiée')+'</strong>'
-  +'<small>'+e(w.latest_date?new Date(w.latest_date).toLocaleString('fr-FR',{dateStyle:'medium',timeStyle:'short'}):'Date inconnue')+'</small></div></div>'
+  +'<small>'+e(w.latest_date&&Number.isFinite(Date.parse(w.latest_date))
+     ?new Date(w.latest_date).toLocaleString('fr-FR',{dateStyle:'medium',timeStyle:'short'}):'Date inconnue')+'</small></div></div>'
   +'<div class="tool-row"><span class="status '+e(css)+'">'+e(status)+'</span>'
   +(known&&w.available?'<span class="hint">'+e(w.commits_behind||'?')+' commit(s) disponibles</span>':'')+'</div>'
   +'<p class="hint">Branche suivie : <code>'+e(branch)+'</code> · Dernière vérification : '+e(checked)+'</p>'
   +'<p class="hint">'+e(w.message||'Le service de maintenance hôte n’a pas encore effectué de vérification')+'</p>'
+  +(!matchingBranch&&w.branch?'<div class="notice error">Le service surveille une branche différente de GIT_BRANCH. Vérification non fiable.</div>':'')
+  +(!matchingInstall?'<div class="notice error">Le commit local ne correspond pas à la version exécutée dans le conteneur. Reconstruire et vérifier le déploiement.</div>':'')
+  +(!fresh&&w.checked_at?'<div class="notice error">Dernière vérification trop ancienne : relancer un contrôle Git.</div>':'')
   +(w.error?'<div class="notice error">'+e(w.error)+'</div>':'');
 }
 function audit(){return title('Journal d’audit','Traçabilité des connexions, modifications, exécutions et opérations Git.')+`<div class="panel" id="auditTable">Chargement...</div>`}
