@@ -421,7 +421,7 @@ function credentialTestFields(entry){
      +'<label class="field"><span>Corps du message (facultatif)</span><textarea name="message" rows="3" maxlength="1500" placeholder="Ceci est un test de réception du serveur SMTP."></textarea></label>'
      +'<div class="notice">Le serveur SMTP peut accepter le message sans qu’il soit encore arrivé dans la boîte. Vérifier la réception et les spams à l’aide de la référence renvoyée. Un seul destinataire par test, délai de 30 secondes entre deux envois.</div>'
    )
-   +'<p class="hint">Expéditeur configuré : '+e(publicData.from_address||publicData.username||'non renseigné')+'</p>';
+   +'<p class="hint">Expéditeur configuré : '+e(publicData.from_address||(String(publicData.username||'').includes('@')?publicData.username:'à renseigner dans le profil SMTP'))+'</p>';
  }
  if(kind==='ssh'){
   return '<p>Test de connexion et d’authentification SSH avec vérification stricte de la clé d’hôte.</p>'
@@ -477,6 +477,9 @@ function updateCredentialTestVisibility(){
  if(recipient)recipient.required=!!form.elements.namedItem('send_email')?.checked;
  const room=form.elements.namedItem('room_id');
  if(room)room.required=!!(form.elements.namedItem('check_room')?.checked||form.elements.namedItem('send_message')?.checked);
+ const send=!!(form.elements.namedItem('send_email')?.checked||form.elements.namedItem('send_message')?.checked);
+ const submit=form.querySelector('button[type="submit"]');
+ if(submit)submit.textContent=send?'Envoyer le message de test':'Lancer le diagnostic sans envoi';
 }
 function openCredentialTestWizard(id){
  const entry=state.credentials.find(c=>c.id===id);
