@@ -399,28 +399,133 @@ function filterCredentialRows(){
  });
 }
 
-async function testCredentialConnection(id,button){
+function testOptionInput(name,label,placeholder='',value='',type='text',hint=''){
+ return '<label class="field"><span>'+e(label)+'</span><input name="'+e(name)+'" type="'+type+'" value="'+e(value)+'" placeholder="'+e(placeholder)+'" autocomplete="off">'
+ +(hint?'<small class="hint">'+e(hint)+'</small>':'')+'</label>';
+}
+function testOptionCheck(name,label,hint=''){
+ return '<label class="test-wizard-option"><input type="checkbox" name="'+e(name)+'"><span><strong>'+e(label)+'</strong>'
+ +(hint?'<small>'+e(hint)+'</small>':'')+'</span></label>';
+}
+function testAdvancedFields(trigger,html){
+ return '<div class="test-wizard-dependent" data-test-requires="'+e(trigger)+'" hidden>'+html+'</div>';
+}
+function credentialTestFields(entry){
+ const kind=entry.kind,publicData=entry.public||{};
+ if(kind==='smtp'){
+  return '<p>Vérifier la connexion SMTP, TLS et l’authentification. Pour tester également la réception, envoyer un vrai message à une adresse choisie.</p>'
+   +testOptionCheck('send_email','Envoyer un e-mail de test réel','Un message sera envoyé uniquement après avoir lancé le diagnostic.')
+   +testAdvancedFields('send_email',
+     '<div class="form-grid">'+testOptionInput('recipient','Adresse e-mail destinataire','prenom@exemple.fr','','email')
+     +testOptionInput('subject','Objet du message','','[OrigamiTasks] Test SMTP')+'</div>'
+     +'<label class="field"><span>Corps du message (facultatif)</span><textarea name="message" rows="3" maxlength="1500" placeholder="Ceci est un test de réception du serveur SMTP."></textarea></label>'
+     +'<div class="notice">Le serveur SMTP peut accepter le message sans qu’il soit encore arrivé dans la boîte. Vérifier la réception et les spams à l’aide de la référence renvoyée. Un seul destinataire par test, délai de 30 secondes entre deux envois.</div>'
+   )
+   +'<p class="hint">Expéditeur configuré : '+e(publicData.from_address||publicData.username||'non renseigné')+'</p>';
+ }
+ if(kind==='ssh'){
+  return '<p>Test de connexion et d’authentification SSH avec vérification stricte de la clé d’hôte.</p>'
+   +testOptionCheck('check_sftp','Tester également le sous-système SFTP','Lit uniquement les métadonnées du répertoire courant.')
+   +testOptionCheck('check_whoami','Exécuter la commande de diagnostic whoami','Commande fixe, en lecture seule. Aucune autre commande n’est autorisée par ce test.');
+ }
+ if(kind==='ftp'){
+  return '<p>Vérification du port FTP/FTPS, de TLS et des identifiants. Aucun fichier ne sera transféré.</p>'
+   +testOptionCheck('check_directory','Tester les droits de lecture du répertoire','Utilise uniquement la commande PWD, si FTPS est activé.')
+   +'<div class="notice">Sur FTP non chiffré, aucun mot de passe n’est envoyé : la vérification se limite à la connectivité.</div>';
+ }
+ if(kind==='ldap'){
+  return '<p>Vérification LDAPS/STARTTLS, liaison du compte de service et base DN.</p><div class="form-grid">'
+   +testOptionInput('test_user','Rechercher un utilisateur (facultatif)','login')
+   +testOptionInput('test_group','Rechercher un groupe (facultatif)','exploitation')+'</div>'
+   +'<p class="hint">La recherche utilise uniquement des filtres échappés, sans modification LDAP.</p>';
+ }
+ if(kind==='matrix'){
+  return '<p>Vérification du jeton Matrix avec whoami.</p>'
+   +testOptionInput('room_id','Identifiant de room pour les tests facultatifs','!id:example.org')
+   +testOptionCheck('check_room','Tester l’appartenance du bot à la room','Lecture de son état de membre.')
+   +testOptionCheck('send_message','Envoyer un vrai message de test dans la room','Aucun message n’est envoyé sans choix explicite.')
+   +testAdvancedFields('send_message',
+     '<label class="field"><span>Contenu du message de test</span><textarea name="message" rows="3" maxlength="1000" placeholder="[OrigamiTasks] Test de notification Matrix"></textarea></label>'
+     +'<div class="notice">L’envoi crée réellement un message dans la room indiquée. Pas de test E2EE.</div>');
+ }
+ if(kind==='proxmox'){
+  return '<p>Authentification du jeton Proxmox et lecture des permissions, sans toucher aux VM.</p>'
+   +testOptionCheck('check_nodes','Vérifier également la liste des nœuds','GET /api2/json/nodes, sans action')
+   +testOptionInput('node','Tester la lecture du statut d’un nœud (facultatif)','pve01');
+ }
+ if(kind==='api'){
+  return '<p>Test HTTP(S) de lecture seulement, vers un hôte explicitement autorisé.</p>'
+   +'<div class="form-grid"><label class="field"><span>Méthode HTTP</span><select name="method">'
+   +option([['GET','GET · Lire une ressource'],['HEAD','HEAD · Vérifier les en-têtes']],'GET')
+   +'</select></label>'
+   +testOptionInput('path','Chemin de diagnostic','/health',publicData.test_path||'/')
+   +'</div>'+testOptionInput('expected_status','Code HTTP attendu','2xx ou 200','2xx')
+   +'<div class="notice">Un statut HTTP réussi ne garantit pas que le serveur a réellement vérifié le token. Utiliser un endpoint nécessitant l’authentification. Aucun POST/PUT/DELETE autorisé ici.</div>';
+ }
+ return '<div class="notice">Ce type de coffre ne définit aucun protocole à tester. Créer une connexion typée avec un serveur ou une URL.</div>';
+}
+function updateCredentialTestVisibility(){
+ const form=document.getElementById('credentialTestForm');
+ if(!form)return;
+ form.querySelectorAll('[data-test-requires]').forEach(el=>{
+  const trigger=form.elements.namedItem(el.dataset.testRequires);
+  const visible=!!trigger?.checked;
+  el.hidden=!visible;
+  el.querySelectorAll('input[required],textarea[required]').forEach(input=>input.required=visible);
+ });
+ const recipient=form.elements.namedItem('recipient');
+ if(recipient)recipient.required=!!form.elements.namedItem('send_email')?.checked;
+ const room=form.elements.namedItem('room_id');
+ if(room)room.required=!!(form.elements.namedItem('check_room')?.checked||form.elements.namedItem('send_message')?.checked);
+}
+function openCredentialTestWizard(id){
  const entry=state.credentials.find(c=>c.id===id);
  if(!entry)return toast('Connexion introuvable',false);
- if(button)button.disabled=true;
- try{
-  const result=await api('/credentials/'+id+'/test','POST');
-  const rows=(result.checks||[]).map(item=>{
-   const success=item.status==='success';
-   return '<div class="connection-test-row"><span class="connection-test-mark '+(success?'passed':'untested')+'">'+(success?'✓':'—')+'</span><div><strong>'+e(item.name)+'</strong><p class="hint">'+e(item.detail)+'</p></div></div>';
-  }).join('');
-  openLayer('credentialTestLayer','Diagnostic · '+entry.name,
-    '<div class="notice">'+e(result.message||'Test effectué')+'</div>'
-    +'<div class="connection-test-list">'+rows+'</div>'
-    +'<p class="hint">Ces diagnostics ne lancent aucune commande SSH, aucun transfert, aucun email et aucune écriture LDAP. Les contrôles dépendent du protocole.</p>'
-    +'<div class="tool-row"><button class="btn primary" data-action="layer-close" data-layer="credentialTestLayer">Fermer</button></div>');
- }catch(ex){
-  openLayer('credentialTestLayer','Échec du test · '+entry.name,
-   '<div class="notice error">'+e(ex.message)+'</div>'
-   +'<p class="hint">Vérifier la cible, les certificats, les autorisations réseau et le compte utilisé. Aucun secret n’est affiché.</p>'
-   +'<div class="tool-row"><button class="btn" data-action="layer-close" data-layer="credentialTestLayer">Fermer</button></div>');
- }finally{if(button)button.disabled=false}
+ const body='<div class="connection-test-intro"><span class="chip tag">'+e(entry.kind.toUpperCase())+'</span><strong>'+e(entry.name)+'</strong>'
+  +'<span class="hint">'+e(entry.public?.host||entry.public?.uri||entry.public?.homeserver||entry.public?.url||entry.public?.base_url||'')+'</span></div>'
+  +'<form id="credentialTestForm" data-id="'+id+'"><div class="connection-test-config">'
+  +credentialTestFields(entry)+'</div>'
+  +'<div class="tool-row"><button class="btn primary" type="submit" '+(entry.kind==='generic'?'disabled':'')+'>Lancer le diagnostic</button>'
+  +'<button class="btn" type="button" data-action="layer-close" data-layer="credentialTestLayer">Fermer</button></div>'
+  +'<div id="credentialTestResult" aria-live="polite"></div></form>';
+ openLayer('credentialTestLayer','Tester une connexion',body);
+ updateCredentialTestVisibility();
 }
+function collectCredentialTestOptions(form,kind){
+ const data=new FormData(form),options={};
+ const boolKeys={smtp:['send_email'],ssh:['check_sftp','check_whoami'],ftp:['check_directory'],
+                 matrix:['check_room','send_message'],proxmox:['check_nodes']};
+ const textKeys={smtp:['recipient','subject','message'],ldap:['test_user','test_group'],
+                 matrix:['room_id','message'],proxmox:['node'],
+                 api:['method','path','expected_status']};
+ (boolKeys[kind]||[]).forEach(k=>options[k]=data.has(k));
+ (textKeys[kind]||[]).forEach(k=>{const value=String(data.get(k)||'').trim();if(value)options[k]=value});
+ if(options.send_email||options.send_message)options.confirm_send=true;
+ return options;
+}
+async function submitCredentialTest(form){
+ const id=Number(form.dataset.id),entry=state.credentials.find(c=>c.id===id);
+ if(!entry)return toast('Connexion introuvable',false);
+ const target=document.getElementById('credentialTestResult');
+ const submit=form.querySelector('button[type="submit"]');
+ if(submit)submit.disabled=true;
+ if(target)target.innerHTML='<div class="notice">Diagnostic en cours…</div>';
+ try{
+  const options=collectCredentialTestOptions(form,entry.kind);
+  const result=await api('/credentials/'+id+'/test','POST',{options});
+  const lines=(result.checks||[]).map(item=>{
+   const good=item.status==='success',warn=item.status==='warning';
+   return '<div class="connection-test-row"><span class="connection-test-mark '+(good?'passed':warn?'warning':'untested')+'">'+(good?'✓':warn?'!':'—')+'</span><div><strong>'+e(item.name)+'</strong><p class="hint">'+e(item.detail)+'</p></div></div>';
+  }).join('');
+  if(target)target.innerHTML='<div class="notice"><strong>Diagnostic effectué</strong> — '+e(result.message||'')+'</div>'
+   +'<div class="connection-test-list">'+lines+'</div>'
+   +(result.reference?'<p class="hint">Référence à rechercher dans le message : <code>'+e(result.reference)+'</code></p>':'');
+ }catch(ex){
+  if(target)target.innerHTML='<div class="notice error"><strong>Échec du diagnostic</strong> — '+e(ex.message)+'</div>'
+   +'<p class="hint">Vérifier le serveur, les identifiants, les certificats et les listes de destinations autorisées.</p>';
+ }finally{if(submit)submit.disabled=false}
+}
+
 function credentialSelected(id){
  const step=state.editor?.steps_json[state.selectedStep];
  if(!step||!state.pickerField)return;
@@ -489,9 +594,7 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='credential-list'){state.credentialAction='';state.pickerCredentialId=null;drawCredentialBrowser();return}
  if(a==='credential-edit'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='edit';drawCredentialBrowser();return}
  if(a==='credential-clone'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='clone';drawCredentialBrowser();return}
- if(a==='credential-test'){
-  await testCredentialConnection(id,b);return
- }
+ if(a==='credential-test'){openCredentialTestWizard(id);return}
  if(a==='credential-remove'){if(!confirm('Supprimer définitivement cette connexion ? Une connexion utilisée par un workflow ne pourra pas être supprimée.'))return;await api('/credentials/'+id,'DELETE');await reloadCredentials();drawCredentialBrowser();if(state.page==='vault')render();toast('Connexion supprimée');return}
  if(a==='group-browser'){await openGroupBrowser(b.dataset.role);return}
  if(a==='group-toggle'){const arr=state.editor.acl_json[state.groupRole]||[],group=b.dataset.name.toLowerCase();state.editor.acl_json[state.groupRole]=arr.includes(group)?arr.filter(x=>x!==group):[...arr,group];drawGroupBrowser();return}
@@ -505,6 +608,8 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git autorisée et redémarrer les services ?'))return;await api('/updates/request','POST',{action:b.dataset.value});toast('Demande envoyée au service de maintenance');hydrateAdmins();return}if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='credentialTestForm'){ev.preventDefault();await submitCredentialTest(ev.target);return}
+
  if(ev.target.id==='ldapAdminForm'){ev.preventDefault();
   try{const data=readLDAPForm();await api('/admin/ldap','PUT',data.settings);toast('Configuration LDAP enregistrée');await hydrateLDAP()}
   catch(ex){toast(ex.message,false)}return
@@ -552,6 +657,7 @@ async function bootstrap(){document.addEventListener('submit',handleSubmit);try{
  if(ev.target.id==='credentialSearch'){state.credentialSearch=ev.target.value;filterCredentialRows()}
  if(ev.target.id==='groupSearch'){state.groupQuery=ev.target.value;clearTimeout(state.groupTimer);state.groupTimer=setTimeout(searchGroups,250)}
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',ev=>{
+ if(ev.target.closest('#credentialTestForm'))updateCredentialTestVisibility();
  if(ev.target.name==='kind'&&ev.target.closest('#credentialManageForm')){
   document.getElementById('credentialProfile').innerHTML=credentialProfileFields(ev.target.value);
   smtpAuthFieldsVisibility();
