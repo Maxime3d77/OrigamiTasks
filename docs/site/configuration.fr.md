@@ -26,6 +26,12 @@ L'administrateur dispose du menu **Administration → LDAP / Active Directory**.
 
 **Tester la connexion** vérifie TLS/certificat, bind du compte de service, accès à la base DN, recherche des groupes et, facultativement, présence d'un compte par login. Test en lecture seule : aucun utilisateur n'est modifié et aucun mot de passe n'est affiché. La configuration est chiffrée dans SQLite avec `VAULT_KEY`. Conserver sa sauvegarde et limiter les droits de lecture. Le compte `admin` local reste indépendant du LDAP. Pour les tâches d'annuaire, les paramètres centraux sont les valeurs par défaut ; un compte de service séparé dans le coffre reste recommandé en cas d'écritures.
 
+### Administration LDAP / Active Directory
+
+Le menu **Administration → LDAP / Active Directory** permet de configurer l’URI et le port, LDAPS ou STARTTLS, le DN du compte de liaison et son mot de passe, les bases DN, l’attribut utilisateur (`uid` sous OpenLDAP), les groupes d’accès et le chemin de la CA. Les valeurs initiales proviennent de `.env`. Une configuration enregistrée dans l’interface prend le dessus sans toucher à ce fichier. Les paramètres et le mot de passe de liaison sont **chiffrés dans SQLite** à l’aide de `VAULT_KEY` ; aucun secret n’est réaffiché.
+
+**Tester la connexion LDAP** réalise un bind et des recherches en lecture seule sur la base, les groupes et, facultativement, un identifiant utilisateur. La CA doit être accessible dans le conteneur sous `/etc/ssl` ou `/app/data`. Le compte `admin` local demeure indépendant de l’annuaire.
+
 ## Identifiants
 
 Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
