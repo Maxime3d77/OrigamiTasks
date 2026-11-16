@@ -96,14 +96,13 @@ def _send_mail(values, options, credential_id):
             last = _LAST_MAIL_SEND.get(credential_id, 0)
             if last and time.monotonic() - last < _MAIL_SEND_COOLDOWN_SECONDS:
                 raise ConnectionTestError("Attendre 30 secondes entre deux e-mails de test pour cette connexion")
+            _LAST_MAIL_SEND[credential_id] = time.monotonic()
         session = None
         try:
             session = connections.open_smtp(values, timeout=TIMEOUT)
             refused = session.send_message(msg, from_addr=sender, to_addrs=[recipient])
             if refused:
                 raise ConnectionTestError("Le serveur SMTP a refusé le destinataire du test")
-            if credential_id is not None:
-                _LAST_MAIL_SEND[credential_id] = time.monotonic()
         except ConnectionTestError:
             raise
         except (OSError, TimeoutError, smtplib.SMTPException, ValueError) as exc:
@@ -312,8 +311,9 @@ def ldap(values, options=None):
                 attr = values.get("user_attribute") or ldap_settings.current().get("user_attribute") or "uid"
                 if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9-]*", attr):
                     raise ConnectionTestError("LDAP : attribut de recherche invalide")
-                found = conn.search(base, "("+attr+"="+escape_filter_chars(test_user)+")",
-                                    SUBTREE, attributes=["cn"], size_limit=2)
+                conn.search(base, "("+attr+"="+escape_filter_chars(test_user)+")",
+                            SUBTREE, attributes=["cn"], size_limit=2)
+                found = bool(getattr(conn, "entries", []))
                 checks.append(check("Recherche utilisateur", "Compte trouvé")
                               if found else warning("Recherche utilisateur", "Utilisateur introuvable"))
             test_group = _short(options, "test_group", 100)
@@ -321,9 +321,10 @@ def ldap(values, options=None):
                 group_base = values.get("group_base_dn") or base
                 if not group_base:
                     raise ConnectionTestError("LDAP : base DN de groupes manquante")
-                found = conn.search(group_base,
-                                    "(cn="+escape_filter_chars(test_group)+")",
-                                    SUBTREE, attributes=["cn"], size_limit=2)
+                conn.search(group_base,
+                            "(cn="+escape_filter_chars(test_group)+")",
+                            SUBTREE, attributes=["cn"], size_limit=2)
+                found = bool(getattr(conn, "entries", []))
                 checks.append(check("Recherche groupe", "Groupe trouvé")
                               if found else warning("Recherche groupe", "Groupe introuvable"))
             return ok("ldap", "Connexion et bind LDAP vérifiés ; recherches facultatives en lecture seule.",
@@ -388,6 +389,7 @@ def matrix(values, options=None, credential_id=None):
                 last = _LAST_MATRIX_SEND.get(credential_id, 0)
                 if last and time.monotonic()-last < _MAIL_SEND_COOLDOWN_SECONDS:
                     raise ConnectionTestError("Attendre 30 secondes entre deux messages Matrix de test")
+                _LAST_MATRIX_SEND[credential_id] = time.monotonic()
             try:
                 integrations.matrix_message(
                     {"homeserver":base, "room_id":room, "message":message}, values,
@@ -397,8 +399,6 @@ def matrix(values, options=None, credential_id=None):
                 raise ConnectionTestError(
                     "Matrix : envoi refusé ou impossible ("+type(exc).__name__+")"
                 ) from None
-            if credential_id is not None:
-                _LAST_MATRIX_SEND[credential_id] = time.monotonic()
         checks.append(check("Envoi message", "API Matrix a accepté le message ; vérifier son affichage dans la room"))
     return ok("matrix", "Jeton Matrix validé ; tests demandés effectués.", checks)
 
