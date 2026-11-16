@@ -489,28 +489,67 @@ def api(values, options=None):
         raise ConnectionTestError("API : erreur réseau ou certificat TLS") from None
 
 
-def run(kind, values):
-    if kind == "smtp":
-        try:
-            result = connections.test_smtp(values)
-        except connections.ConnectionError as exc:
-            raise ConnectionTestError(str(exc)) from None
-        mode = values.get("tls_mode") or "starttls"
-        auth = bool(result.get("authenticated"))
-        checks = [check("Connectivité SMTP", "Serveur accessible")]
-        checks.append(check("Sécurité", {"ssl":"TLS direct vérifié",
-                                         "starttls":"STARTTLS validé",
-                                         "none":"Connexion sans TLS (relais interne)"}[mode]))
-        checks.append(check("Authentification", "Identifiants acceptés") if auth
-                      else untested("Authentification", "Non requise pour ce relais"))
-        return ok("smtp", result["message"], checks)
-    registry = {"ssh": ssh, "ftp": ftp, "ldap": ldap, "matrix": matrix,
-                "proxmox": proxmox, "api": api}
+OPTION_KEYS = {
+    "smtp": {"send_email", "confirm_send", "recipient", "subject", "message"},
+    "ssh": {"check_sftp", "check_whoami"},
+    "ftp": {"check_directory"},
+    "ldap": {"test_user", "test_group"},
+    "matrix": {"check_room", "room_id", "send_message", "confirm_send", "message"},
+    "proxmox": {"check_nodes", "node"},
+    "api": {"path", "method", "expected_status"},
+    "generic": set(),
+}
+
+
+def run(kind, values, options=None, credential_id=None):
+    options = options or {}
+    if not isinstance(options, dict):
+        raise ConnectionTestError("Options de test invalides")
+    if kind not in OPTION_KEYS:
+        raise ConnectionTestError("Type de connexion non pris en charge")
+    if set(options) - OPTION_KEYS[kind]:
+        raise ConnectionTestError("Paramètre non autorisé pour ce protocole")
     if kind == "generic":
         raise ConnectionTestError(
             "Identifiant générique : aucun protocole ou serveur défini. "
-            "Choisir un profil SSH, SMTP, LDAP, API… pour tester une connexion."
+            "Choisir un profil SSH, SMTP, LDAP ou API pour le tester."
         )
-    if kind not in registry:
-        raise ConnectionTestError("Type de connexion non pris en charge")
-    return registry[kind](values)
+    if kind == "smtp":
+        sending = _bool(options, "send_email")
+        mode = values.get("tls_mode") or "starttls"
+        if mode not in ("ssl", "starttls", "none"):
+            raise ConnectionTestError("Mode SMTP invalide")
+        authenticated = bool(values.get("auth", bool(values.get("username"))))
+        if sending:
+            reference = _send_mail(values, options, credential_id)
+            message = "Message accepté par le serveur SMTP : vérifier sa présence dans la boîte destinataire."
+        else:
+            try:
+                result = connections.test_smtp(values)
+            except connections.ConnectionError as exc:
+                raise ConnectionTestError(str(exc)) from None
+            authenticated = bool(result.get("authenticated"))
+            message = result["message"]
+            reference = None
+        checks = [check("Connectivité SMTP", "Serveur accessible"),
+                  check("Sécurité", {
+                      "ssl": "SSL/TLS direct vérifié",
+                      "starttls": "STARTTLS négocié",
+                      "none": "Relais interne sans TLS"
+                  }[mode]),
+                  check("Authentification", "Identifiants SMTP acceptés")
+                  if authenticated else untested("Authentification", "Non requise")]
+        if sending:
+            checks.append(check("Remise au serveur SMTP", "Commande DATA acceptée ; référence "+reference))
+            checks.append(untested("Réception en boîte", "À vérifier dans la boîte de réception et les spams"))
+        else:
+            checks.append(untested("Envoi / réception", "Aucun message envoyé ; cocher l'envoi réel pour tester"))
+        result = ok("smtp", message, checks)
+        if reference:
+            result["reference"] = reference
+        return result
+    if kind == "matrix":
+        return matrix(values, options, credential_id)
+    registry = {"ssh": ssh, "ftp": ftp, "ldap": ldap,
+                "proxmox": proxmox, "api": api}
+    return registry[kind](values, options)
