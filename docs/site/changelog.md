@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.9-rc1 — 2026-11-16
+
+- **SSH:** the default host-key policy is now persistent trust-on-first-use (`SSH_HOST_KEY_POLICY=accept-new`): new public host keys are stored automatically; changed keys are blocked. `strict` remains available for manual approval.
+- **LDAP:** schema-neutral read-only queries eliminate client-side `LDAPObjectClassError` from mixed AD/OpenLDAP group filters. The imported CA continues to verify LDAPS/STARTTLS; PEM files with a UTF-8 BOM are supported.
+- **UI/tests:** no mandatory per-server fingerprint entry, public CA import clears the TLS bypass checkbox in the form; regression tests and English/French documentation updated.
+
 ## 0.3.8-rc1 — 2026-11-16
 
 - **SSH:** browser-assisted public server host-key pinning, requiring independently verified SHA256 fingerprint confirmation. Changed existing keys remain blocked. User SSH private keys and vault identities are never altered by host-key approval.

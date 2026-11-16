@@ -64,6 +64,57 @@ def _compare_known(host, ssh_port, offered):
     return "trusted" if old==offered else "changed"
 
 
+
+def accept_new(hostname, key):
+    """Persist an SSH host key on first use (TOFU), never replace a known host.
+
+    Paramiko passes host for port 22 and [host]:port for custom ports.
+    No SSH user credential is involved in this operation.
+    """
+    import paramiko
+    if (not isinstance(hostname, str) or not hostname or len(hostname) > 260 or
+            any(c in hostname for c in ('\n', '\r', '\t', ' ', '\x00'))):
+        raise HostKeyError("Nom d'hôte SSH invalide pour known_hosts")
+    path = _trusted_path()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+        with os.fdopen(fd, "r+", encoding="utf-8") as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                # Validate while locked, also across worker processes.
+                stream.seek(0)
+                content = stream.read()
+                known = paramiko.HostKeys()
+                if content.strip():
+                    try:
+                        known.load(str(path))
+                    except (OSError, paramiko.SSHException, ValueError):
+                        raise HostKeyError("known_hosts invalide : aucune clé ajoutée") from None
+                existing = known.lookup(hostname)
+                if existing:
+                    if existing.get(key.get_name()) == key:
+                        return False
+                    raise HostKeyError(
+                        "Clé d'hôte SSH différente pour un serveur déjà connu : "
+                        "connexion bloquée, vérifier la rotation de clé"
+                    )
+                if content and not content.endswith("\n"):
+                    stream.write("\n")
+                stream.write(hostname + " " + key.get_name() + " " +
+                             key.get_base64() + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+                return True
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        raise HostKeyError(
+            "Impossible d'enregistrer la clé publique SSH dans le volume persistent known_hosts"
+        ) from None
+
+
 def _fetch(host, ssh_port):
     """Read the offered public host key (no user authentication attempt)."""
     import paramiko

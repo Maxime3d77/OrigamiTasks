@@ -537,13 +537,13 @@ def lookup_directory_groups(request:Request,q:str=''):
     settings=ldap_settings.current()
     if settings['enabled'] and settings['uri'] and settings['group_base_dn']:
         try:
-            from ldap3 import Server, Connection, SUBTREE, Tls
+            from ldap3 import Server, Connection, SUBTREE, NONE
             from ldap3.utils.conv import escape_filter_chars
             if not (settings['uri'].startswith('ldaps://') or settings['starttls']):
                 raise ValueError('LDAPS ou STARTTLS obligatoire')
-            server=Server(settings['uri'],tls=Tls(validate=ssl.CERT_REQUIRED,ca_certs_file=settings['ca_cert'] or None),connect_timeout=6)
+            server=Server(settings['uri'],tls=ldap_settings.tls_for(settings),connect_timeout=6,get_info=NONE)
             conn=Connection(server,user=settings['bind_dn'],password=settings['bind_password'],
-                            auto_bind=not settings['starttls'],receive_timeout=8)
+                            auto_bind=not settings['starttls'],receive_timeout=8,check_names=False)
             if settings['starttls']:
                 conn.open()
                 if not conn.start_tls() or not conn.bind(): raise ValueError('Bind LDAP refusé')

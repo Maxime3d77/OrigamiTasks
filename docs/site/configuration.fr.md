@@ -14,6 +14,7 @@ Le fichier `.env.example` constitue la liste de référence des paramètres. Red
 | `PROXMOX_ALLOWED_HOSTS` | API Proxmox autorisées et tests de connexion | ex. `pve.example.org:8006` |
 | `CONNECTION_TEST_ALLOWED_HOSTS` | Hôtes HTTPS autorisés pour les tests de jetons API génériques | Vide par défaut ; ajouter seulement des hôtes approuvés |
 | `PROXMOX_CA_CERT` | CA PEM de confiance montée dans le conteneur | Si CA interne |
+| `SSH_HOST_KEY_POLICY` | Acceptation des clés d'hôte | `accept-new` par défaut ; `strict` si contrôle manuel exigé |
 | `ALLOW_PROXMOX_ACTIONS` | Active les actions VM encadrées | `false` avant revue |
 | `GIT_ALLOWED_ORIGIN` | Origine Git autorisée au service de mise à jour | Dépôt protégé uniquement |
 
@@ -38,29 +39,28 @@ Le menu **Administration → LDAP / Active Directory** permet de configurer l’
 Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
 
 
-### Approuver la clé d'hôte SSH depuis le navigateur
+### Acceptation SSH automatique des nouveaux serveurs (TOFU)
 
-Une clé privée SSH importée depuis un autre ordinateur peut être utilisée telle quelle dans **Coffre-fort → Identité SSH**. La clé privée de l'utilisateur est indépendante de la clé publique d'identité **du serveur**.
+Une identité SSH du coffre est **réutilisable sans modification** sur tous les hôtes où la clé publique utilisateur correspondante est autorisée. Elle n'est liée ni au FQDN ni au port d'un serveur.
 
-Dans **Coffre-fort → Tester la connexion SSH**, choisir un FQDN manuel ou un serveur d'inventaire, puis **Vérifier la clé d'hôte du serveur**. OrigamiTasks affiche l'algorithme, l'empreinte SHA256 et l'état connu / inconnu / modifié. Avant de l'approuver, **comparer l'empreinte à celle obtenue directement sur la console du serveur cible**, par exemple avec `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256`. Recopier l'empreinte vérifiée dans le champ de confirmation et cocher la validation indépendante ; alors seulement le serveur enregistre la **clé d'hôte publique** dans `/app/data/known_hosts`, persistant dans `data/known_hosts` sur l'hôte.
+Avec `SSH_HOST_KEY_POLICY=accept-new` (valeur par défaut), OrigamiTasks mémorise **automatiquement** la première clé publique de chaque serveur dans `/app/data/known_hosts` lors du test SSH, d'un workflow ou d'un déploiement d'agent. Les connexions suivantes doivent présenter la même clé ; une empreinte différente bloque immédiatement l'exécution. Le fichier persiste sur le volume de données.
 
-La clé d'hôte est récupérée une seconde fois lors de l'approbation et son empreinte doit être identique. Une empreinte déjà connue mais différente bloque l'opération : vérifier une éventuelle rotation de clé depuis la console. Le système ne fait pas confiance automatiquement à un serveur inconnu. **Aucune clé privée utilisateur n'est envoyée dans ce parcours.**
+Ce mode facilite la première connexion, mais il présente un risque d'usurpation **à cette première connexion** si le réseau est compromis. Pour les environnements nécessitant une vérification indépendante, définir `SSH_HOST_KEY_POLICY=strict` dans le `.env` et redémarrer le conteneur : l'approbation manuelle depuis l'interface reste disponible. Dans ce mode, la commande `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` sur la console cible permet de comparer l'empreinte.
 
 ### Import des chaînes de CA LDAP en CRT
 
 Un fichier `.crt` peut contenir plusieurs certificats X.509. L'import prend en charge PEM et DER ; pour un bundle PEM mêlant CA et certificat serveur, il **conserve uniquement les certificats d'autorité** et indique les certificats non-CA ignorés. Les certificats CA avec `CA:TRUE` sont conservés ; un fichier ne contenant que des certificats serveur est refusé. Après import, utiliser le chemin CA fourni, **enregistrer la configuration LDAP**, puis vérifier LDAPS/STARTTLS. Si la case « Ignorer la vérification du certificat » est grisée, c'est que `ALLOW_INSECURE_LDAP_TLS` est désactivé sur l'hôte. Avec une CA correcte, laisser cette case désactivée.
 
 
-### Diagnostic SSH : clé privée utilisateur et clé d'hôte
+### Diagnostic SSH : identité privée et clé d'hôte
 
-La connexion SSH du coffre contient **la clé privée du compte utilisateur** (OpenSSH, RSA ou EC en PEM), pas la clé d'identité du serveur. La clé publique correspondante doit être dans \`authorized_keys\` côté serveur. Une clé \`/etc/ssh/ssh_host_*_key\` ne doit jamais être importée comme identité du compte.
+La **clé privée SSH utilisateur** enregistrée dans le coffre (OpenSSH/PEM, éventuellement protégée par une phrase secrète) sert à s'authentifier. Sa clé publique correspondante doit se trouver dans `authorized_keys` sur les serveurs. Elle n'est **pas** la clé privée `/etc/ssh/ssh_host_*` des serveurs.
 
-Le fichier de confiance des serveurs est \`data/known_hosts\` sur l'hôte OrigamiTasks, monté dans le conteneur sous \`/app/data/known_hosts\`. Pour \`serveur.fr\` (exemple fictif), afficher l'empreinte avec \`ssh-keyscan -T 5 -p 22 -t ed25519 serveur.fr 2>/dev/null | ssh-keygen -lf - -E sha256\`. **Comparer cette empreinte à celle obtenue directement sur la console du serveur** avec \`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256\` avant d'ajouter la clé d'hôte. Le diagnostic différencie clé inconnue (SHA-256 affichée, jamais acceptée automatiquement), clé remplacée, authentification refusée et protocole incompatible.
-
+Le test avec FQDN manuel n'ajoute pas ce FQDN à l'inventaire. En mode `accept-new`, la première connexion mémorise uniquement la **clé d'hôte publique** dans `known_hosts`, sans copie manuelle d'empreinte. Le bouton « Afficher l’empreinte SSH (facultatif) » reste utile pour contrôler un changement de clé.
 
 ### Test SSH ponctuel sans inventaire
 
-Dans **Coffre-fort → Identité SSH → Tester**, choisir **Saisie manuelle**, indiquer le FQDN du serveur (par exemple `serveur.fr`) et son port SSH, 22 par défaut. La clé ou le mot de passe du coffre sont testés sur ce serveur, sans inscrire le FQDN dans l’inventaire ni l’enregistrer dans l’identité. Les modes **Inventaire SSH** et **Ancien hôte** restent disponibles. Les clés d’hôte SSH doivent toujours être vérifiées dans `SSH_KNOWN_HOSTS` pour empêcher les attaques de type usurpation de serveur.
+Dans **Coffre-fort → Identité SSH → Tester**, choisir **Saisie manuelle**, indiquer le FQDN du serveur (par exemple `serveur.fr`) et son port SSH, 22 par défaut. La clé ou le mot de passe du coffre sont testés sur ce serveur, sans inscrire le FQDN dans l’inventaire ni l’enregistrer dans l’identité. Les modes **Inventaire SSH** et **Ancien hôte** restent disponibles. Le fichier `known_hosts` mémorise automatiquement les nouvelles clés en mode `accept-new`, puis refuse toute substitution.
 
 ### Import de certificats LDAP CRT, DER ou PEM
 
@@ -79,7 +79,7 @@ Le menu **Administration → Serveurs & groupes SSH** permet de :
 
 Les tâches **SSH**, **SFTP** et le runner **Ansible** proposent un sélecteur de **serveur cible enregistré** : elles utilisent le compte SSH du coffre, mais le FQDN et le port du serveur sélectionné. Un groupe sert à **organiser et filtrer les cibles**, pas à exécuter implicitement une tâche sur tous les serveurs. Les anciennes connexions SSH contenant encore `host`/`port` continuent de fonctionner ; la sélection d'un serveur de l'inventaire les remplace pour cette tâche ou ce test.
 
-La vérification de la **clé d'hôte SSH** reste stricte (`known_hosts`) afin de prévenir les connexions à un serveur inconnu ou usurpé. Vérifier l'empreinte par un canal fiable avant de l'ajouter au fichier `SSH_KNOWN_HOSTS`. Aucune commande SSH n'est lancée lors du simple test d'authentification.
+La première clé d'hôte SSH est enregistrée automatiquement avec le mode `accept-new`, puis un changement de clé est refusé. `strict` impose l'approbation manuelle. Aucune commande SSH n'est lancée lors du simple test d'authentification.
 
 ### Assistant de diagnostic des connexions
 
@@ -98,7 +98,7 @@ Par défaut, les diagnostics **n'envoient aucun message** et ne modifient aucune
 
 ## SSH distant
 
-Une entrée `known_hosts` vérifiée est obligatoire. Contrôler l'empreinte **par un canal indépendant** ; ne pas accepter automatiquement la première clé en production. Windows exige OpenSSH Server et un compte de service capable d'utiliser PowerShell ; Linux exige un compte SSH de service.
+Avec `accept-new`, la première clé est acceptée et persistée automatiquement ; une modification ultérieure est bloquée. Pour une infrastructure critique, choisir `strict` et comparer les empreintes par un canal indépendant. Windows exige OpenSSH Server et un compte de service capable d'utiliser PowerShell ; Linux exige un compte SSH de service.
 
 ## Règles réseau
 

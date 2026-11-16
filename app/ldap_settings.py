@@ -53,6 +53,8 @@ def import_ca(pem_text=None, der_base64=None):
             pem_text=cert.public_bytes(Encoding.PEM).decode("ascii")
         except (ValueError,binascii.Error):
             raise LDAPSettingsError("Fichier CRT/DER invalide ou illisible") from None
+    if isinstance(pem_text, str):
+        pem_text = pem_text.lstrip('\ufeff').strip()
     if not isinstance(pem_text,str) or not 100<=len(pem_text)<=131072:
         raise LDAPSettingsError("Certificat CA invalide (128 Kio maximum)")
     if 'PRIVATE KEY' in pem_text or '\x00' in pem_text:
@@ -228,13 +230,14 @@ def test(settings, user_login=''):
         raise LDAPSettingsError('Activer LDAP pour lancer le test')
     check_settings(settings)
     try:
-        from ldap3 import Server, Connection, SUBTREE, BASE
+        from ldap3 import Server, Connection, SUBTREE, BASE, NONE
         from ldap3.utils.conv import escape_filter_chars
         server = Server(settings['uri'],
                         tls=tls_for(settings),
-                        connect_timeout=7)
+                        connect_timeout=7, get_info=NONE)
         conn = Connection(server,user=settings['bind_dn'],password=settings['bind_password'],
-                          auto_bind=not settings.get('starttls'),receive_timeout=10)
+                          auto_bind=not settings.get('starttls'),receive_timeout=10,
+                          check_names=False)
         try:
             if settings.get('starttls'):
                 conn.open()
@@ -261,5 +264,13 @@ def test(settings, user_login=''):
     except LDAPSettingsError:
         raise
     except Exception as exc:
-        # Avoid echoing credentials, server responses or sensitive LDAP results.
-        raise LDAPSettingsError('Échec LDAP ('+type(exc).__name__+') : vérifier TLS, résolution DNS, bind et bases DN') from None
+        # Classify failures without disclosing LDAP entries or credentials.
+        if isinstance(exc, ssl.SSLCertVerificationError):
+            detail = "Certificat LDAP non approuvé : vérifier la CA importée et le FQDN du serveur"
+        elif isinstance(exc, ssl.SSLError):
+            detail = "Négociation TLS LDAP échouée : vérifier la chaîne de certificats"
+        elif type(exc).__name__ == "LDAPObjectClassError":
+            detail = "Schéma LDAP incompatible avec le filtre de groupes ; vérifier le type d'annuaire"
+        else:
+            detail = "Vérifier l'annuaire, le bind et les bases DN"
+        raise LDAPSettingsError('Échec LDAP ('+type(exc).__name__+') : '+detail) from None
