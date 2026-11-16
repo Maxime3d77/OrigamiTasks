@@ -4,6 +4,19 @@
 
 A **job** contains ordered **steps**; each step has a unique ID, type, JSON configuration, optional condition, retry policy and `on_success`/`on_failure` target. `END` exits successfully; `FAIL` terminates with failure. Up to 80 steps and 200 graph transitions are accepted per run. The engine snapshots steps when a run is queued, preserving that run against later edits.
 
+## Connection-source forms, scheduling and error recovery
+
+Connection steps (**SMTP, SSH/SFTP, FTP/FTPS, Matrix, LDAP, HTTP and Ansible runner**) now offer **Use vault connection** (recommended) versus **Manual network configuration**. Only the relevant endpoint fields are shown; action-specific inputs remain visible.
+
+- **Vault SMTP:** select an SMTP profile with host, port, TLS, sender and credentials already saved; specify only recipient, subject and body. Stale task-level SMTP host overrides are ignored when vault mode is explicitly selected.
+- **Manual SMTP:** supply host, port, transport security (STARTTLS / implicit SSL / unencrypted internal relay), sender and message. No plaintext login/password is permitted; use the vault for authenticated SMTP.
+- **SSH/SFTP/Ansible:** vault mode uses a server inventory selection; manual mode uses a typed FQDN/port. The SSH identity remains in the encrypted vault in both cases.
+- **HTTP API:** vault mode uses the stored base URL and token plus a step-specific relative path; manual mode uses a full URL without embedding any password.
+
+Scheduling choices are **Manual**, **Once**, **Repeat using assistant** (minute / five minutes / hourly / daily / weekly presets) and **Advanced cron**. Inactive schedule fields are hidden; **Once** shows no interval controls.
+
+Click **Add on failure** on a step to insert a new task automatically connected to its red `on_failure` branch. By default the recovery path ends in **FAIL** so a failed workflow remains observable; explicitly connect the recovery task to `END` when recovery should make the run successful. Additional steps can be chained via branch targets.
+
 ## Example: branch after a backup
 
 1. **Run a backup** (`ssh` to a dedicated Linux runner); define `on_success: notify_ok`, `on_failure: notify_fail`.
