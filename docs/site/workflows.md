@@ -1,5 +1,11 @@
 # Workflows and scheduling
 
+### Per-workflow HTML email completion reports
+
+In the workflow editor (administrator only), use **HTML email report** to choose an encrypted SMTP vault profile, up to **5 recipients** and which events trigger a report (**success**, **failure** or both). Reports are dispatched once after a manual, scheduled, or webhook-triggered execution finishes.
+
+The subject shows `[OrigamiTasks] [SUCCÈS]` or `[OrigamiTasks] [ÉCHEC]`, workflow name and run ID. The HTML/plaintext email includes status, requester, UTC completion timestamp, per-step names, attempts, exit codes, and redacted error snippets. Full logs remain in **Runs**, and SMTP delivery failures never alter the workflow status. Operators cannot reassign vault SMTP profiles.
+
 ### Zoom and navigation in the workflow graph
 
 The editor provides **−**, **＋**, **100%**, **Fit width**, and **Overview** controls. Zoom ranges from 8% to 250%, with buttons or **Ctrl + mouse wheel**. Drag the **graph background** to pan horizontally/vertically; clicking a node still selects the step. Zoom and scroll position persist when switching steps within the same workflow. The graph has a bounded viewport so it never stretches the whole editor window.
