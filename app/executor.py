@@ -121,15 +121,13 @@ def _ssh(command, opts, cred, timeout):
     kwargs = dict(hostname=target_host, port=int(target_port), username=user,
                   timeout=min(timeout, 30), auth_timeout=min(timeout, 30), look_for_keys=False, allow_agent=False)
     if cred.get('private_key'):
-        key = cred['private_key']
-        for cls in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey):
-            try:
-                kwargs['pkey'] = cls.from_private_key(io.StringIO(key), password=cred.get('passphrase') or None)
-                break
-            except (paramiko.SSHException, ValueError):
-                continue
-        if 'pkey' not in kwargs:
-            raise StepError('Clé privée SSH invalide')
+        from .ssh_keys import load_private_key, SSHKeyError
+        try:
+            kwargs['pkey'] = load_private_key(
+                cred['private_key'], cred.get('passphrase')
+            )
+        except SSHKeyError as exc:
+            raise StepError(str(exc)) from None
     else:
         kwargs['password'] = cred.get('password')
     try:
