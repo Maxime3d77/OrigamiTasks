@@ -324,8 +324,8 @@ def add_datacenter(payload:dict[str,Any],request:Request):
         raise HTTPException(422,str(exc))
     with db.session() as con:
         credential_exists=con.execute('SELECT kind FROM credentials WHERE id=?',(credential_id,)).fetchone()
-        if not credential_exists or credential_exists['kind']!='proxmox':
-            raise HTTPException(422,'Un jeton Proxmox du coffre-fort est obligatoire')
+        if not credential_exists or credential_exists['kind'] not in ('proxmox','api'):
+            raise HTTPException(422,'Un jeton Proxmox/API du coffre-fort est obligatoire')
         try:
             cur=con.execute('INSERT INTO datacenters(name,url,credential_id,created_at) VALUES (?,?,?,?)',
                             (name,origin,credential_id,db.now()))
