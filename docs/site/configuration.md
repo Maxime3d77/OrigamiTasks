@@ -37,6 +37,14 @@ Use **Administration → LDAP / Active Directory** to configure URI and port, LD
 
 Create **protocol-specific vault profiles** for SMTP (server, port, STARTTLS / implicit SSL / unencrypted relay, optional authentication and default sender), SSH/SFTP, FTP/FTPS, LDAP, API, Matrix and Proxmox. The editor changes fields when you select a connection type. **Test SMTP** verifies TLS and optional credentials without sending mail. Use the **Administration → LDAP** test for the directory itself. Grant workflow editing rights only to trusted operators. Non-sensitive settings can be reviewed by administrators; passwords, tokens and SSH keys are never re-displayed. Blank secret fields retain their existing encrypted values. Old hostless credentials remain compatible with tasks that define their own host.
 
+### Test SSH credentials against a temporary manual host
+
+In **Vault → SSH identity → Test**, select **Manual FQDN**, enter a server hostname (such as `vl-exploittools-01.infra.aday.fr`) and SSH port (22 by default). The vault private key or password is tested against the specified host, without creating an inventory entry or modifying the identity. **Inventory SSH** and **Legacy host** are still available. SSH host-key pinning through `SSH_KNOWN_HOSTS` remains mandatory.
+
+### LDAP public CA certificates in CRT, DER, or PEM
+
+In **Administration → LDAP**, import a `.crt`, `.cer`, `.der`, or `.pem` public CA file. A `.crt` may be text **PEM** or binary **DER**; both are recognized and normalized to PEM. Private keys and non-CA server certificates are rejected. **Save** the LDAP settings after importing, then run **Test LDAP**. LDAPS/STARTTLS certificate validation remains mandatory, without a global insecure skip option.
+
 ### SSH identities and reusable server groups
 
 An **SSH** vault entry is a **reusable identity**, not a host configuration: profile name, login, password **or** OpenSSH private key, with an optional key passphrase. Secrets remain encrypted and are never revealed after saving. Prefer individual least-privilege service keys.
