@@ -136,3 +136,29 @@ def test_published_docs_and_interface_use_generic_server_examples():
         content=path.read_text()
         assert "vl-exploittools-01" not in content, path
         assert "infra.aday.fr" not in content, path
+
+
+
+def test_legacy_der_ca_without_basic_constraints_imports_like_pem():
+    from datetime import datetime, timedelta, timezone
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    from app import ldap_settings
+    private=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+    name=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,"Example legacy LDAP CA")])
+    now=datetime.now(timezone.utc)
+    cert=(x509.CertificateBuilder().subject_name(name).issuer_name(name)
+          .public_key(private.public_key()).serial_number(x509.random_serial_number())
+          .not_valid_before(now-timedelta(days=1))
+          .not_valid_after(now+timedelta(days=2))
+          .sign(private,hashes.SHA256()))
+    der=cert.public_bytes(serialization.Encoding.DER)
+    result=ldap_settings.import_ca(der_base64=base64.b64encode(der).decode())
+    path=Path(result["path"])
+    try:
+        assert path.is_file()
+        assert path.read_bytes().startswith(b"-----BEGIN CERTIFICATE-----")
+    finally:
+        path.unlink(missing_ok=True)
