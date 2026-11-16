@@ -39,7 +39,7 @@ Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, S
 
 ### Test SSH ponctuel sans inventaire
 
-Dans **Coffre-fort → Identité SSH → Tester**, choisir **Saisie manuelle**, indiquer le FQDN du serveur (par exemple `vl-exploittools-01.infra.aday.fr`) et son port SSH, 22 par défaut. La clé ou le mot de passe du coffre sont testés sur ce serveur, sans inscrire le FQDN dans l’inventaire ni l’enregistrer dans l’identité. Les modes **Inventaire SSH** et **Ancien hôte** restent disponibles. Les clés d’hôte SSH doivent toujours être vérifiées dans `SSH_KNOWN_HOSTS` pour empêcher les attaques de type usurpation de serveur.
+Dans **Coffre-fort → Identité SSH → Tester**, choisir **Saisie manuelle**, indiquer le FQDN du serveur (par exemple `serveur.fr`) et son port SSH, 22 par défaut. La clé ou le mot de passe du coffre sont testés sur ce serveur, sans inscrire le FQDN dans l’inventaire ni l’enregistrer dans l’identité. Les modes **Inventaire SSH** et **Ancien hôte** restent disponibles. Les clés d’hôte SSH doivent toujours être vérifiées dans `SSH_KNOWN_HOSTS` pour empêcher les attaques de type usurpation de serveur.
 
 ### Import de certificats LDAP CRT, DER ou PEM
 
