@@ -340,10 +340,21 @@ def known_folders(con):
 
 @app.get('/api/folders')
 def list_folders(request:Request):
-    security.require(request)
+    user=security.require(request)
     with db.session() as con:
-        paths=known_folders(con)
-        counts={row['folder']:row['n'] for row in con.execute('SELECT folder,COUNT(*) AS n FROM jobs GROUP BY folder')}
+        rows=con.execute('SELECT * FROM jobs').fetchall()
+        allowed=[db.obj(row,'tags_json','acl_json','steps_json','schedule_json') for row in rows]
+        allowed=[job for job in allowed if security.can_job(user,job,'view')]
+        if user['role']=='admin':
+            paths=known_folders(con)
+        else:
+            paths={'Général'}
+            for job in allowed:
+                parts=job['folder'].split('/')
+                paths.update('/'.join(parts[:i]) for i in range(1,len(parts)+1))
+        counts={}
+        for job in allowed:
+            counts[job['folder']]=counts.get(job['folder'],0)+1
     return {'items':[{'path':p,'name':p.rsplit('/',1)[-1],
             'parent':p.rsplit('/',1)[0] if '/' in p else '',
             'count':counts.get(p,0),'depth':p.count('/')} for p in sorted(paths,key=lambda x:(x.count('/'),x.casefold()))]}
