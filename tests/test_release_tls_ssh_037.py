@@ -71,6 +71,10 @@ def test_ldap_skip_tls_trust_requires_both_saved_optin_and_host_authorization(mo
     unsafe=ldap_settings.tls_for(dict(settings,skip_cert_verification=True))
     assert strict.validate==ssl.CERT_REQUIRED
     assert unsafe.validate==ssl.CERT_NONE
+    settings["uri"]="ldaps://directory.example.org:636"
+    other=ldap_settings.tls_for(dict(settings,skip_cert_verification=True),
+                                uri="ldaps://other.example.org:636")
+    assert other.validate==ssl.CERT_REQUIRED
 
 
 def test_update_worker_preflight_never_merges_or_restarts(tmp_path,monkeypatch):
