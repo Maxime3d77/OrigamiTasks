@@ -279,7 +279,7 @@ async function openGroupBrowser(role){
 }
 async function searchGroups(){
  const q=state.groupQuery||'',token=Symbol();state.groupRequest=token;
- try{const r=await api('/directory/groups?q='+encodeURIComponent(q));if(state.groupRequest!==token)return;state.directoryGroups=r.items;state.groupWarning=r.warning||'';drawGroupBrowser()}
+ try{const r=await api('/directory/groups?q='+encodeURIComponent(q));if(state.groupRequest!==token)return;const focused=document.activeElement?.id==='groupSearch',caret=focused?document.activeElement.selectionStart:null;state.directoryGroups=r.items;state.groupWarning=r.warning||'';drawGroupBrowser();if(focused){const input=document.getElementById('groupSearch');input?.focus();if(caret!==null)input?.setSelectionRange(caret,caret)}}
  catch(ex){state.groupWarning=ex.message;drawGroupBrowser()}
 }
 function drawGroupBrowser(){
