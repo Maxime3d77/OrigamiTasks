@@ -124,6 +124,19 @@ CREATE TABLE IF NOT EXISTS agents (
  token_hash TEXT, enrolled INTEGER NOT NULL DEFAULT 0,
  revoked INTEGER NOT NULL DEFAULT 0, last_seen TEXT, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_deploy_batches (
+ id INTEGER PRIMARY KEY, actor TEXT NOT NULL, platform TEXT NOT NULL,
+ agent_group TEXT NOT NULL, total INTEGER NOT NULL, status TEXT NOT NULL,
+ created_at TEXT NOT NULL, finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS agent_deploy_targets (
+ id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL REFERENCES agent_deploy_batches(id),
+ host TEXT NOT NULL, port INTEGER NOT NULL, server_id INTEGER,
+ credential_id INTEGER NOT NULL, status TEXT NOT NULL,
+ agent_id INTEGER, error TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_deploy_queue ON agent_deploy_targets(status,id);
 CREATE TABLE IF NOT EXISTS agent_tasks (
  id INTEGER PRIMARY KEY, agent_id INTEGER NOT NULL REFERENCES agents(id),
  run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,

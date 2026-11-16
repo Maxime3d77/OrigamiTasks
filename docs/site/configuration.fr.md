@@ -87,3 +87,15 @@ Limiter les sorties aux destinations explicitement autorisées : Matrix HTTPS, P
 | `ALLOW_DIRECTORY_WRITES` | Écritures LDAP/AD (false) |
 
 Pour la procédure complète et les précautions, consulter [Agents](agents.md) et [Tâches](tasks.md).
+
+## Certificat CA LDAP et vérification TLS
+
+Dans **Administration → LDAP / Active Directory**, importer la **CA publique** qui a signé le certificat du serveur LDAPS depuis un fichier `.pem` ou `.crt` (128 Kio maximum). Les certificats PEM sont validés et conservés dans `/app/data/ldap-cas` (volume persistant avec permissions restreintes). Le chemin est renseigné dans le formulaire ; **enregistrer la configuration**, puis **tester la connexion**. Le SAN du certificat serveur doit correspondre au FQDN utilisé.
+
+La vérification du certificat reste obligatoire pour **LDAPS:636** ou **STARTTLS:389**. Il n'y a pas d'option « ignorer le certificat », car elle rendrait possible l'interception des identifiants du compte de liaison. **Ne jamais importer de clé privée.**
+
+## Statut de mise à jour
+
+Le menu **Mises à jour** présente la version installée, la version du dernier commit de la branche `GIT_BRANCH` sur l'origine autorisée par `GIT_ALLOWED_ORIGIN`, la date du **commit** distant, le nombre de commits en retard et la date de vérification. Le service hôte `ops/update-worker.py` vérifie au démarrage puis toutes les heures environ. Le contrôle peut aussi être demandé manuellement.
+
+Configurer `GIT_ALLOWED_ORIGIN` avec l'URL exacte obtenue via `git remote get-url origin` et `GIT_BRANCH` avec la branche réellement utilisée. Quand le worker est absent, que l'origine n'est pas autorisée ou que la branche diverge, l'écran indique **Vérification indisponible**, jamais un faux « À jour ». Une installation reste une action administrateur manuelle ; la date affichée est celle du dernier commit, pas nécessairement d'une release.

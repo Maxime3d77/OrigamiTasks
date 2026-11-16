@@ -4,6 +4,31 @@
 
 A **job** contains ordered **steps**; each step has a unique ID, type, JSON configuration, optional condition, retry policy and `on_success`/`on_failure` target. `END` exits successfully; `FAIL` terminates with failure. Up to 80 steps and 200 graph transitions are accepted per run. The engine snapshots steps when a run is queued, preserving that run against later edits.
 
+## Connection-source forms, scheduling and error recovery
+
+Connection steps (**SMTP, SSH/SFTP, FTP/FTPS, Matrix, LDAP, HTTP and Ansible runner**) now offer **Use vault connection** (recommended) versus **Manual network configuration**. Only the relevant endpoint fields are shown; action-specific inputs remain visible.
+
+- **Vault SMTP:** select an SMTP profile with host, port, TLS, sender and credentials already saved; specify only recipient, subject and body. Stale task-level SMTP host overrides are ignored when vault mode is explicitly selected.
+- **Manual SMTP:** supply host, port, transport security (STARTTLS / implicit SSL / unencrypted internal relay), sender and message. No plaintext login/password is permitted; use the vault for authenticated SMTP.
+- **SSH/SFTP/Ansible:** vault mode uses a server inventory selection; manual mode uses a typed FQDN/port. The SSH identity remains in the encrypted vault in both cases.
+- **HTTP API:** vault mode uses the stored base URL and token plus a step-specific relative path; manual mode uses a full URL without embedding any password.
+
+Scheduling choices are **Manual**, **Once**, **Repeat using assistant** (minute / five minutes / hourly / daily / weekly presets) and **Advanced cron**. Inactive schedule fields are hidden; **Once** shows no interval controls.
+
+Click **Add on failure** on a step to insert a new task automatically connected to its red `on_failure` branch. By default the recovery path ends in **FAIL** so a failed workflow remains observable; explicitly connect the recovery task to `END` when recovery should make the run successful. Additional steps can be chained via branch targets.
+
+## Vault/manual connection modes and failure recovery
+
+**SMTP, SSH/SFTP, FTP/FTPS, HTTP, Matrix, LDAP and Ansible runner** steps now offer **Use vault connection** (recommended) or **Manual network settings**. Only the selected source's relevant connection fields are displayed.
+
+For **email / SMTP**, vault mode displays the SMTP profile and the task-specific recipients, subject, body and attachments. Host, port, TLS and sender come from the vault, and hidden legacy overrides no longer take precedence. Manual mode shows host, port, transport security (STARTTLS, implicit TLS or unencrypted internal relay), sender and message. Manual SMTP is intended for relays **without authentication**; use the vault for credentials. Passwords are never stored in a workflow.
+
+**SSH/SFTP/Ansible** steps use a vault SSH identity and either an inventory host or a manually entered FQDN. HTTP steps can use a vault base URL/token with a relative path or a manually entered full URL.
+
+Scheduling modes are **Manual**, **Once**, **Repeat using assistant** (minute, 5/10/15/30 minutes, hourly, daily, weekly or custom) and **Advanced cron**. Inactive schedule controls are hidden.
+
+Click **Add on failure** on a step to insert a new task wired to `on_failure`. Its default completion is **FAIL** to preserve failure visibility after notifying or cleanup. Explicitly change the recovery task's success target to `END` if recovery should make the overall run successful.
+
 ## Example: branch after a backup
 
 1. **Run a backup** (`ssh` to a dedicated Linux runner); define `on_success: notify_ok`, `on_failure: notify_fail`.

@@ -17,6 +17,26 @@ ALLOW_DIRECTORY_WRITES=false
 
 All three enable flags default to **false**. `AGENT_SERVER_URL` must be a trusted HTTPS origin. `AGENT_DEPLOY_ALLOWED_HOSTS` is an exact hostname/IP list. Agent enrollment uses a **one-use 15-minute token** and then a distinct long-lived per-agent bearer token that can be revoked; mTLS and signed packages are not implemented.
 
+## Single-server and bulk deployment
+
+Under **Administration → Linux / Windows agents**, deployment credential choices are restricted to **SSH identities in the Vault**. SMTP/LDAP/API profiles cannot be used for SSH installation.
+
+- **Single server:** enter target FQDN/port, Linux or Windows, agent group and a vault SSH identity, then explicitly approve.
+- **Multiple servers:** choose **Multiple servers**, paste one FQDN per line (optional `fqdn:2222` port) or add an SSH inventory group. Choose the platform and SSH identity, then approve the entire batch.
+- Each host must be present in `AGENT_DEPLOY_ALLOWED_HOSTS`, reachable over SSH/SFTP, and able to reach the trusted OrigamiTasks HTTPS endpoint.
+- Installation is **queued and sequential**, with an independent status and error for each host. Restarted/abandoned attempts are never silently replayed. Maximum 100 target FQDNs per batch.
+- **Proxmox:** cluster/VM inventory and operations use the **Proxmox API**, so an agent on a PVE host is **not required**. Only install a Linux agent directly on a hypervisor for a separate, validated system-management use case.
+
+## Single-host and bulk deployment
+
+In **Administration → Linux / Windows agents**, only **SSH vault identities** are offered for installation; SMTP and API credentials are excluded.
+
+For **one host**, choose FQDN, SSH port, Linux/Windows, agent group and SSH identity, then confirm.
+
+For **multiple hosts**, select **Multiple servers**, paste one FQDN per line (optional `fqdn:2222`) or add a group from the SSH inventory. Choose one target platform and SSH identity, then approve the batch. **Up to 100 hosts per batch.** Every host must be listed in `AGENT_DEPLOY_ALLOWED_HOSTS`. Installation is **queued and sequential**, with **independent per-host results**. Interrupted/pending jobs are **not silently replayed** after a restart. Raw SSH secrets are never returned.
+
+**Proxmox** cluster/VM inventory and operations use the Proxmox API, so a PVE node agent is **not required**. Installing a Linux agent on a hypervisor is optional for a separately validated host-management use case.
+
 ## Deploy from the UI
 
 1. Add a scoped SSH credential in **Vault**. Prepare a trusted `SSH_KNOWN_HOSTS` file (default `data/known_hosts`) in the control-plane container. Unknown or changed SSH keys are rejected.

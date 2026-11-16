@@ -37,3 +37,10 @@ See the detailed [security threat model](https://github.com/Maxime3d77/OrigamiTa
 Preview agents use distinct revocable, long-lived tokens (no mTLS yet); enrollment tokens are single-use and expire after 15 minutes. Remote provisioning uses pinned SSH host keys and allow-listed targets. The Windows scheduled task runs as SYSTEM; Linux runs unprivileged. Script execution is still privileged trusted automation.
 
 LDAP/AD writes are disabled by default, confined by base DN, TLS certificate validation and explicit step approval. Use least-privilege service credentials, a test directory and external domain controller audit logs.
+
+
+## Bulk agent deployments and LDAP TLS
+
+Bulk agent provisioning requires an administrator session, explicit approval and an encrypted SSH vault identity. Every host must appear in `AGENT_DEPLOY_ALLOWED_HOSTS`. The durable per-host queue never automatically replays interrupted installs. API results and audit logs do not reveal passwords, private keys or raw installation output.
+
+LDAP upload accepts only **public PEM CA certificates** with restricted file access. TLS certificate verification cannot be disabled in the UI. Manual workflow network settings must never store plaintext passwords or tokens.

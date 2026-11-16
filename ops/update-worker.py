@@ -7,6 +7,7 @@ its repository to an untrusted origin. Access to the web admin = update rights.
 import argparse
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -31,6 +32,16 @@ def state_write(root,message,**kwargs):
     dst.write_text(json.dumps({'checked_at':now(),'message':message,**kwargs},ensure_ascii=False,indent=2))
 
 
+def version_at(root, git, ref):
+    """Read advertised version from trusted Git content, without executing it."""
+    try:
+        source=execute(git+['show',ref+':app/config.py'],root,timeout=15)
+    except Exception:
+        return None
+    match=re.search(r"(?m)^APP_VERSION\s*=\s*['\"]([^'\"]{1,64})['\"]",source)
+    return match.group(1) if match else None
+
+
 def process(root, action, branch, allowed_origin):
     git=['git','-c','core.hooksPath=/dev/null','-c','protocol.file.allow=never']
     # Restrict the update to a configured, pre-reviewed origin, never a user-supplied URL.
@@ -44,7 +55,15 @@ def process(root, action, branch, allowed_origin):
     remote=execute(git+['rev-parse','FETCH_HEAD'],root)
     subprocess.run(git+['merge-base','--is-ancestor',old,remote],cwd=root,check=True,stdout=subprocess.DEVNULL)
     available=(old!=remote)
-    state_write(root,'Mise à jour disponible' if available else 'Déjà à jour',current=old,latest=remote,available=available,origin=origin)
+    current_version=version_at(root,git,'HEAD')
+    latest_version=version_at(root,git,'FETCH_HEAD')
+    latest_date=execute(git+['show','-s','--format=%cI','FETCH_HEAD'],root,timeout=15)
+    remote_count=int(execute(git+['rev-list','--count',old+'..'+remote],root,timeout=15))
+    state_write(root,'Mise à jour disponible' if available else 'Déjà à jour',
+                current=old, latest=remote, available=available, origin=origin,
+                branch=branch, current_version=current_version,
+                latest_version=latest_version, latest_date=latest_date,
+                commits_behind=remote_count)
     if action=='check' or not available:
         return 'Nouveau commit : '+remote[:12] if available else 'Aucune mise à jour disponible'
     backup=root/'data/backups'
@@ -64,7 +83,10 @@ def process(root, action, branch, allowed_origin):
             try:
                 with urlopen(f'http://127.0.0.1:{port}/api/health',timeout=3) as response:
                     if response.status==200:
-                        state_write(root,'Déploiement confirmé',current=remote,latest=remote,available=False)
+                        state_write(root,'Déploiement confirmé',
+                                    current=remote,latest=remote,available=False,branch=branch,
+                                    current_version=latest_version,latest_version=latest_version,
+                                    latest_date=latest_date,commits_behind=0)
                         return 'Mise à jour appliquée : '+remote[:12]
             except Exception as exc:
                 last=type(exc).__name__
@@ -88,7 +110,17 @@ def loop(root,once=False):
     if not branch or not all(ch.isalnum() or ch in '-_/' for ch in branch):
         raise RuntimeError('GIT_BRANCH invalide')
     state_write(root,'Service de maintenance actif',branch=branch)
+    last_auto_check=0
     while True:
+        # Periodic, passive check: fetch only the pinned origin. Never install
+        # updates automatically and never claim "up-to-date" if check failed.
+        if not once and allowed_origin and time.monotonic()-last_auto_check>=3600:
+            last_auto_check=time.monotonic()
+            try:
+                process(root,'check',branch,allowed_origin)
+            except Exception as exc:
+                state_write(root,'Vérification impossible : '+type(exc).__name__,
+                            branch=branch,error='Vérifier GIT_BRANCH, GIT_ALLOWED_ORIGIN et la branche locale')
         try:
             con=sqlite3.connect(root/'data/origamitasks.db',timeout=30)
             con.row_factory=sqlite3.Row

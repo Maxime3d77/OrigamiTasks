@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments
 
 
 @asynccontextmanager
@@ -24,9 +24,11 @@ async def lifespan(app):
     security.initialize_admin()
     engine.start()
     scheduler.start()
+    agent_deployments.start()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
+    agent_deployments.STOP.set()
 
 
 app = FastAPI(title='OrigamiTasks', version=config.APP_VERSION, docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -129,6 +131,12 @@ def create_agent_enrollment(payload:dict[str,Any], request:Request):
 @app.post('/api/agents/deploy')
 def deploy_agent(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
+    if payload.get('credential_id'):
+        with db.session() as con:
+            credential_kind=con.execute("SELECT kind FROM credentials WHERE id=?",
+                (payload['credential_id'],)).fetchone()
+        if not credential_kind or credential_kind['kind']!='ssh':
+            raise HTTPException(422,'Une identité SSH du coffre est obligatoire')
     try:
         result=agents.deploy(payload)
     except HTTPException:
@@ -138,6 +146,25 @@ def deploy_agent(payload:dict[str,Any],request:Request):
         raise HTTPException(502,'Installation distante échouée : '+type(exc).__name__)
     db.audit(user['username'],'agent.deploy',result['id'],result['name'])
     return result
+
+
+
+@app.post('/api/agents/deploy/batch')
+def batch_deploy_agents(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=agent_deployments.queue(payload,user['username'])
+    except (agent_deployments.DeploymentError,ssh_inventory.InventoryError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'agent.deploy.batch',result['batch_id'],
+             str(result['total'])+' serveur(s)')
+    return result
+
+
+@app.get('/api/agents/deploy/batches')
+def agent_deploy_batch_status(request:Request):
+    security.require(request,role='admin')
+    return agent_deployments.list_batches()
 
 
 @app.post('/api/agents/{agent_id}/revoke')
@@ -185,6 +212,32 @@ def validate_job(payload):
             raise HTTPException(422,'Type d’étape inconnu')
         if not isinstance(step.get('config'),dict) or len(json.dumps(step['config']))>50_000:
             raise HTTPException(422,'Configuration d’étape invalide')
+        connection_mode=step['config'].get('connection_mode')
+        if connection_mode is not None:
+            if connection_mode not in ('manual','vault'):
+                raise HTTPException(422,'Mode de connexion invalide')
+            typ=step.get('type')
+            kind={'email':'smtp','http':'api','ssh':'ssh','sftp':'ssh',
+                  'ansible':'ssh','ftp':'ftp','matrix':'matrix','directory':'ldap'}.get(typ)
+            if not kind:
+                raise HTTPException(422,'Mode coffre/manuel non applicable à cette tâche')
+            cid=step['config'].get('credential_id')
+            need_cred=(connection_mode=='vault' and typ not in ('directory',)) or (
+                typ in ('ssh','sftp','ansible','matrix'))
+            if need_cred and not cid:
+                raise HTTPException(422,'Sélectionner un identifiant '+kind.upper()+' du coffre')
+            if cid:
+                with db.session() as check_con:
+                    cred=check_con.execute("SELECT kind FROM credentials WHERE id=?",(cid,)).fetchone()
+                if not cred or cred['kind']!=kind:
+                    raise HTTPException(422,'Le compte sélectionné doit être une connexion '+kind.upper())
+            if connection_mode=='vault' and typ in ('ssh','sftp','ansible') and not step['config'].get('ssh_server_id'):
+                raise HTTPException(422,'Sélectionner un serveur SSH de l’inventaire')
+            if connection_mode=='manual' and typ=='email':
+                if not step['config'].get('host') or not step['config'].get('from'):
+                    raise HTTPException(422,'SMTP manuel : serveur et expéditeur obligatoires')
+            if connection_mode=='manual' and typ=='http' and not step['config'].get('url'):
+                raise HTTPException(422,'API manuelle : URL obligatoire')
         if step.get('type') in ('ssh','sftp','ansible') and step['config'].get('ssh_server_id'):
             try:
                 ssh_inventory.server(step['config']['ssh_server_id'])
@@ -270,8 +323,9 @@ def add_datacenter(payload:dict[str,Any],request:Request):
     except (integrations.IntegrationError,ValueError,TypeError) as exc:
         raise HTTPException(422,str(exc))
     with db.session() as con:
-        credential_exists=con.execute('SELECT 1 FROM credentials WHERE id=?',(credential_id,)).fetchone()
-        if not credential_exists: raise HTTPException(422,'Credential introuvable')
+        credential_exists=con.execute('SELECT kind FROM credentials WHERE id=?',(credential_id,)).fetchone()
+        if not credential_exists or credential_exists['kind'] not in ('proxmox','api'):
+            raise HTTPException(422,'Un jeton Proxmox/API du coffre-fort est obligatoire')
         try:
             cur=con.execute('INSERT INTO datacenters(name,url,credential_id,created_at) VALUES (?,?,?,?)',
                             (name,origin,credential_id,db.now()))
@@ -441,6 +495,18 @@ def put_admin_ldap(payload:dict[str,Any],request:Request):
     ldap_settings.save(values)
     db.audit(user['username'],'ldap.settings.update','ldap','configuration protégée')
     return ldap_settings.public(values)
+
+
+@app.post('/api/admin/ldap/ca')
+def upload_ldap_ca(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=ldap_settings.import_ca(payload.get('pem'))
+    except ldap_settings.LDAPSettingsError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ldap.ca.import',result['fingerprint_sha256'][:16],
+             str(result['certificate_count'])+' certificat(s) publics')
+    return result
 
 
 @app.post('/api/admin/ldap/test')

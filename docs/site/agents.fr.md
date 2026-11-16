@@ -17,6 +17,26 @@ ALLOW_DIRECTORY_WRITES=false
 
 Les trois options d'activation sont sur **false** par défaut. `AGENT_SERVER_URL` doit être une origine HTTPS fiable ; les FQDN/IP autorisés à l'installation SSH sont exacts. L'enrôlement utilise un **jeton unique valable 15 minutes**, ensuite remplacé par un token d'agent individuel, durable et révocable. Pas encore de mTLS ou de paquets signés.
 
+## Déploiement individuel et par liste de serveurs
+
+Dans **Administration → Agents Linux / Windows**, les comptes proposés pour le déploiement sont **uniquement les identités SSH du coffre**. Les profils SMTP, LDAP et API ne sont jamais des comptes SSH valides.
+
+- **Un serveur** : renseigner le FQDN, le port, le système Linux/Windows, le groupe d'agents et une identité SSH ; confirmer l'installation.
+- **Plusieurs serveurs** : cliquer sur **Plusieurs serveurs**, coller les FQDN (un par ligne, port facultatif sous la forme `fqdn:2222`) ou utiliser **Ajouter** à partir d'un groupe de l'inventaire SSH. Choisir une identité SSH et la plateforme des cibles, puis confirmer le lot.
+- Chaque serveur doit figurer dans `AGENT_DEPLOY_ALLOWED_HOSTS` ; le serveur de contrôle doit pouvoir établir une connexion SSH/SFTP et l'agent doit pouvoir joindre l'URL HTTPS de l'application.
+- Les déploiements sont mis en file, traités **un serveur à la fois**, avec un statut indépendant par cible : en attente, en cours, installé, échec. Ils sont audités. **Après redémarrage, les opérations interrompues ne sont pas relancées sans confirmation.** Maximum : 100 FQDN par lot.
+- **Proxmox** : les opérations sur les VM et l'inventaire des DC Proxmox utilisent directement l'API Proxmox ; un agent sur l'hyperviseur n'est **pas obligatoire**. Installer un agent Linux sur un nœud Proxmox seulement pour des besoins précis hors API, après recette, avec un compte au moindre privilège.
+
+## Déploiement sur un ou plusieurs serveurs
+
+Dans **Administration → Agents Linux / Windows**, le compte proposé pour déployer les agents est obligatoirement une **identité SSH du coffre**. Les profils SMTP et API ne sont pas affichés.
+
+Pour **un serveur**, choisir son FQDN, son port, Linux/Windows, son groupe et le compte SSH, puis confirmer.
+
+Pour **plusieurs serveurs**, utiliser **Plusieurs serveurs**, coller les FQDN un par ligne (port facultatif `fqdn:2222`) ou ajouter un groupe de serveurs depuis l'inventaire SSH. Sélectionner une plateforme commune et une identité SSH, puis confirmer le lot. **Maximum 100 machines par lot.** Chaque FQDN doit être présent dans `AGENT_DEPLOY_ALLOWED_HOSTS`. Les installations sont mises en file **séquentiellement** et les résultats sont affichés **par machine**. Un redémarrage interrompt les tâches en attente/en cours ; elles ne sont **pas relancées automatiquement**. Les erreurs ne dévoilent pas les secrets SSH.
+
+**Pour Proxmox**, les opérations concernant les clusters, les VM et l'inventaire s'effectuent via l'API Proxmox : aucun agent sur les hyperviseurs n'est nécessaire. L'installation d'un agent Linux sur un nœud PVE reste facultative pour une tâche système précise, après recette.
+
 ## Déploiement depuis OrigamiTasks
 
 1. Enregistrer un compte SSH dédié dans le **Coffre-fort**. Préparer les empreintes dans `SSH_KNOWN_HOSTS` (par défaut `data/known_hosts` du conteneur). Les clés inconnues ou modifiées sont refusées.

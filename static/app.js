@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],sshInventory:{servers:[],groups:[]},folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,12 +10,12 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory')}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
 const badgeTags=tags=>tags.map(t=>`<span class="chip tag">#${e(t)}</span>`).join('');
-function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'Datacenters',agents:'Agents Linux / Windows','ssh-inventory':'Serveurs & groupes SSH',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
+function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'DC Proxmox',agents:'Agents Linux / Windows','ssh-inventory':'Serveurs & groupes SSH',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
 function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage,'ssh-inventory':sshInventoryPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
 function dashboard(){const s=state.summary;return title('Vue d’ensemble','Votre centre de contrôle de l’automatisation.','<button class="btn primary" data-action="create">＋ Nouveau workflow</button>')+`<div class="stats-grid">
  <div class="stat-card featured"><span class="label">Workflows disponibles</span><span class="stat-icon">◈</span><div class="value">${s.jobs||0}</div><div class="sub">${s.enabled||0} workflows actifs</div></div>
@@ -80,6 +80,7 @@ function ldapSettingsForm(cfg){
  +ldapInput('Groupe des opérateurs','operator_group',cfg.operator_group)
  +ldapInput('Groupe des lecteurs','viewer_group',cfg.viewer_group)
  +ldapInput('Chemin CA TLS (dans le conteneur)','ca_cert',cfg.ca_cert,'text','Optionnel : certificat CA de confiance, sous /etc/ssl ou /app/data')
+ +'<div class="field full"><span>Importer un certificat CA public (.pem / .crt)</span><div class="inline-picker"><input id="ldapCAImportFile" type="file" accept=".pem,.crt,.cer,application/x-pem-file,text/plain"><button class="btn" type="button" data-action="ldap-ca-import">Importer la CA</button></div><small class="hint">Certificat(s) PEM uniquement, jamais de clé privée. Après import, enregistrer la configuration LDAP puis tester la connexion. La vérification du certificat TLS reste obligatoire.</small></div>'
  +ldapCheck('Utiliser la recherche des groupes AD imbriqués','nested_groups',cfg.nested_groups)
  +'</div><div class="divider"></div>'
  +'<div class="form-grid">'+ldapInput('Utilisateur à rechercher (test facultatif)','test_user','','text','Test en lecture seule du login, sans tenter de l’authentifier')+'</div>'
@@ -201,22 +202,106 @@ function catalog(){const entries=state.catalog.available||[];const groups=[...ne
 function agentsPage(){
  if(!roleAdmin())return title('Agents','Administration uniquement.');
  return title('Agents Linux et Windows','Gestion des agents en sortie HTTPS, déploiement SSH et révocation.',
- '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button><button class="btn primary" data-action="agent-deploy-form">⇣ Déployer par SSH</button></div>')+
+ '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button><button class="btn primary" data-action="agent-deploy-form">⇣ Un serveur</button><button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')+
  '<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2><span class="hint">'+state.agents.length+' agent(s)</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Plateforme</th><th>Groupe</th><th>État</th><th>Dernier contact</th><th></th></tr></thead><tbody>'+
  state.agents.map(a=>'<tr><td class="name-cell">'+e(a.name)+'<div class="muted tinytext">'+e(a.hostname||'Non enrôlé')+'</div></td><td>'+e(a.platform)+' · '+e(a.version||'—')+'</td><td>'+e(a.group_name)+'</td><td>'+labelStatus(a.status)+'</td><td>'+dt(a.last_seen)+'</td><td>'+(a.revoked?'—':'<button class="btn tiny danger" data-action="agent-revoke" data-id="'+a.id+'">Révoquer</button>')+'</td></tr>').join('')+
- '</tbody></table></div></div><div class="notice">Déploiement SSH : compte privilégié, clé d’hôte connue, AGENT_SERVER_URL HTTPS, ALLOW_AGENT_REMOTE_DEPLOY=true et liste AGENT_DEPLOY_ALLOWED_HOSTS. Les écritures sont désactivées par défaut. Linux utilise un compte non privilégié ; Windows utilise une tâche SYSTEM.</div>'}
+ '</tbody></table></div></div><div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2><button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button></div><div id="agentBatchList">'+agentBatchPanel()+'</div></div><div class="notice">Déploiement SSH : compte privilégié, clé d’hôte connue, AGENT_SERVER_URL HTTPS, ALLOW_AGENT_REMOTE_DEPLOY=true et liste AGENT_DEPLOY_ALLOWED_HOSTS. Les écritures sont désactivées par défaut. Linux utilise un compte non privilégié ; Windows utilise une tâche SYSTEM.</div>'}
 function agentDeployForm(){modal('Déployer un agent via SSH','<form id="agentDeployForm"><div class="form-grid">'+
  field('Nom de l’agent','name')+selectField('Système','platform',[['linux','Linux (Python 3 + systemd)'],['windows','Windows (PowerShell 5.1+)']],'linux')+
  field('Hôte / FQDN autorisé','host')+field('Port SSH','port',22,'number')+field('Groupe','group','default')+
- selectField('Compte SSH (coffre)','credential_id',[['','— Choisir —'],...state.credentials.map(c=>[c.id,c.name])],'')+
+ selectField('Compte SSH (coffre)','credential_id',[['','— Sélectionner une identité SSH —'],...state.credentials.filter(c=>c.kind==='ssh').map(c=>[c.id,c.name])],'')+
  '</div><div class="field checkbox"><input type="checkbox" name="approved" required><span>Je confirme l’installation d’un service ou d’une tâche planifiée sur cet hôte.</span></div><p class="hint">Le serveur doit joindre l’hôte par SSH et l’agent joindre OrigamiTasks par HTTPS.</p><button class="btn primary" type="submit">Déployer l’agent</button></form>', '', true)}
+
+let agentBatchPollTimer=null;
+function scheduleAgentBatchPoll(){
+ if(agentBatchPollTimer||state.page!=='agents'||!roleAdmin())return;
+ if(!(state.agentDeployBatches||[]).some(x=>x.status==='queued'||x.status==='running'))return;
+ agentBatchPollTimer=setTimeout(async()=>{
+  agentBatchPollTimer=null;
+  if(state.page!=='agents'||!roleAdmin())return;
+  try{
+   state.agentDeployBatches=(await api('/agents/deploy/batches')).items;
+   const panel=document.getElementById('agentBatchList');
+   if(panel)panel.innerHTML=agentBatchPanel();
+  }catch(ex){console.warn('Statut des déploiements agents non disponible',ex?.message)}
+  scheduleAgentBatchPoll();
+ },3500);
+}
+function agentBatchPanel(){
+ const batches=state.agentDeployBatches||[];
+ if(!batches.length)return '<p class="hint">Aucun déploiement groupé pour le moment.</p>';
+ return batches.slice(0,8).map(batch=>{
+  const stateLabel=batch.status==='success'?'Terminé':batch.status==='completed_with_errors'?'Terminé avec erreurs':batch.status==='interrupted'?'Interrompu':'En cours';
+  const rows=batch.targets.map(t=>'<div class="agent-batch-host"><strong>'+e(t.host)+':'+e(t.port)+'</strong><span class="chip">'+e(t.status)+'</span>'
+   +(t.error?'<small class="hint">'+e(t.error)+'</small>':'')+'</div>').join('');
+  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong><span>'+e(stateLabel)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
+   +'<div class="agent-batch-hosts">'+rows+'</div></details>';
+ }).join('');
+}
+function agentBulkDeployForm(){
+ const groups=(state.sshInventory.groups||[]),serverCount=(state.sshInventory.servers||[]).length;
+ const sshAccounts=state.credentials.filter(c=>c.kind==='ssh');
+ const body='<form id="agentBulkDeployForm"><div class="notice">Installer des agents sur une liste de serveurs est une action privilégiée. Les installations sont mises en file et suivies individuellement ; aucune relance automatique après interruption.</div>'
+  +'<div class="form-grid">'+selectField('Système cible','platform',[['linux','Linux (Python 3 / systemd)'],['windows','Windows (PowerShell / tâche SYSTEM)']],'linux')
+  +selectField('Identité SSH (coffre)','credential_id',[['','— Choisir une identité SSH —'],...sshAccounts.map(c=>[c.id,c.name])],'')
+  +field('Groupe attribué aux agents','agent_group','default')
+  +'<div class="field"><span>Choisir un groupe de serveurs</span><div class="inline-picker"><select name="inventory_group" id="agentBulkInventoryGroup">'
+  +option([['','— Ajouter par FQDN —'],...groups.map(g=>[g.id,g.name+' ('+g.server_count+')'])],'')
+  +'</select><button type="button" class="btn tiny" data-action="agent-bulk-add-group">Ajouter</button></div></div></div>'
+  +'<div class="field"><span>FQDN des cibles (un par ligne, port optionnel)</span><textarea name="targets" rows="10" placeholder="au-host01.infra.example.org&#10;sd-host02.infra.example.org&#10;au-host03.infra.example.org:2222" required></textarea>'
+  +'<small class="hint">'+serverCount+' serveur(s) dans l’inventaire, 100 cibles maximum par lot. Le FQDN doit être explicitement autorisé dans AGENT_DEPLOY_ALLOWED_HOSTS. Les cibles Windows nécessitent SSH/SFTP actif.</small></div>'
+  +'<label class="test-wizard-option"><input type="checkbox" name="approved" required><span><strong>Je confirme l’installation de l’agent sur chacun des serveurs indiqués.</strong><small>Service systemd non privilégié sur Linux ou tâche planifiée SYSTEM sur Windows. L’agent contacte OrigamiTasks par HTTPS.</small></span></label>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">Mettre les déploiements en file</button><button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal('Déployer des agents sur plusieurs serveurs',body,'',true);
+}
+
 function agentEnrollForm(){modal('Enrôlement manuel','<form id="agentEnrollForm"><div class="form-grid">'+
  field('Nom','name')+selectField('Plateforme','platform',[['linux','Linux'],['windows','Windows']],'linux')+
  field('Groupe','group','default')+'</div><p class="hint">Jeton unique valable 15 minutes. Installer agents/linux/agent.py ou agents/windows/agent.ps1 avec config.json sur la machine.</p><button class="btn primary" type="submit">Créer un jeton</button></form>')}
 
-function datacenters(){if(!roleAdmin())return title('Datacenters','Administration uniquement.');return title('Datacenters Proxmox','Inventaire en lecture seule des clusters indépendants.','<button class="btn primary" data-action="new-datacenter">＋ Déclarer un datacenter</button>')+`<div class="workflow-grid">${state.datacenters.map(d=>`<div class="job-card"><div class="job-card-head"><div class="job-icon">◈</div><span class="chip tag">Proxmox VE</span></div><h3>${e(d.name)}</h3><p>${e(d.url)}</p><div class="muted tinytext">Coffre #${d.credential_id}</div><div class="actions"><button class="btn primary tiny" data-action="discover-datacenter" data-id="${d.id}">⌕ Découvrir les ressources</button><button class="btn tiny danger" data-action="delete-datacenter" data-id="${d.id}">Supprimer</button></div></div>`).join('')||empty('Aucun datacenter','Déclarez votre premier cluster avec un compte API dédié.')}</div><div class="notice">Les opérations sensibles sont désactivées par défaut. Les migrations et réplications entre clusters restent au stade du plan d’architecture.</div>`}
-function openDatacenterForm(){modal('Ajouter un datacenter Proxmox',`<form id="datacenterForm"><div class="form-grid">${field('Nom','dc_name')}${field('URL HTTPS, ex. https://pve.exemple:8006','dc_url')}${selectField('Token API Proxmox', 'dc_credential',[['','— Sélectionner —'],...state.credentials.map(c=>[c.id,c.name])],'')}</div><p class="hint">Configurer PROXMOX_ALLOWED_HOSTS avant l’enregistrement. API token dédié au moindre privilège ; certificat TLS vérifié.</p><button class="btn primary" type="submit">Enregistrer</button></form>`)}
-function updates(){return title('Versions & mises à jour','Mises à jour Git déclenchées depuis l’interface, exécutées par un service de maintenance séparé.')+`<div class="panel"><div class="panel-title"><h2>OrigamiTasks v0.3.4-rc1</h2><span class="status success">Installé</span></div><p class="muted">Branche suivie : <span class="code-inline">main</span> · Origine Git configurée sur l’hôte</p><div class="tool-row"><button class="btn" data-action="update-request" data-value="check">⌕ Rechercher des mises à jour</button><button class="btn primary" data-action="update-request" data-value="apply">⇣ Installer la dernière version Git</button><button class="btn" data-action="refresh-updates">↻</button></div><div class="notice">Sécurité : la mise à jour est <b>approuvée manuellement</b> par un administrateur. Un service hôte indépendant effectue un <b>git fetch + fast-forward</b>, une sauvegarde et le redéploiement Docker. Aucun accès Docker n'est accordé au conteneur web. Installer le service <span class="code-inline">ops/update-worker.py</span> pour activer le bouton d’installation.</div></div><div class="panel"><div class="panel-title"><h2>Maintenance & tâches Git</h2></div><div id="updateStatus">Chargement...</div></div>`}
+function datacenters(){if(!roleAdmin())return title('DC Proxmox','Administration uniquement.');return title('DC Proxmox','Inventaire en lecture seule des clusters indépendants.','<button class="btn primary" data-action="new-datacenter">＋ Déclarer un DC Proxmox</button>')+`<div class="workflow-grid">${state.datacenters.map(d=>`<div class="job-card"><div class="job-card-head"><div class="job-icon">◈</div><span class="chip tag">Proxmox VE</span></div><h3>${e(d.name)}</h3><p>${e(d.url)}</p><div class="muted tinytext">Coffre #${d.credential_id}</div><div class="actions"><button class="btn primary tiny" data-action="discover-datacenter" data-id="${d.id}">⌕ Découvrir les ressources</button><button class="btn tiny danger" data-action="delete-datacenter" data-id="${d.id}">Supprimer</button></div></div>`).join('')||empty('Aucun DC Proxmox','Déclarez votre premier cluster avec un compte API dédié.')}</div><div class="notice">Les opérations sensibles sont désactivées par défaut. Les migrations et réplications entre clusters restent au stade du plan d’architecture.</div>`}
+function openDatacenterForm(){modal('Ajouter un DC Proxmox',`<form id="datacenterForm"><div class="form-grid">${field('Nom','dc_name')}${field('URL HTTPS, ex. https://pve.exemple:8006','dc_url')}${selectField('Token API Proxmox', 'dc_credential',[['','— Sélectionner —'],...state.credentials.filter(c=>c.kind==='proxmox').map(c=>[c.id,c.name])],'')}</div><p class="hint">Configurer PROXMOX_ALLOWED_HOSTS avant l’enregistrement. API token dédié au moindre privilège ; certificat TLS vérifié.</p><button class="btn primary" type="submit">Enregistrer</button></form>`)}
+function updates(){
+ return title('Versions & mises à jour',
+   'Comparaison de la version installée avec la branche Git autorisée. Aucun déploiement automatique.')
+  +'<div class="panel"><div class="panel-title"><h2>État des versions</h2><span class="hint">Source : service de maintenance hôte</span></div>'
+  +'<div id="updateVersionSummary"><div class="hint">Vérification des versions…</div></div>'
+  +'<div class="tool-row"><button class="btn" data-action="update-request" data-value="check">⌕ Vérifier maintenant</button>'
+  +'<button class="btn primary" data-action="update-request" data-value="apply">⇣ Installer la version Git disponible</button>'
+  +'<button class="btn" data-action="refresh-updates">↻ Rafraîchir</button></div>'
+  +'<div class="notice">Les vérifications sont effectuées par <code>ops/update-worker.py</code> sur l’hôte, avec <code>GIT_ALLOWED_ORIGIN</code> et <code>GIT_BRANCH</code>. La date affichée est la date du dernier commit de la branche suivie, pas nécessairement une date de release. Un correctif en recette sur une autre branche ne doit pas être annoncé comme « à jour sur main ». Installation toujours sur validation manuelle.</div></div>'
+  +'<div class="panel"><div class="panel-title"><h2>Historique des opérations Git</h2></div><div id="updateStatus">Chargement…</div></div>';
+}
+function renderUpdateVersion(data){
+ const w=data.worker||{},installed=data.version||'inconnue';
+ const checkedTime=Date.parse(w.checked_at||'');
+ const fresh=Number.isFinite(checkedTime)&&Date.now()-checkedTime<26*3600*1000
+             &&Date.now()-checkedTime>=-5*60*1000;
+ const matchingBranch=w.branch===data.git_branch;
+ const matchingInstall=!w.current_version||w.current_version===installed;
+ const known=typeof w.available==='boolean'&&!!w.latest&&!!w.current&&fresh
+             &&matchingBranch&&matchingInstall;
+ const branch=w.branch||data.git_branch||'non définie';
+ let status,css;
+ if(!known){status='Vérification indisponible';css='warning'}
+ else if(w.available){status='Nouvelle version disponible';css='warning'}
+ else{status='À jour sur la branche suivie';css='success'}
+ const checked=w.checked_at?dt(w.checked_at):'jamais vérifié';
+ return '<div class="version-comparison"><div class="version-entry"><span>Version installée</span>'
+  +'<strong>'+e(installed)+'</strong><small>Depuis le conteneur en cours</small></div>'
+  +'<div class="version-entry"><span>Version distante</span>'
+  +'<strong>'+e(w.latest_version||'non vérifiée')+'</strong>'
+  +'<small>'+e(w.latest_date&&Number.isFinite(Date.parse(w.latest_date))
+     ?new Date(w.latest_date).toLocaleString('fr-FR',{dateStyle:'medium',timeStyle:'short'}):'Date inconnue')+'</small></div></div>'
+  +'<div class="tool-row"><span class="status '+e(css)+'">'+e(status)+'</span>'
+  +(known&&w.available?'<span class="hint">'+e(w.commits_behind||'?')+' commit(s) disponibles</span>':'')+'</div>'
+  +'<p class="hint">Branche suivie : <code>'+e(branch)+'</code> · Dernière vérification : '+e(checked)+'</p>'
+  +'<p class="hint">'+e(w.message||'Le service de maintenance hôte n’a pas encore effectué de vérification')+'</p>'
+  +(!matchingBranch&&w.branch?'<div class="notice error">Le service surveille une branche différente de GIT_BRANCH. Vérification non fiable.</div>':'')
+  +(!matchingInstall?'<div class="notice error">Le commit local ne correspond pas à la version exécutée dans le conteneur. Reconstruire et vérifier le déploiement.</div>':'')
+  +(!fresh&&w.checked_at?'<div class="notice error">Dernière vérification trop ancienne : relancer un contrôle Git.</div>':'')
+  +(w.error?'<div class="notice error">'+e(w.error)+'</div>':'');
+}
 function audit(){return title('Journal d’audit','Traçabilité des connexions, modifications, exécutions et opérations Git.')+`<div class="panel" id="auditTable">Chargement...</div>`}
 function modal(title,body,footer='',wide=false){$('#modalRoot').innerHTML=`<div class="modal-overlay"><div class="modal ${wide?'xl':''}" role="dialog" aria-modal="true"><div class="modal-head"><h2>${title}</h2><button class="close" data-action="modal-close" aria-label="Fermer">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div></div>`}
 function closeModal(){$('#modalRoot').innerHTML='';state.editor=null}
@@ -239,9 +324,9 @@ const FIELDS={
  ssh:[['ssh_server_id','Serveur cible (inventaire SSH)','ssh-target'],['host','Hôte manuel (ancienne configuration)','text'],['port','Port SSH','number'],['platform','Système distant','select:linux|windows'],['script','Script distant','textarea'],['timeout','Timeout (s)','number'],['credential_id','Identifiant SSH','credential']],
  sftp:[['ssh_server_id','Serveur cible (inventaire SSH)','ssh-target'],['host','Hôte manuel (ancienne configuration)','text'],['port','Port SSH','number'],['remote_path','Fichier distant','text'],['local_path','Fichier local (transfers/)','text'],['direction','Sens','select:get|put'],['credential_id','Identifiant','credential']],
  ftp:[['host','Hôte FTP','text'],['port','Port FTP','number'],['remote_path','Fichier distant','text'],['local_path','Fichier local (transfers/)','text'],['direction','Sens','select:get|put'],['allow_plaintext','Autoriser FTP non chiffré (déconseillé)','checkbox'],['credential_id','Identifiant','credential']],
- http:[['url','URL','text'],['method','Méthode','select:GET|POST|PUT|PATCH|DELETE'],['body','Corps','textarea'],['timeout','Timeout (s)','number'],['credential_id','Token Bearer','credential']],
+ http:[['url','URL complète (manuel)','text'],['path','Chemin relatif (coffre)','text'],['method','Méthode','select:GET|POST|PUT|PATCH|DELETE'],['body','Corps','textarea'],['timeout','Timeout (s)','number'],['credential_id','Token Bearer','credential']],
  file:[['action','Opération','select:list|read|write|copy|move|mkdir|delete'],['path','Chemin cible sous transfers/','text'],['source','Source copy/move sous transfers/','text'],['content','Contenu (write)','textarea'],['approved','Confirmer la suppression (delete)','checkbox']],
- email:[['host','Serveur SMTP (facultatif si renseigné dans le coffre)','text'],['port','Port SMTP (facultatif)','number'],['ssl','Forcer SSL immédiat pour cette tâche','checkbox'],['from','Expéditeur (facultatif si défini dans le coffre)','text'],['to','Destinataires','text'],['subject','Objet','text'],['body','Corps texte','textarea'],['html_body','Corps HTML (optionnel)','textarea'],['attachments','Pièces jointes (transfers/ séparées par virgules)','text'],['credential_id','Connexion SMTP configurée dans le coffre','credential']],
+ email:[['host','Serveur SMTP (manuel)','text'],['port','Port SMTP (manuel)','number'],['ssl','SSL direct (compatibilité ancienne tâche)','checkbox'],['tls_mode','Sécurité SMTP','select:starttls|ssl|none'],['from','Expéditeur (facultatif si défini dans le coffre)','text'],['to','Destinataires','text'],['subject','Objet','text'],['body','Corps texte','textarea'],['html_body','Corps HTML (optionnel)','textarea'],['attachments','Pièces jointes (transfers/ séparées par virgules)','text'],['credential_id','Connexion SMTP configurée dans le coffre','credential']],
  delay:[['seconds','Secondes (maximum 300)','number']],
  set_variable:[['name','Nom de la variable','text'],['value','Valeur','textarea']]
 };
@@ -323,18 +408,48 @@ function groupEditorField(label,key,groups){
 }
 function scheduleFields(schedule){
  const mode=schedule.mode||(schedule.cron?'cron':'manual');
- const modeOptions=[['manual','Manuel / événement'],['once','Une seule fois'],['interval','Répéter à intervalle'],['cron','Cron avancé']];
+ const modeOptions=[['manual','Manuel / évènement (aucune répétition)'],
+    ['once','Une seule exécution programmée'],
+    ['interval','Assistant de répétition'],
+    ['cron','Expression Cron avancée']];
  const units=[['minutes','minute(s)'],['hours','heure(s)'],['days','jour(s)'],['weeks','semaine(s)']];
- return '<div class="field"><span>Déclenchement</span><select name="job_schedule_mode">'+option(modeOptions,mode)+'</select></div>'
-  +'<div class="field" data-schedule-mode="once"><span>Date et heure d’exécution</span><input type="datetime-local" name="job_at" value="'+e(schedule.at||'')+'"></div>'
-  +'<div class="field" data-schedule-mode="interval"><span>Répéter toutes les</span><div class="inline-picker"><input type="number" name="job_every" min="1" max="100000" value="'+e(schedule.every||5)+'"><select name="job_unit">'+option(units,schedule.unit||'minutes')+'</select></div></div>'
-  +'<div class="field" data-schedule-mode="cron"><span>Cron (5 champs)</span><input name="job_cron" placeholder="*/5 * * * *" value="'+e(schedule.cron||'')+'"><small class="hint">Minutes · Heures · Jour · Mois · Jour de semaine</small></div>'
-  +field('Fuseau horaire','job_timezone',schedule.timezone||'Europe/Paris');
+ const presets=[['','Personnalisé'],['1:minutes','Toutes les minutes'],
+    ['5:minutes','Toutes les 5 minutes'],['10:minutes','Toutes les 10 minutes'],
+    ['15:minutes','Toutes les 15 minutes'],['30:minutes','Toutes les 30 minutes'],
+    ['1:hours','Toutes les heures'],['6:hours','Toutes les 6 heures'],
+    ['1:days','Chaque jour'],['1:weeks','Chaque semaine']];
+ const currentPreset=(schedule.every||5)+':'+(schedule.unit||'minutes');
+ return '<div class="field"><span>Planification</span><select name="job_schedule_mode">'+option(modeOptions,mode)+'</select></div>'
+  +'<div class="field schedule-detail" data-schedule-mode="once"><span>Date et heure de la seule exécution</span><input type="datetime-local" name="job_at" value="'+e(schedule.at||'')+'"></div>'
+  +'<div class="schedule-detail field full" data-schedule-mode="interval"><span>Assistant de répétition</span><select name="job_interval_preset">'
+  +option(presets,presets.some(x=>x[0]===currentPreset)?currentPreset:'')+'</select>'
+  +'<div class="inline-picker"><input type="number" name="job_every" min="1" max="100000" value="'+e(schedule.every||5)+'">'
+  +'<select name="job_unit">'+option(units,schedule.unit||'minutes')+'</select></div>'
+  +'<small class="hint">Exécution récurrente suivant l’intervalle choisi.</small></div>'
+  +'<div class="field schedule-detail" data-schedule-mode="cron"><span>Expression Cron (5 champs)</span><input name="job_cron" placeholder="*/5 * * * *" value="'+e(schedule.cron||'')+'">'
+  +'<small class="hint">Minute · Heure · Jour du mois · Mois · Jour de semaine</small></div>'
+  +'<div class="field schedule-timezone"><span>Fuseau horaire</span><input name="job_timezone" value="'+e(schedule.timezone||'Europe/Paris')+'"></div>'
+  +'<div class="schedule-info hint">En mode manuel, le workflow est lancé à la demande ou par webhook, sans calendrier.</div>';
 }
 function showScheduleMode(){
- const mode=document.querySelector('.modal select[name="job_schedule_mode"]')?.value||'manual';
- $('[data-schedule-mode]',document.querySelector('.modal')||document).forEach(el=>el.hidden=el.dataset.scheduleMode!==mode);
+ const root=document.querySelector('.modal');
+ if(!root)return;
+ const mode=root.querySelector('[name="job_schedule_mode"]')?.value||'manual';
+ $$('[data-schedule-mode]',root).forEach(el=>el.hidden=el.dataset.scheduleMode!==mode);
+ $$('.schedule-timezone',root).forEach(el=>el.hidden=mode==='manual');
+ $$('.schedule-info',root).forEach(el=>el.hidden=mode!=='manual');
 }
+function applySchedulePreset(){
+ const form=document.querySelector('.modal');
+ if(!form)return;
+ const preset=form.querySelector('[name="job_interval_preset"]')?.value;
+ if(!preset)return;
+ const [every,unit]=preset.split(':');
+ const fieldEvery=form.querySelector('[name="job_every"]'),fieldUnit=form.querySelector('[name="job_unit"]');
+ if(fieldEvery)fieldEvery.value=every;
+ if(fieldUnit)fieldUnit.value=unit;
+}
+
 function captureSchedule(v){
  const mode=v('job_schedule_mode')||'manual', timezone=v('job_timezone')||'Europe/Paris';
  const schedule={mode,timezone};
@@ -458,8 +573,8 @@ function drawCredentialBrowser(){
   body='<div class="tool-row"><input id="credentialSearch" placeholder="Rechercher une connexion (nom, type, hôte…)" value="'+e(state.credentialSearch||'')+'">'
    +'<button class="btn primary" data-action="credential-new">＋ Nouvelle connexion</button></div>'
    +(target?'<p class="hint">Connexions conseillées pour cette tâche : '+e(connectionKinds.find(x=>x[0]===target)?.[1]||target)+'. Les anciennes connexions API ou génériques restent utilisables.</p>':'')
-   +'<div class="credential-list">'+(state.credentials.map(c=>{
-      const compatible=!target||c.kind===target||c.kind==='generic'||(['matrix','proxmox'].includes(target)&&c.kind==='api');
+   +'<div class="credential-list">'+(state.credentials.filter(c=>!target||target==='generic'||c.kind===target||(['matrix','proxmox'].includes(target)&&c.kind==='api')).map(c=>{
+      const compatible=!target||target==='generic'||c.kind===target||(['matrix','proxmox'].includes(target)&&c.kind==='api');
       return '<div class="credential-entry" data-credential-search="'+e((c.name+' '+c.kind+' '+(c.public?.host||c.public?.uri||c.public?.url||'')).toLowerCase())+'">'
        +'<div><b>'+e(c.name)+'</b><p class="hint">'+e(c.kind.toUpperCase())+' · '+e(c.public?.host||c.public?.uri||c.public?.url||'')+' · #'+c.id+'</p></div>'
        +'<div class="credential-actions">'+(state.pickerField?'<button class="btn tiny primary" data-action="credential-select" data-id="'+c.id+'" '+(compatible?'':'disabled title="Protocole non compatible"')+'>Sélectionner</button>':'')
@@ -649,19 +764,73 @@ function drawGroupBrowser(){
  openLayer('groupLayer','Sélection des groupes — '+({view:'Lecture',run:'Exécution',edit:'Modification'}[state.groupRole]||''),body);
 }
 
-function stepConfigFields(step){return (FIELDS[step.type]||[]).map(([key,label,type])=>{const value=step.config?.[key]??'';if(type==='textarea')return `<div class="field full"><span>${label}</span><textarea name="cfg_${key}">${e(value)}</textarea></div>`;if(type==='checkbox')return field(label,'cfg_'+key,value,'checkbox');if(type==='agent'){return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.agents.filter(a=>a.enrolled&&!a.revoked).map(a=>[a.id,a.name+' ('+a.platform+')'])],value)}if(type==='datacenter'){return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.datacenters.map(d=>[d.id,d.name])],value)}if(type==='ssh-target')return sshTargetPicker('cfg_'+key,value,false);if(type==='credential')return credentialField(label,key,value);if(type.startsWith('select:'))return selectField(label,'cfg_'+key,type.slice(7).split('|').map(x=>[x,x]),value);return field(label,'cfg_'+key,value,type) }).join('')}
+const CONNECTION_STEP_TYPES={
+ email:{manual:['host','port','ssl','tls_mode','from'],vault:['credential_id']},
+ ssh:{manual:['host','port'],vault:['ssh_server_id']},
+ sftp:{manual:['host','port'],vault:['ssh_server_id']},
+ ansible:{manual:['host','port'],vault:['ssh_server_id']},
+ ftp:{manual:['host','port','allow_plaintext'],vault:[]},
+ matrix:{manual:['homeserver'],vault:[]},
+ directory:{manual:['uri','starttls','base_dn'],vault:[]},
+ http:{manual:['url'],vault:['path']}
+};
+const CONNECTION_MODE_HELP={
+ email:{vault:'Hôte, port, chiffrement et expéditeur fournis par le coffre SMTP.',
+ manual:'Paramètres SMTP du relais saisis ici, sans identifiant ni mot de passe inline. Pour SMTP authentifié, sélectionner le coffre.'},
+ ssh:{vault:'Choisir un serveur inventorié et une identité SSH du coffre.',
+ manual:'FQDN/port manuels, mais identité SSH du coffre obligatoire pour la clé ou le mot de passe.'},
+ sftp:{vault:'Cible d’inventaire et identité SSH du coffre.',manual:'FQDN/port manuels, secrets conservés au coffre.'},
+ ansible:{vault:'Runner inventorié et compte SSH du coffre.',manual:'Runner saisi manuellement, identité SSH du coffre.'},
+ ftp:{vault:'Hôte, port, sécurité et compte depuis le coffre FTP.',manual:'Hôte/port manuels ; compte FTP du coffre facultatif si connexion anonyme.'},
+ matrix:{vault:'Homeserver et token Matrix du coffre.',manual:'Homeserver manuel, token bot toujours issu du coffre.'},
+ directory:{vault:'Utiliser le coffre LDAP ou l’administration centrale.',manual:'Paramètres réseau LDAP personnalisés, secrets toujours dans le coffre.'},
+ http:{vault:'URL de base et token API depuis le coffre ; chemin relatif par étape.',manual:'URL saisie directement ; pour authentification, utiliser le coffre API.'}
+};
+function stepConnectionMode(step){
+ if(step.config?.connection_mode)return step.config.connection_mode;
+ return step.config?.credential_id?'vault':'manual';
+}
+function connectionModeWidget(step){
+ if(!CONNECTION_STEP_TYPES[step.type])return '';
+ const mode=stepConnectionMode(step),help=CONNECTION_MODE_HELP[step.type]||{};
+ return '<div class="connection-source-select"><div class="field"><span>Configuration de la connexion</span><select name="cfg_connection_mode">'
+  +option([['vault','Utiliser le coffre-fort (recommandé)'],['manual','Configuration réseau manuelle']],mode)
+  +'</select></div><p class="hint">'+e(help[mode]||'')+'</p></div>';
+}
+function stepConfigFields(step){
+ const schema=CONNECTION_STEP_TYPES[step.type],mode=stepConnectionMode(step);
+ const fields=FIELDS[step.type]||[];
+ return connectionModeWidget(step)+fields.filter(([key])=>{
+  if(!schema)return true;
+  if(key==='credential_id')return (step.type==='email'||step.type==='http')?mode==='vault':true;
+  if(step.type==='email'&&key==='ssl'&&step.config?.connection_mode)return false;
+  if(schema.manual.includes(key))return mode==='manual';
+  if(schema.vault.includes(key))return mode==='vault';
+  return true;
+ }).map(([key,label,type])=>{
+  const value=step.config?.[key]??'';
+  if(type==='textarea')return '<div class="field full"><span>'+e(label)+'</span><textarea name="cfg_'+e(key)+'">'+e(value)+'</textarea></div>';
+  if(type==='checkbox')return field(label,'cfg_'+key,value,'checkbox');
+  if(type==='agent')return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.agents.filter(a=>a.enrolled&&!a.revoked).map(a=>[a.id,a.name+' ('+a.platform+')'])],value);
+  if(type==='datacenter')return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.datacenters.map(d=>[d.id,d.name])],value);
+  if(type==='ssh-target')return sshTargetPicker('cfg_'+key,value,false);
+  if(type==='credential')return credentialField(label,key,value);
+  if(type.startsWith('select:'))return selectField(label,'cfg_'+key,type.slice(7).split('|').map(x=>[x,x]),value);
+  return field(label,'cfg_'+key,value,type);
+ }).join('');
+}
 function branches(step){const s=state.editor.steps_json;const targets=[['','Automatique (étape suivante)'],['END','Fin avec succès'],['FAIL','Fin avec échec'],...s.filter(x=>x.id!==step.id).map(x=>[x.id,x.name])];return `${selectField('Si réussite','on_success',targets,step.on_success||'')}${selectField('Si échec','on_failure',[['','Arrêt en échec'],...targets.slice(1)],step.on_failure||'')}`}
-function renderEditor(){const j=state.editor;const selected=j.steps_json[state.selectedStep];const body=`<div class="editor-meta">${field('Nom du workflow','job_name',j.name)}${folderEditorField(j.folder)}${field('Tags (séparés par des virgules)','job_tags',j.tags_json.join(', '))}</div><div class="editor-meta"><div class="field"><span>Description</span><input name="job_description" value="${e(j.description)}"></div>${scheduleFields(j.schedule_json||{})}</div><div class="editor-meta">${groupEditorField('Groupes lecture','view',j.acl_json.view)}${groupEditorField('Groupes exécution','run',j.acl_json.run)}${groupEditorField('Groupes modification','edit',j.acl_json.edit)}</div><div class="field checkbox"><input type="checkbox" name="job_enabled" ${j.enabled?'checked':''}><span>Workflow actif</span></div><div class="editor-columns"><section class="editor-graph"><div class="panel-title"><h2>Graphe d’exécution</h2><span class="hint">Succès / échec</span></div><div class="graph-legend"><span>Succès</span><span>Échec</span></div><div class="graph-surface" id="workflowGraph">${renderGraph(j.steps_json,state.selectedStep)}</div><div class="step-list">${j.steps_json.map((s,i)=>`<button class="step-pill ${i===state.selectedStep?'selected':''}" data-action="select-step" data-index="${i}">${i+1}. ${e(s.name)}<small>${e(kindLabel[s.type])}</small></button>`).join('')}</div></section><section class="editor-side"><div class="panel-title"><h2>Configurer l’étape ${state.selectedStep+1}</h2><span class="hint">${j.steps_json.length} étapes</span></div><div class="editor-actions"><button class="btn tiny" data-action="add-step">＋ Ajouter</button><button class="btn tiny" data-action="step-up">↑</button><button class="btn tiny" data-action="step-down">↓</button><button class="btn tiny danger" data-action="delete-step">Supprimer</button></div><div class="form-grid">${field('Nom de l’étape','step_name',selected.name)}${selectField('Type','step_type',kinds.map(k=>[k,kindLabel[k]]),selected.type)}</div><div class="subheading">Paramètres de la tâche</div><div class="step-config">${stepConfigFields(selected)}</div><div class="divider"></div><div class="subheading">Gestion des erreurs</div><div class="form-grid">${field('Nouvelles tentatives (0–5)','step_retries',selected.retries||0,'number')}${field('Attente entre tentatives (s)','step_retry_delay',selected.retry_delay??2,'number')}</div><div class="divider"></div><div class="subheading">Branches conditionnelles</div><div class="form-grid">${branches(selected)}</div><div class="divider"></div><div class="subheading">Condition avant exécution</div><div class="field checkbox"><input name="cond_enabled" type="checkbox" ${selected.condition?.enabled?'checked':''}><span>Activer cette condition</span></div><div class="form-grid">${selectField('Source','cond_source',[['last_status','État de la précédente étape'],['last_exit_code','Code retour précédent'],['last_output','Sortie précédente'],['variable','Variable']],selected.condition?.source||'last_status')}${selectField('Comparaison','cond_operator',[['equals','Égal'],['not_equals','Différent'],['contains','Contient'],['not_contains','Ne contient pas'],['exists','Existe']],selected.condition?.operator||'equals')}${field('Valeur attendue','cond_value',selected.condition?.value||'')}${field('Nom de la variable','cond_key',selected.condition?.key||'')}</div></section></div>`;
+function renderEditor(){const j=state.editor;const selected=j.steps_json[state.selectedStep];const body=`<div class="editor-meta">${field('Nom du workflow','job_name',j.name)}${folderEditorField(j.folder)}${field('Tags (séparés par des virgules)','job_tags',j.tags_json.join(', '))}</div><div class="editor-meta"><div class="field"><span>Description</span><input name="job_description" value="${e(j.description)}"></div>${scheduleFields(j.schedule_json||{})}</div><div class="editor-meta">${groupEditorField('Groupes lecture','view',j.acl_json.view)}${groupEditorField('Groupes exécution','run',j.acl_json.run)}${groupEditorField('Groupes modification','edit',j.acl_json.edit)}</div><div class="field checkbox"><input type="checkbox" name="job_enabled" ${j.enabled?'checked':''}><span>Workflow actif</span></div><div class="editor-columns"><section class="editor-graph"><div class="panel-title"><h2>Graphe d’exécution</h2><span class="hint">Succès / échec</span></div><div class="graph-legend"><span>Succès</span><span>Échec</span></div><div class="graph-surface" id="workflowGraph">${renderGraph(j.steps_json,state.selectedStep)}</div><div class="step-list">${j.steps_json.map((s,i)=>`<button class="step-pill ${i===state.selectedStep?'selected':''}" data-action="select-step" data-index="${i}">${i+1}. ${e(s.name)}<small>${e(kindLabel[s.type])}</small></button>`).join('')}</div></section><section class="editor-side"><div class="panel-title"><h2>Configurer l’étape ${state.selectedStep+1}</h2><span class="hint">${j.steps_json.length} étapes</span></div><div class="editor-actions"><button class="btn tiny" data-action="add-step">＋ Ajouter</button><button class="btn tiny failure-add" data-action="add-failure-step">＋ Si échec</button><button class="btn tiny" data-action="step-up">↑</button><button class="btn tiny" data-action="step-down">↓</button><button class="btn tiny danger" data-action="delete-step">Supprimer</button></div><div class="form-grid">${field('Nom de l’étape','step_name',selected.name)}${selectField('Type','step_type',kinds.map(k=>[k,kindLabel[k]]),selected.type)}</div><div class="subheading">Paramètres de la tâche</div><div class="step-config">${stepConfigFields(selected)}</div><div class="divider"></div><div class="subheading">Gestion des erreurs</div><div class="form-grid">${field('Nouvelles tentatives (0–5)','step_retries',selected.retries||0,'number')}${field('Attente entre tentatives (s)','step_retry_delay',selected.retry_delay??2,'number')}</div><div class="divider"></div><div class="subheading">Branches de réussite / échec</div><p class="hint">En cas d’échec, le moteur suit la branche rouge. Cliquez sur « ＋ Si échec » pour créer une tâche reliée automatiquement.</p><div class="form-grid">${branches(selected)}</div><div class="divider"></div><div class="subheading">Condition avant exécution</div><div class="field checkbox"><input name="cond_enabled" type="checkbox" ${selected.condition?.enabled?'checked':''}><span>Activer cette condition</span></div><div class="form-grid">${selectField('Source','cond_source',[['last_status','État de la précédente étape'],['last_exit_code','Code retour précédent'],['last_output','Sortie précédente'],['variable','Variable']],selected.condition?.source||'last_status')}${selectField('Comparaison','cond_operator',[['equals','Égal'],['not_equals','Différent'],['contains','Contient'],['not_contains','Ne contient pas'],['exists','Existe']],selected.condition?.operator||'equals')}${field('Valeur attendue','cond_value',selected.condition?.value||'')}${field('Nom de la variable','cond_key',selected.condition?.key||'')}</div></section></div>`;
 modal(j.id?'Modifier le workflow':'Nouveau workflow',body,`<button class="btn" data-action="modal-close">Annuler</button>${j.id&&roleAdmin()?`<button class="btn danger" data-action="delete-job" data-id="${j.id}">Supprimer</button>`:''}<button class="btn primary" data-action="save-job">✓ Enregistrer</button>`,true);showScheduleMode()}
-function captureEditor(){const root=$('.modal');if(!root||!state.editor)return;const get=n=>root.querySelector(`[name="${n}"]`),v=n=>get(n)?.value??'',ck=n=>!!get(n)?.checked;const j=state.editor;j.name=v('job_name');j.folder=v('job_folder');j.description=v('job_description');j.tags_json=v('job_tags').split(',').map(x=>x.trim()).filter(Boolean);j.schedule_json=captureSchedule(v);j.enabled=ck('job_enabled');j.acl_json=Object.fromEntries(['view','run','edit'].map(k=>[k,v('acl_'+k).split(',').map(x=>x.trim().toLowerCase()).filter(Boolean)]));const s=j.steps_json[state.selectedStep];s.name=v('step_name');s.type=v('step_type');s.retries=Number(v('step_retries')||0);s.retry_delay=Number(v('step_retry_delay')||2);s.on_success=v('on_success');s.on_failure=v('on_failure');s.condition={enabled:ck('cond_enabled'),source:v('cond_source'),operator:v('cond_operator'),value:v('cond_value'),key:v('cond_key')};const keys=(FIELDS[s.type]||[]).map(x=>x[0]);const cfg={...s.config};for(const key of keys){const element=get('cfg_'+key);if(element){cfg[key]=element.type==='checkbox'?element.checked:element.type==='number'?Number(element.value||0):element.value}}s.config=cfg}
+function captureEditor(){const root=$('.modal');if(!root||!state.editor)return;const get=n=>root.querySelector(`[name="${n}"]`),v=n=>get(n)?.value??'',ck=n=>!!get(n)?.checked;const j=state.editor;j.name=v('job_name');j.folder=v('job_folder');j.description=v('job_description');j.tags_json=v('job_tags').split(',').map(x=>x.trim()).filter(Boolean);j.schedule_json=captureSchedule(v);j.enabled=ck('job_enabled');j.acl_json=Object.fromEntries(['view','run','edit'].map(k=>[k,v('acl_'+k).split(',').map(x=>x.trim().toLowerCase()).filter(Boolean)]));const s=j.steps_json[state.selectedStep];s.name=v('step_name');s.type=v('step_type');s.retries=Number(v('step_retries')||0);s.retry_delay=Number(v('step_retry_delay')||2);s.on_success=v('on_success');s.on_failure=v('on_failure');s.condition={enabled:ck('cond_enabled'),source:v('cond_source'),operator:v('cond_operator'),value:v('cond_value'),key:v('cond_key')};const keys=(FIELDS[s.type]||[]).map(x=>x[0]);const cfg={...s.config};for(const key of keys){const element=get('cfg_'+key);if(element){cfg[key]=element.type==='checkbox'?element.checked:element.type==='number'?Number(element.value||0):element.value}}const mode=get('cfg_connection_mode');if(mode)cfg.connection_mode=mode.value;s.config=cfg}
 function renderGraph(steps,index){const coords=steps.map((_,i)=>({x:135,y:55+i*125}));const height=Math.max(375,steps.length*125+55);let svg=`<svg width="670" height="${height}" viewBox="0 0 670 ${height}" xmlns="http://www.w3.org/2000/svg"><defs><marker id="okArrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="none" stroke="#51d5a5"/></marker><marker id="noArrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="none" stroke="#f17883"/></marker></defs><rect x="14" y="16" width="78" height="27" rx="7" fill="#ffc34b22"/><text x="26" y="34" font-size="11" fill="#ffc34b">DÉPART</text><path d="M92 30 H120 V60 H135" class="edge-success" marker-end="url(#okArrow)"/>`;
 steps.forEach((s,i)=>{const next=s.on_success||steps[i+1]?.id||'END';const fail=s.on_failure||'FAIL';const target=steps.findIndex(x=>x.id===next);const failure=steps.findIndex(x=>x.id===fail);const x=coords[i].x,y=coords[i].y; if(target>=0){const ty=coords[target].y+37;svg+=`<path d="M${x+230} ${y+27} H410 V${ty} H${coords[target].x}" class="edge-success" marker-end="url(#okArrow)"/>`}else{svg+=`<path d="M${x+230} ${y+27} H445" class="edge-success" marker-end="url(#okArrow)"/><text x="450" y="${y+31}" font-size="10" fill="#51d5a5">${next==='FAIL'?'FAIL':'END'}</text>`}if(failure>=0){const fy=coords[failure].y+14;svg+=`<path d="M${x+230} ${y+57} H535 V${fy} H${coords[failure].x}" class="edge-fail" marker-end="url(#noArrow)"/>`}else{svg+=`<path d="M${x+230} ${y+57} H565" class="edge-fail"/><text x="570" y="${y+61}" font-size="10" fill="#f17883">${fail==='END'?'END':'FAIL'}</text>`}});
 steps.forEach((s,i)=>{const x=coords[i].x,y=coords[i].y;svg+=`<g class="step-node ${index===i?'selected':''}" data-action="select-step" data-index="${i}"><rect x="${x}" y="${y}" width="230" height="77" rx="11"/><circle cx="${x+22}" cy="${y+23}" r="10" fill="#ffc34b33"/><text x="${x+18}" y="${y+27}" font-size="12" fill="#ffc34b">${i+1}</text><text x="${x+41}" y="${y+28}" font-size="13" font-weight="700">${e(s.name.slice(0,25))}</text><text x="${x+17}" y="${y+54}" font-size="11" fill="#9396a2">${e(kindLabel[s.type])}</text></g>`});return svg+'</svg>'}
 async function saveEditor(){captureEditor();const j=state.editor;if(!j.name.trim())return toast('Saisis un nom de workflow',false);try{if(j.id){await api('/jobs/'+j.id,'PUT',j)}else await api('/jobs','POST',j);toast('Workflow enregistré');closeModal();await refresh();showPage('jobs')}catch(ex){toast(ex.message,false)}}
 async function runJob(id){try{const r=await api('/jobs/'+id+'/run','POST');toast('Exécution #'+r.run_id+' mise en file');await refresh();showPage('runs');await openRun(r.run_id)}catch(ex){toast(ex.message,false)}}
 async function openRun(id){try{const r=await api('/runs/'+id);state.selectedRun=r;modal('Exécution #'+r.id+' — '+e(r.job_name),`<div class="tool-row">${labelStatus(r.status)}<span class="hint">Déclenché par ${e(r.requested_by)} · ${dt(r.queued_at)}</span></div>${r.error?`<div class="notice error">${e(r.error)}</div>`:''}<h3>Résultats par étape</h3>${r.steps.map(s=>`<div class="step-log"><div class="step-header">${labelStatus(s.status)}<b>${e(s.name)}</b><span class="muted">${e(s.type)} · essai ${s.attempt} · code ${s.exit_code??'—'}</span></div><pre>${e(s.output||'(aucune sortie)')}</pre></div>`).join('')||'<p class="muted">Exécution en attente. Réactualisez dans quelques secondes.</p>'}`,`<button class="btn" data-action="run-detail" data-id="${id}">↻ Actualiser</button><button class="btn primary" data-action="modal-close">Fermer</button>`,true)}catch(ex){toast(ex.message,false)}}
-async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit')).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
-function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP()}
+async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit')).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateVersionSummary').innerHTML=renderUpdateVersion(u);$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
+function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP();if(state.page==='agents')scheduleAgentBatchPoll()}
 async function refresh(){await load();render()}
 async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='layer-close'){closeLayer(b.dataset.layer);return}
  if(a==='ssh-goto-inventory'){closeLayer('credentialTestLayer');closeLayer('credentialLayer');showPage('ssh-inventory');return}
@@ -701,6 +870,20 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='group-browser'){await openGroupBrowser(b.dataset.role);return}
  if(a==='group-toggle'){const arr=state.editor.acl_json[state.groupRole]||[],group=b.dataset.name.toLowerCase();state.editor.acl_json[state.groupRole]=arr.includes(group)?arr.filter(x=>x!==group):[...arr,group];drawGroupBrowser();return}
  if(a==='group-done'){closeLayer('groupLayer');renderEditor();return}
+ if(a==='ldap-ca-import'){
+  const file=document.getElementById('ldapCAImportFile')?.files?.[0];
+  if(!file)return toast('Sélectionner un certificat CA PEM (.crt ou .pem)',false);
+  if(file.size>131072)return toast('Certificat trop volumineux (128 Kio maximum)',false);
+  const original=b.textContent;b.disabled=true;b.textContent='Import en cours…';
+  try{
+   const result=await api('/admin/ldap/ca','POST',{pem:await file.text()});
+   const input=document.querySelector('#ldapAdminForm [name="ca_cert"]');
+   if(input)input.value=result.path;
+   toast(result.certificate_count+' certificat(s) CA importé(s). Enregistrer la configuration LDAP.');
+  }catch(ex){toast(ex.message,false)}
+  finally{b.disabled=false;b.textContent=original}
+  return
+ }
  if(a==='ldap-test'){
   const data=readLDAPForm(),target=document.getElementById('ldapTestResult');
   if(target)target.textContent='Test LDAP en cours…';
@@ -708,7 +891,34 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    if(target)target.innerHTML='<span class="status success">Test réussi</span> '+e(result.message)+' · '+result.group_sample_count+' groupe(s) échantillonnés'+(result.user_tested?' · Utilisateur '+(result.user_found?'trouvé':'introuvable'):'');
   }catch(ex){if(target)target.innerHTML='<div class="notice error">'+e(ex.message)+'</div>'}return
  }
- if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git autorisée et redémarrer les services ?'))return;await api('/updates/request','POST',{action:b.dataset.value});toast('Demande envoyée au service de maintenance');hydrateAdmins();return}if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
+ if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}
+ if(a==='agent-deploy-bulk-form'){agentBulkDeployForm();return}
+ if(a==='agent-batch-refresh'){await refresh();return}
+ if(a==='agent-bulk-add-group'){
+  const sel=document.getElementById('agentBulkInventoryGroup');
+  const group=(state.sshInventory.groups||[]).find(g=>String(g.id)===sel?.value);
+  if(!group)return toast('Sélectionner un groupe de serveurs',false);
+  const area=document.querySelector('#agentBulkDeployForm [name="targets"]');
+  if(!area)return;
+  const targets=(state.sshInventory.servers||[]).filter(h=>group.server_ids.includes(h.id))
+   .map(x=>x.fqdn+(x.port===22?'':':'+x.port));
+  const lines=new Set([...area.value.split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean),...targets]);
+  area.value=[...lines].join('\n');
+  toast(targets.length+' serveur(s) ajoutés');return
+ }if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-failure-step'){
+  captureEditor();
+  const step=state.editor.steps_json[state.selectedStep];
+  const next=addStep();
+  next.name='Si échec · '+step.name.slice(0,35);
+  next.on_success=step.on_failure&&step.on_failure!=='FAIL'&&step.on_failure!=='END'?
+     step.on_failure:'FAIL';
+  step.on_failure=next.id;
+  state.editor.steps_json.push(next);
+  state.selectedStep=state.editor.steps_json.length-1;
+  renderEditor();
+  toast('Étape liée à la branche d’échec');return
+ }
+ if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git autorisée et redémarrer les services ?'))return;await api('/updates/request','POST',{action:b.dataset.value});toast('Demande envoyée au service de maintenance');hydrateAdmins();return}if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
  if(ev.target.id==='sshGroupForm'){
   ev.preventDefault();
@@ -775,6 +985,26 @@ async function handleSubmit(ev){
    await reloadFolders();drawFolderBrowser();toast('Dossier renommé')}catch(ex){toast(ex.message,false)}return
  }
  if(ev.target.id==='agentEnrollForm'){ev.preventDefault();const f=new FormData(ev.target);try{const r=await api('/agents/enrollments','POST',{name:f.get('name'),platform:f.get('platform'),group:f.get('group')});modal('Jeton agent #'+r.id,'<p class="notice">Copier maintenant : jeton unique expirant dans 15 minutes.</p><div class="field"><span>Identifiant</span><input readonly value="'+e(r.id)+'"></div><div class="field"><span>Jeton</span><textarea readonly>'+e(r.enrollment_token)+'</textarea></div><p class="hint">config.json : {"server":"https://origami.exemple.fr","agent_id":'+r.id+',"enrollment_token":"…"} (droits limités au service).</p>','<button class="btn primary" data-action="modal-close">Fermer</button>');await refresh()}catch(ex){toast(ex.message,false)}return}
+
+ if(ev.target.id==='agentBulkDeployForm'){
+  ev.preventDefault();const f=new FormData(ev.target);
+  if(!f.has('approved'))return toast('Confirmation requise',false);
+  const hosts=String(f.get('targets')||'').split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean);
+  if(!hosts.length||hosts.length>100)return toast('La liste doit contenir entre 1 et 100 FQDN',false);
+  if(!f.get('credential_id'))return toast('Choisir une identité SSH du coffre',false);
+  const button=ev.target.querySelector('button[type="submit"]');
+  if(button)button.disabled=true;
+  try{
+   const result=await api('/agents/deploy/batch','POST',{
+    platform:String(f.get('platform')),credential_id:Number(f.get('credential_id')),
+    agent_group:String(f.get('agent_group')||'default'),
+    targets:hosts.map(host=>({host})),approved:true
+   });
+   closeModal();toast('Lot #'+result.batch_id+' accepté : '+result.total+' serveur(s)');
+   await refresh();showPage('agents');
+  }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
+  return
+ }
  if(ev.target.id==='agentDeployForm'){ev.preventDefault();const f=new FormData(ev.target);if(!f.get('approved'))return toast('Confirmation requise',false);try{const r=await api('/agents/deploy','POST',{name:f.get('name')||f.get('host'),host:f.get('host'),port:Number(f.get('port')||22),platform:f.get('platform'),group:f.get('group'),credential_id:Number(f.get('credential_id')),approved:true});closeModal();toast('Agent #'+r.id+' : installation envoyée');await refresh()}catch(ex){toast(ex.message,false)}return}
  if(ev.target.id==='datacenterForm'){ev.preventDefault();const f=new FormData(ev.target);try{await api('/datacenters','POST',{name:f.get('dc_name'),url:f.get('dc_url'),credential_id:Number(f.get('dc_credential'))});closeModal();toast('Datacenter ajouté');await refresh()}catch(ex){toast(ex.message,false)}return}if(ev.target.id==='loginForm'){ev.preventDefault();const form=new FormData(ev.target);$('#authError').textContent='';try{await api('/login','POST',{username:form.get('username'),password:form.get('password')});const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#userAvatar').textContent=initials();$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);await refresh();showPage('dashboard')}catch(ex){$('#authError').textContent=ex.message}}else if(ev.target.id==='credentialForm'){ev.preventDefault();const f=new FormData(ev.target);const payload={};for(const k of ['username','password','token','private_key','passphrase'])if(f.get(k)?.trim())payload[k]=f.get(k);try{await api('/credentials','POST',{name:f.get('name'),kind:f.get('kind'),payload});closeModal();toast('Secret chiffré et enregistré');await refresh()}catch(ex){toast(ex.message,false)}}}
 function initTheme(){let theme=localStorage.getItem('origami-theme')||'dark';document.body.className='theme-'+theme;$('#themeToggle').textContent={dark:'☾',light:'☀',cyber:'✧'}[theme]||'☾'}
@@ -798,5 +1028,7 @@ async function bootstrap(){document.addEventListener('submit',handleSubmit);try{
   const port=ev.target.closest('form').elements.namedItem('port');
   if(port&&['25','465','587'].includes(port.value))port.value=ev.target.value==='ssl'?465:ev.target.value==='none'?25:587;
  }
- if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config={};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
+ if(ev.target.name==='cfg_connection_mode'&&state.editor){captureEditor();renderEditor();return}
+ if(ev.target.name==='job_interval_preset'){applySchedulePreset();return}
+ if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config=CONNECTION_STEP_TYPES[newType]?{connection_mode:'vault'}:{};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
 bootstrap();
