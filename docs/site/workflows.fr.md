@@ -15,10 +15,22 @@ L'éditeur permet de créer les blocs et de relier les branches. Variables dispo
 ## Déclencheurs
 
 - **Manuel :** un opérateur autorisé clique sur Exécuter.
-- **Cron :** expression cron et fuseau gérés par l'ordonnanceur.
+- **Une seule fois :** choisir une date/heure locale et un fuseau ; le workflow ne se réenfile pas après le déclenchement.
+- **Répéter :** toutes les N minutes, heures, jours ou semaines (par exemple toutes les 5 minutes ou toutes les heures).
+- **Cron avancé :** expression à 5 champs et fuseau IANA pour les fréquences personnalisées.
 - **Webhook :** token propre au workflow créé par un administrateur ; les événements peuvent transmettre des variables JSON. Ne pas mettre le token dans une URL ou des logs publics.
 
 **Non disponibles :** jonctions DAG parallèles, surveillance des fichiers et Event Logs, réception IMAP, approbation humaine native, ordonnanceur HA distribué.
+
+## Dossiers, groupes et connexions
+
+Le menu **Workflows** contient une arborescence : **Gérer** ouvre les dossiers pour créer des sous-dossiers, renommer ou supprimer un dossier, et sélectionner le dossier d'un workflow. Les workflows d'un dossier supprimé sont **déplacés vers son parent**, jamais effacés.
+
+Dans **Nouveau workflow**, sélectionner **Déclenchement** : **Manuel**, **Une seule fois**, **Répéter à intervalle**, ou **Cron avancé**. Les horaires sont saisis dans le fuseau indiqué (par défaut Europe/Paris) et persistés en UTC. Une tâche déclenchée à intervalle ne rejoue pas automatiquement toutes les occurrences manquées pendant un arrêt du serveur. Le cron peut cibler des jours précis, contrairement aux intervalles.
+
+Les ACL **Lecture / Exécution / Modification** ouvrent une fenêtre **Rechercher** dans les groupes existants de l'annuaire (y compris les groupes OpenLDAP `posixGroup` / `memberUid`). Le compte LDAP de lecture doit avoir accès à `LDAP_GROUP_BASE_DN`. Si la connexion LDAP est indisponible, seuls les groupes déjà connus sont proposés et un avertissement apparaît ; vérifier ces choix avant sauvegarde.
+
+Pour les blocs utilisant une connexion, **Rechercher / gérer** ouvre le coffre depuis la tâche. Il est possible de **sélectionner**, **créer**, **modifier**, **cloner** ou **supprimer** une connexion. Les valeurs secrètes ne sont jamais réaffichées ; modifier une connexion en laissant un champ sensible vide préserve sa valeur. **Créer depuis la tâche** stocke également les secrets dans le coffre chiffré, puis référence leur identifiant dans le workflow — aucun mot de passe en clair dans `steps_json`. La suppression d'une connexion référencée par un workflow ou un datacenter est refusée.
 
 ## Reprises et idempotence
 
