@@ -44,3 +44,9 @@ LDAP/AD writes are disabled by default, confined by base DN, TLS certificate val
 Bulk agent provisioning requires an administrator session, explicit approval and an encrypted SSH vault identity. Every host must appear in `AGENT_DEPLOY_ALLOWED_HOSTS`. The durable per-host queue never automatically replays interrupted installs. API results and audit logs do not reveal passwords, private keys or raw installation output.
 
 LDAP upload accepts only **public PEM CA certificates** with restricted file access. TLS certificate verification cannot be disabled in the UI. Manual workflow network settings must never store plaintext passwords or tokens.
+
+
+### Exceptional LDAPS/STARTTLS certificate validation override
+
+Prefer installing the **issuing public CA** instead of a server-leaf certificate. A CRT file may contain the LDAP server leaf rather than a CA. For exceptional troubleshooting only, a host administrator can set ALLOW_INSECURE_LDAP_TLS=true in .env and restart the container, then explicitly check and save the LDAP certificate-verification bypass under Administration → LDAP. **Warning:** transport remains encrypted, but the remote LDAP server is not authenticated: an active network attacker may intercept directory credentials. This exception also affects LDAP login, tests and directory workflows. Disable it as soon as the proper CA is installed.
+

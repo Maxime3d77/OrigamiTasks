@@ -18,10 +18,12 @@ LDAP_VIEWER_GROUP = os.getenv('LDAP_VIEWER_GROUP', 'origamitasks-viewers')
 LDAP_USER_ATTRIBUTE = os.getenv('LDAP_USER_ATTRIBUTE', 'sAMAccountName')
 LDAP_STARTTLS = os.getenv('LDAP_STARTTLS', 'false').lower() == 'true'
 LDAP_CA_CERT = os.getenv('LDAP_CA_CERT', '')
+# Explicit, high-risk exception, independently gated on the host.
+ALLOW_INSECURE_LDAP_TLS = os.getenv('ALLOW_INSECURE_LDAP_TLS', 'false').lower() == 'true'
 LDAP_GROUP_BASE_DN = os.getenv('LDAP_GROUP_BASE_DN', LDAP_BASE_DN)
 LDAP_NESTED_GROUPS = os.getenv('LDAP_NESTED_GROUPS', 'false').lower() == 'true'
 GIT_BRANCH = os.getenv('GIT_BRANCH', 'main')
-APP_VERSION = '0.3.6-rc1'
+APP_VERSION = '0.3.7-rc1'
 SESSION_HOURS = int(os.getenv('SESSION_HOURS', '12'))
 WORKERS = int(os.getenv('ORIGAMI_EXECUTOR_WORKERS', '2'))
 ALLOW_LOCAL_EXECUTION = os.getenv('ALLOW_LOCAL_EXECUTION', 'false').lower() == 'true'

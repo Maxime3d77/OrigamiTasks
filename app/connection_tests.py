@@ -167,22 +167,19 @@ def ssh(values, options=None):
     client.load_system_host_keys()
     if config.KNOWN_HOSTS.is_file():
         client.load_host_keys(str(config.KNOWN_HOSTS))
-    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    from .ssh_keys import strict_host_key_policy, SSHUnknownHostKey
+    client.set_missing_host_key_policy(strict_host_key_policy())
     params = dict(hostname=host, port=_port(values.get("port"), 22), username=user,
                   timeout=TIMEOUT, auth_timeout=TIMEOUT, banner_timeout=TIMEOUT,
                   look_for_keys=False, allow_agent=False)
     if values.get("private_key"):
-        for cls in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey):
-            try:
-                params["pkey"] = cls.from_private_key(
-                    io.StringIO(values["private_key"]),
-                    password=values.get("passphrase") or None
-                )
-                break
-            except (paramiko.SSHException, ValueError):
-                continue
-        if "pkey" not in params:
-            raise ConnectionTestError("Clé privée SSH invalide ou phrase secrète incorrecte")
+        from .ssh_keys import load_private_key, SSHKeyError
+        try:
+            params["pkey"]=load_private_key(
+                values["private_key"],values.get("passphrase")
+            )
+        except SSHKeyError as exc:
+            raise ConnectionTestError(str(exc)) from None
     else:
         params["password"] = values["password"]
     try:
@@ -208,13 +205,15 @@ def ssh(values, options=None):
                 raise ConnectionTestError("SSH : whoami a échoué ou dépassé le délai")
             checks.append(check("Commande distante", "whoami terminé sans modification"))
         return ok("ssh", "Clé d’hôte et authentification SSH vérifiées.", checks)
+    except SSHUnknownHostKey as exc:
+        raise ConnectionTestError(str(exc)) from None
     except paramiko.BadHostKeyException:
         raise ConnectionTestError("SSH : empreinte d'hôte différente de la clé approuvée") from None
     except paramiko.AuthenticationException:
         raise ConnectionTestError("SSH : authentification refusée par le serveur") from None
     except paramiko.SSHException:
         raise ConnectionTestError(
-            "SSH : protocole/clé d'hôte non validé. Vérifier known_hosts et l'algorithme de clé."
+            "SSH : échec de négociation du protocole SSH ou algorithmes incompatibles. Clé d'hôte inconnue et empreinte différente sont signalées séparément."
         ) from None
     except (OSError, TimeoutError, EOFError):
         raise ConnectionTestError("SSH : hôte injoignable, sous-système indisponible ou délai dépassé") from None
@@ -288,8 +287,8 @@ def ldap(values, options=None):
     if not username or not password:
         raise ConnectionTestError("LDAP : DN et mot de passe de liaison obligatoires")
     try:
-        ca_cert = ldap_settings.current().get("ca_cert") or None
-        server = Server(uri, tls=Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=ca_cert),
+        settings=ldap_settings.current()
+        server = Server(uri, tls=ldap_settings.tls_for(settings,uri=uri),
                         connect_timeout=TIMEOUT)
         conn = Connection(server, user=username, password=password,
                           receive_timeout=TIMEOUT, auto_bind=not starttls)
@@ -299,7 +298,9 @@ def ldap(values, options=None):
                 if not conn.start_tls() or not conn.bind():
                     raise ConnectionTestError("LDAP : négociation STARTTLS ou bind refusé")
             base = values.get("base_dn") or ""
-            checks = [check("TLS / certificat", "Connexion chiffrée validée"),
+            checks = [warning("TLS / certificat", "Transport chiffré, mais certificat NON vérifié (exception dangereuse)")
+                      if settings.get('skip_cert_verification')
+                      else check("TLS / certificat", "Certificat et transport TLS validés"),
                       check("Authentification", "Bind du compte de service accepté")]
             if base:
                 if not conn.search(base, "(objectClass=*)", BASE, attributes=["objectClass"],

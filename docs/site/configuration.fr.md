@@ -37,9 +37,17 @@ Le menu **Administration → LDAP / Active Directory** permet de configurer l’
 
 Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
 
+
+### Diagnostic SSH : clé privée utilisateur et clé d'hôte
+
+La connexion SSH du coffre contient **la clé privée du compte utilisateur** (OpenSSH, RSA ou EC en PEM), pas la clé d'identité du serveur. La clé publique correspondante doit être dans \`authorized_keys\` côté serveur. Une clé \`/etc/ssh/ssh_host_*_key\` ne doit jamais être importée comme identité du compte.
+
+Le fichier de confiance des serveurs est \`data/known_hosts\` sur l'hôte OrigamiTasks, monté dans le conteneur sous \`/app/data/known_hosts\`. Pour \`serveur.fr\` (exemple fictif), afficher l'empreinte avec \`ssh-keyscan -T 5 -p 22 -t ed25519 serveur.fr 2>/dev/null | ssh-keygen -lf - -E sha256\`. **Comparer cette empreinte à celle obtenue directement sur la console du serveur** avec \`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256\` avant d'ajouter la clé d'hôte. Le diagnostic différencie clé inconnue (SHA-256 affichée, jamais acceptée automatiquement), clé remplacée, authentification refusée et protocole incompatible.
+
+
 ### Test SSH ponctuel sans inventaire
 
-Dans **Coffre-fort → Identité SSH → Tester**, choisir **Saisie manuelle**, indiquer le FQDN du serveur (par exemple `vl-exploittools-01.infra.aday.fr`) et son port SSH, 22 par défaut. La clé ou le mot de passe du coffre sont testés sur ce serveur, sans inscrire le FQDN dans l’inventaire ni l’enregistrer dans l’identité. Les modes **Inventaire SSH** et **Ancien hôte** restent disponibles. Les clés d’hôte SSH doivent toujours être vérifiées dans `SSH_KNOWN_HOSTS` pour empêcher les attaques de type usurpation de serveur.
+Dans **Coffre-fort → Identité SSH → Tester**, choisir **Saisie manuelle**, indiquer le FQDN du serveur (par exemple `serveur.fr`) et son port SSH, 22 par défaut. La clé ou le mot de passe du coffre sont testés sur ce serveur, sans inscrire le FQDN dans l’inventaire ni l’enregistrer dans l’identité. Les modes **Inventaire SSH** et **Ancien hôte** restent disponibles. Les clés d’hôte SSH doivent toujours être vérifiées dans `SSH_KNOWN_HOSTS` pour empêcher les attaques de type usurpation de serveur.
 
 ### Import de certificats LDAP CRT, DER ou PEM
 

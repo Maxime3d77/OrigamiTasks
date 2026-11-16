@@ -36,7 +36,7 @@ def test_ssh_probe_validates_host_key_and_auth_without_command(monkeypatch):
     result=t.run("ssh", {"host":"ssh.example.org","port":2222,
                           "username":"alice","password":"test-secret"})
     assert result["ok"] and len(result["checks"]) == 3
-    assert ("pinned","RejectPolicy") in events
+    assert ("pinned","RejectWithFingerprint") in events  # strict reject, with safe SHA256 host-key fingerprint
     assert ("login","alice","ssh.example.org") in events
     assert "close" in events
     class Failed(FakeSSH):

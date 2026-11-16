@@ -70,6 +70,8 @@ function ldapSettingsForm(cfg){
  +'<form id="ldapAdminForm"><div class="form-grid">'
  +ldapCheck('Activer la connexion LDAP', 'enabled', cfg.enabled)
  +ldapCheck('Activer STARTTLS (ldap://, généralement port 389)', 'starttls', cfg.starttls)
+ +'<div class="field full"><label class="field checkbox ldap-insecure-toggle"><input type="checkbox" name="skip_cert_verification" '+(cfg.skip_cert_verification?'checked':'')+' '+(!cfg.insecure_tls_allowed?'disabled':'')+'><span>Exception avancée : ignorer la vérification du certificat LDAP</span></label><small class="hint">DANGEREUX : le chiffrement demeure actif mais l’identité du serveur n’est plus vérifiée. Cela expose les identifiants à une interception. Autorisation hôte requise : ALLOW_INSECURE_LDAP_TLS=true ; désactivée par défaut.</small></div>'
+ +(cfg.skip_cert_verification?'<div class="notice error">Attention : la vérification des certificats LDAPS/STARTTLS est désactivée pour cet annuaire. Remettre une CA valide dès que possible.</div>':'')
  +ldapInput('Adresse de l’annuaire','uri',cfg.uri,'text','Ex. ldaps://serveur:636 ou ldap://serveur:389 avec STARTTLS')
  +ldapInput('DN du compte de liaison','bind_dn',cfg.bind_dn,'text','Compte de service en lecture seule')
  +ldapInput('Mot de passe du compte de liaison','bind_password','','password',cfg.has_bind_password?'Déjà configuré — laisser vide pour conserver':'Mot de passe requis si LDAP est activé')
@@ -99,7 +101,7 @@ function readLDAPForm(){
  const form=document.getElementById('ldapAdminForm');
  if(!form)throw Error('Le formulaire LDAP est fermé');
  const f=new FormData(form),data={};
- for(const key of ['enabled','starttls','nested_groups'])data[key]=f.has(key);
+ for(const key of ['enabled','starttls','nested_groups','skip_cert_verification'])data[key]=f.has(key);
  for(const key of ['uri','bind_dn','bind_password','base_dn','group_base_dn','user_attribute','admin_group','operator_group','viewer_group','ca_cert']){
   if(key==='bind_password'&&!f.get(key))continue;
   data[key]=String(f.get(key)||'').trim();
@@ -165,7 +167,7 @@ function sshGroupForm(groupId=null){
  const body='<form id="sshGroupForm" data-id="'+(group?.id||'')+'">'
   +'<div class="form-grid">'+field('Nom du groupe','name',group?.name||'')
   +field('Description','description',group?.description||'')+'</div>'
-  +'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="au-server01.infra.example.org&#10;sd-server01.infra.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>'
+  +'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="serveur-a.example.org&#10;serveur-b.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>'
   +'<small class="hint">Ajouter ou retirer des lignes modifie l’appartenance au groupe. Les serveurs retirés restent dans l’inventaire. Port 22 par défaut, préciser :2222 si nécessaire. Max. 250 serveurs.</small></div>'
   +'<div class="tool-row"><button class="btn primary" type="submit">'+(group?'Enregistrer le groupe':'Créer le groupe')+'</button>'
   +'<button class="btn" data-action="layer-close" data-layer="sshInventoryLayer" type="button">Annuler</button></div></form>';
@@ -267,13 +269,15 @@ function updates(){
   +'<div class="panel"><div class="panel-title"><h2>État des versions</h2><span class="hint">Source : service de maintenance hôte</span></div>'
   +'<div id="updateVersionSummary"><div class="hint">Vérification des versions…</div></div>'
   +'<div class="tool-row"><button class="btn" data-action="update-request" data-value="check">⌕ Vérifier maintenant</button>'
+  +'<button class="btn" data-action="update-request" data-value="preflight">◫ Tester la mise à jour (simulation)</button>'
   +'<button class="btn primary" data-action="update-request" data-value="apply">⇣ Installer la version Git disponible</button>'
   +'<button class="btn" data-action="refresh-updates">↻ Rafraîchir</button></div>'
-  +'<div class="notice">Les vérifications sont effectuées par <code>ops/update-worker.py</code> sur l’hôte, avec <code>GIT_ALLOWED_ORIGIN</code> et <code>GIT_BRANCH</code>. La date affichée est la date du dernier commit de la branche suivie, pas nécessairement une date de release. Un correctif en recette sur une autre branche ne doit pas être annoncé comme « à jour sur main ». Installation toujours sur validation manuelle.</div></div>'
+  +'<div class="notice">Les vérifications sont effectuées par <code>ops/update-worker.py</code> sur l’hôte, avec <code>GIT_ALLOWED_ORIGIN</code> et <code>GIT_BRANCH</code>. La date affichée est la date du dernier commit de la branche suivie, pas nécessairement une date de release. Le bouton « Tester la mise à jour » vérifie Git, Docker Compose et la sauvegarde sans modifier la version. Les releases GitHub sont créées automatiquement par la CI lors de l’envoi d’un tag `vX.Y.Z` ou `vX.Y.Z-rcN`. Un correctif en recette sur une autre branche ne doit pas être annoncé comme « à jour sur main ». Installation toujours sur validation manuelle.</div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Historique des opérations Git</h2></div><div id="updateStatus">Chargement…</div></div>';
 }
 function renderUpdateVersion(data){
  const w=data.worker||{},installed=data.version||'inconnue';
+ const serviceOnline=data.worker_online===true;
  const checkedTime=Date.parse(w.checked_at||'');
  const fresh=Number.isFinite(checkedTime)&&Date.now()-checkedTime<26*3600*1000
              &&Date.now()-checkedTime>=-5*60*1000;
@@ -297,6 +301,8 @@ function renderUpdateVersion(data){
   +(known&&w.available?'<span class="hint">'+e(w.commits_behind||'?')+' commit(s) disponibles</span>':'')+'</div>'
   +'<p class="hint">Branche suivie : <code>'+e(branch)+'</code> · Dernière vérification : '+e(checked)+'</p>'
   +'<p class="hint">'+e(w.message||'Le service de maintenance hôte n’a pas encore effectué de vérification')+'</p>'
+ +'<p class="hint">Service de maintenance : <strong>'+e(serviceOnline?'En ligne (sur l’hôte)':'Hors ligne ou non configuré')+'</strong></p>'
+ +(w.preflight_ok===true?'<div class="notice">Simulation réussie'+(w.preflight_at?' le '+e(dt(w.preflight_at)):'')+' ; aucune installation effectuée. Cette vérification est indépendante des futurs tests fonctionnels.</div>':'')
   +(!matchingBranch&&w.branch?'<div class="notice error">Le service surveille une branche différente de GIT_BRANCH. Vérification non fiable.</div>':'')
   +(!matchingInstall?'<div class="notice error">Le commit local ne correspond pas à la version exécutée dans le conteneur. Reconstruire et vérifier le déploiement.</div>':'')
   +(!fresh&&w.checked_at?'<div class="notice error">Dernière vérification trop ancienne : relancer un contrôle Git.</div>':'')
@@ -541,7 +547,7 @@ function credentialProfileFields(kind,credential){
   return '<label class="'+cls+'" '+(kind==='smtp'&&['username','password'].includes(key)?'data-smtp-auth-field':'')+'><span>'+e(label)+'</span>'+control+'</label>';
  }).join('')+'</div>'
  +(kind==='smtp'?'<div class="notice">Pour le SMTP, configure le serveur, le port, la sécurité et l’authentification. La tâche utilise automatiquement ces paramètres lorsque sa connexion est sélectionnée.</div>':'')
- +(kind==='ssh'?'<div class="notice">Identité SSH indépendante des serveurs : indique le login et un mot de passe ou une clé privée. Ajoute tes FQDN dans <b>Administration → Serveurs & groupes SSH</b>, puis choisis le serveur dans le test ou la tâche. '+(profile.host?'Cette ancienne identité conserve son serveur historique ('+e(profile.host)+') pour compatibilité.':'')+'</div>':'');
+ +(kind==='ssh'?'<div class="field full"><span>Importer le fichier de clé privée SSH du compte</span><input id="sshPrivateKeyFile" type="file" accept=".key,.pem,.openssh,.priv,.txt"><small class="hint">Le fichier reste dans le navigateur jusqu’à l’enregistrement du coffre. Formats OpenSSH ou PEM : BEGIN OPENSSH PRIVATE KEY, RSA PRIVATE KEY ou EC PRIVATE KEY. Pas la clé publique ssh-ed25519 ; jamais /etc/ssh/ssh_host_*_key.</small></div><div class="notice">Identité SSH indépendante des serveurs : indique le login et un mot de passe ou une clé privée utilisateur. La clé publique correspondante doit figurer dans authorized_keys sur le serveur cible. Ne jamais publier une clé privée. '+(profile.host?'Un ancien hôte reste enregistré pour compatibilité.':'')+'</div>':'');
 }
 function credentialKindForStep(){
  const type=state.editor?.steps_json[state.selectedStep]?.type;
@@ -624,7 +630,7 @@ function credentialTestFields(entry){
   return '<p>Cette identité SSH est réutilisable : choisis un serveur seulement pour ce diagnostic. Le FQDN saisi manuellement ne sera pas enregistré.</p>'
    +'<div class="field"><span>Mode de sélection de la cible SSH</span><select name="ssh_target_mode">'+option(modes,'manual')+'</select></div>'
    +'<div class="ssh-test-mode" data-ssh-test-mode="manual"><div class="form-grid">'
-   +testOptionInput('manual_host','FQDN du serveur à tester','vl-exploittools-01.infra.aday.fr')
+   +testOptionInput('manual_host','FQDN du serveur à tester','serveur.fr')
    +'<div class="field"><span>Port SSH</span><input name="manual_port" type="number" min="1" max="65535" value="22"></div></div>'
    +'<p class="hint">Connexion ponctuelle ; aucune création de serveur dans l’inventaire. L’empreinte SSH doit être approuvée dans known_hosts.</p></div>'
    +'<div class="ssh-test-mode" data-ssh-test-mode="inventory" hidden>'
@@ -1028,7 +1034,12 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   renderEditor();
   toast('Étape liée à la branche d’échec');return
  }
- if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git autorisée et redémarrer les services ?'))return;await api('/updates/request','POST',{action:b.dataset.value});toast('Demande envoyée au service de maintenance');hydrateAdmins();return}if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
+ if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){
+  if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git AUTORISÉE puis redémarrer les services ? Une sauvegarde SQLite est créée mais toutes les migrations ne sont pas nécessairement réversibles.'))return;
+  await api('/updates/request','POST',{action:b.dataset.value});
+  toast(b.dataset.value==='preflight'?'Simulation demandée : aucune installation ne sera effectuée':'Demande envoyée au service de maintenance');
+  hydrateAdmins();return
+ }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
  if(ev.target.id==='sshGroupForm'){
   ev.preventDefault();
@@ -1135,13 +1146,26 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
   $('.ssh-server-row[data-ssh-search]').forEach(row=>row.hidden=!row.dataset.sshSearch.includes(ev.target.value.toLowerCase()));
  }
  if(ev.target.id==='groupSearch'){state.groupQuery=ev.target.value;clearTimeout(state.groupTimer);state.groupTimer=setTimeout(searchGroups,250)}
- if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',ev=>{
+ if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',async ev=>{
  if(ev.target.matches('[data-ssh-filter-group]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
  if(ev.target.id==='sshInventoryGroupFilter'){state.sshInventoryGroupFilter=ev.target.value;render();}
  if(ev.target.closest('#credentialTestForm'))updateCredentialTestVisibility();
  if(ev.target.name==='kind'&&ev.target.closest('#credentialManageForm')){
   document.getElementById('credentialProfile').innerHTML=credentialProfileFields(ev.target.value);
   smtpAuthFieldsVisibility();
+ }
+ if(ev.target.id==='sshPrivateKeyFile'){
+  const file=ev.target.files?.[0],textarea=ev.target.closest('form')?.elements.namedItem('private_key');
+  if(!file||!textarea)return;
+  if(file.size>24576){toast('Clé privée trop volumineuse (24 Kio max.)',false);ev.target.value='';return}
+  try{
+   const raw=new Uint8Array(await file.arrayBuffer());
+   const content=new TextDecoder('utf-8',{fatal:true}).decode(raw);
+   if(!content.includes('-----BEGIN ')||!content.includes('PRIVATE KEY-----'))
+    throw Error('Ce fichier ne contient pas une clé privée OpenSSH/PEM');
+   textarea.value=content;
+   toast('Fichier de clé privée chargé localement ; enregistrer le coffre pour le conserver');
+  }catch(ex){toast(ex.message||'Clé SSH illisible',false)}
  }
  if(ev.target.name==='auth'&&ev.target.closest('#credentialManageForm'))smtpAuthFieldsVisibility();
  if(ev.target.name==='tls_mode'&&ev.target.closest('#credentialManageForm')&&ev.target.closest('form').elements.namedItem('kind')?.value==='smtp'){

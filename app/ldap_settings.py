@@ -12,9 +12,9 @@ from . import config, db, security
 
 FIELDS = ('enabled', 'uri', 'starttls', 'bind_dn', 'bind_password',
           'base_dn', 'group_base_dn', 'user_attribute', 'admin_group',
-          'operator_group', 'viewer_group', 'nested_groups', 'ca_cert')
+          'operator_group', 'viewer_group', 'nested_groups', 'ca_cert', 'skip_cert_verification')
 SECRET = 'bind_password'
-BOOL = {'enabled', 'starttls', 'nested_groups'}
+BOOL = {'enabled', 'starttls', 'nested_groups', 'skip_cert_verification'}
 
 
 class LDAPSettingsError(Exception):
@@ -39,12 +39,20 @@ def import_ca(pem_text=None, der_base64=None):
             if not 100<=len(raw)<=131072:
                 raise ValueError("invalid certificate size")
             cert=x509.load_der_x509_certificate(raw)
-            basic=cert.extensions.get_extension_for_class(x509.BasicConstraints).value
-            if not basic.ca:
-                raise LDAPSettingsError("Le fichier CRT est un certificat serveur, pas une autorité CA")
+            try:
+                basic=cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+            except x509.ExtensionNotFound:
+                # Match the PEM path: legacy CA roots sometimes lack this field.
+                # OpenSSL still validates the actual LDAPS chain at connection time.
+                basic=None
+            if basic is not None and not basic.ca:
+                raise LDAPSettingsError(
+                    "Ce fichier CRT contient un certificat serveur (CA:FALSE), "
+                    "pas la CA qui l'a signé. Importer la CA émettrice."
+                )
             pem_text=cert.public_bytes(Encoding.PEM).decode("ascii")
-        except (ValueError,binascii.Error,x509.ExtensionNotFound):
-            raise LDAPSettingsError("Fichier CRT/DER invalide ou sans attribut CA=true") from None
+        except (ValueError,binascii.Error):
+            raise LDAPSettingsError("Fichier CRT/DER invalide ou illisible") from None
     if not isinstance(pem_text,str) or not 100<=len(pem_text)<=131072:
         raise LDAPSettingsError("Certificat CA invalide (128 Kio maximum)")
     if 'PRIVATE KEY' in pem_text or '\x00' in pem_text:
@@ -95,7 +103,7 @@ def defaults():
                 user_attribute=config.LDAP_USER_ATTRIBUTE,
                 admin_group=config.LDAP_ADMIN_GROUP, operator_group=config.LDAP_OPERATOR_GROUP,
                 viewer_group=config.LDAP_VIEWER_GROUP, nested_groups=config.LDAP_NESTED_GROUPS,
-                ca_cert=config.LDAP_CA_CERT)
+                ca_cert=config.LDAP_CA_CERT, skip_cert_verification=False)
 
 
 def current():
@@ -137,6 +145,13 @@ def check_settings(data):
     for key in ('admin_group', 'operator_group', 'viewer_group'):
         if not re.fullmatch(r'[A-Za-z0-9_.@\- ]{1,120}', str(data.get(key) or '')):
             raise LDAPSettingsError('Nom de groupe LDAP invalide : '+key)
+    if data.get('skip_cert_verification') and not config.ALLOW_INSECURE_LDAP_TLS:
+        raise LDAPSettingsError(
+            'Exception de certificat interdite : définir ALLOW_INSECURE_LDAP_TLS=true '
+            'sur l’hôte uniquement après validation du risque'
+        )
+    if data.get('skip_cert_verification') and not isinstance(data['skip_cert_verification'], bool):
+        raise LDAPSettingsError('Option de confiance LDAP invalide')
     if data.get('ca_cert'):
         path = Path(str(data['ca_cert'])).resolve()
         # Paths are administrator-configured but must remain in trusted certificates or app data.
@@ -144,6 +159,26 @@ def check_settings(data):
         if not path.is_file() or not any(path.is_relative_to(root) for root in roots):
             raise LDAPSettingsError('Chemin de certificat CA illisible ou non autorisé')
     return data
+
+
+def tls_for(settings, uri=None):
+    """LDAP TLS: saved override is limited to its exact configured LDAP URI.
+
+    No certificate checking bypass is inherited by other vault directory URLs
+    or a workflow with a different LDAP server.
+    """
+    from ldap3 import Tls
+    saved_uri=str(settings.get('uri') or '').rstrip('/').lower()
+    selected_uri=str(uri or settings.get('uri') or '').rstrip('/').lower()
+    insecure=bool(settings.get('skip_cert_verification')) and selected_uri==saved_uri
+    if insecure and not config.ALLOW_INSECURE_LDAP_TLS:
+        raise LDAPSettingsError(
+            'Exception TLS non autorisée : ALLOW_INSECURE_LDAP_TLS=false'
+        )
+    return Tls(
+        validate=ssl.CERT_NONE if insecure else ssl.CERT_REQUIRED,
+        ca_certs_file=None if insecure else settings.get('ca_cert') or None
+    )
 
 
 def merge(updates, previous=None):
@@ -180,10 +215,10 @@ def test(settings, user_login=''):
         raise LDAPSettingsError('Activer LDAP pour lancer le test')
     check_settings(settings)
     try:
-        from ldap3 import Server, Connection, SUBTREE, BASE, Tls
+        from ldap3 import Server, Connection, SUBTREE, BASE
         from ldap3.utils.conv import escape_filter_chars
         server = Server(settings['uri'],
-                        tls=Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=settings.get('ca_cert') or None),
+                        tls=tls_for(settings),
                         connect_timeout=7)
         conn = Connection(server,user=settings['bind_dn'],password=settings['bind_password'],
                           auto_bind=not settings.get('starttls'),receive_timeout=10)

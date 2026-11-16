@@ -64,6 +64,24 @@ def process(root, action, branch, allowed_origin):
                 branch=branch, current_version=current_version,
                 latest_version=latest_version, latest_date=latest_date,
                 commits_behind=remote_count)
+    if action=='preflight':
+        # Read-only validation: no merge, no rebuild, no Docker changes.
+        execute(['docker','compose','version'],root,timeout=15)
+        execute(['docker','compose','config','--quiet'],root,timeout=25)
+        data_dir=root/'data'
+        if not data_dir.is_dir() or not os.access(data_dir,os.R_OK|os.W_OK):
+            raise RuntimeError('Le répertoire de données ne permet pas les sauvegardes')
+        database=data_dir/'origamitasks.db'
+        if not database.is_file():
+            raise RuntimeError('Base SQLite introuvable pour sauvegarde')
+        state_write(root,'Préparation de mise à jour validée (simulation, aucune installation)',
+                    current=old,latest=remote,available=available,origin=origin,
+                    branch=branch,current_version=current_version,
+                    latest_version=latest_version,latest_date=latest_date,
+                    commits_behind=remote_count,preflight_ok=True,
+                    preflight_at=now())
+        return ('Simulation réussie : '+str(remote_count)+' commit(s) disponibles, '
+                'Docker Compose et sauvegardes vérifiés ; aucune mise à jour installée')
     if action=='check' or not available:
         return 'Nouveau commit : '+remote[:12] if available else 'Aucune mise à jour disponible'
     backup=root/'data/backups'
@@ -98,6 +116,16 @@ def process(root, action, branch, allowed_origin):
         raise RuntimeError('Rollback applicatif demandé: '+str(exc))
 
 
+def heartbeat(root):
+    """Heartbeat separates a running host updater from stale state.json."""
+    import tempfile
+    target=root/'data'/'update-worker-heartbeat.json'
+    if not target.parent.is_dir(): return
+    tmp=target.with_name(target.name+'.tmp')
+    tmp.write_text(json.dumps({'seen_at':now(),'pid':os.getpid()}))
+    os.replace(tmp,target)
+
+
 def loop(root,once=False):
     branch='main'
     allowed_origin=''
@@ -112,6 +140,8 @@ def loop(root,once=False):
     state_write(root,'Service de maintenance actif',branch=branch)
     last_auto_check=0
     while True:
+        try: heartbeat(root)
+        except OSError: pass
         # Periodic, passive check: fetch only the pinned origin. Never install
         # updates automatically and never claim "up-to-date" if check failed.
         if not once and allowed_origin and time.monotonic()-last_auto_check>=3600:

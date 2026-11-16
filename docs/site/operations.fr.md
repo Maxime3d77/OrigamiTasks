@@ -40,3 +40,13 @@ docker compose up -d
 ## Supervision
 
 Contrôler API health, redémarrages, espace disque, échecs, ancienneté des runs en file, LDAP, expiration tokens et disponibilité des intégrations. L'export Zabbix/Prometheus est prévu ; temporairement, interroger health et centraliser les journaux hôte.
+
+
+### Releases GitHub et précontrôle de mise à jour dans le navigateur
+
+Le workflow GitHub Actions .github/workflows/release.yml crée automatiquement une **prérelease** pour un tag vX.Y.Z-rcN, ou une **release stable** pour un tag vX.Y.Z, après vérification stricte de la version, tests Python/JavaScript et documentation EN/FR. Le tag doit être poussé explicitement sur un commit révisé ; les commits ordinaires ne créent aucune release.
+
+Sur l'hôte Docker, installer le service séparé ops/origamitasks-updater.service, adapté au chemin /opt/OrigamiTasks. Il utilise un accès privilégié à Docker et au dépôt Git ; n'exposer cette fonction qu'aux administrateurs autorisés. Définir GIT_ALLOWED_ORIGIN à la valeur exacte de git remote get-url origin et GIT_BRANCH à la branche de déploiement choisie. La page Mises à jour affiche le heartbeat du worker.
+
+Le bouton « Tester la mise à jour (simulation) » vérifie la source Git épinglée, le fast-forward, la configuration Docker Compose et l'accès au répertoire de données **sans merger, installer ni redémarrer**. Cette simulation ne garantit ni le succès d'une mise à jour réelle, ni la possibilité de revenir en arrière après migration de schéma. La sauvegarde et la recette restent nécessaires.
+
