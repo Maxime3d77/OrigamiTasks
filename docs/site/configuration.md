@@ -26,6 +26,12 @@ Administrators can open **Administration → LDAP / Active Directory**. Initial 
 
 **Test connection** performs certificate-verified TLS negotiation, service-account bind, base DN and group searches, and optional user lookup. This is **read-only**: no directory objects change and no password is returned. Settings are encrypted in SQLite using `VAULT_KEY`; retain backups and restrict database access. The local `admin` account is independent of LDAP. Directory steps can default to central settings; use a separate vault service account for write actions when possible.
 
+### LDAP / Active Directory administration
+
+Use **Administration → LDAP / Active Directory** to configure URI and port, LDAPS or STARTTLS, bind DN/password, user/group base DNs, login attribute (`uid` for OpenLDAP), mapped permission groups and CA path. The initial values come from `.env`; settings saved in the web console override them without changing the file. These settings, including the bind secret, are **encrypted in SQLite** using `VAULT_KEY` and never returned to the browser.
+
+**Test LDAP connection** performs read-only bind, base and group searches plus optional login lookup. Trusted CA files must be available inside `/etc/ssl` or `/app/data` in the container. The local `admin` account remains independent of LDAP.
+
 ## Credentials
 
 Create **protocol-specific vault profiles** for SMTP (server, port, STARTTLS / implicit SSL / unencrypted relay, optional authentication and default sender), SSH/SFTP, FTP/FTPS, LDAP, API, Matrix and Proxmox. The editor changes fields when you select a connection type. **Test SMTP** verifies TLS and optional credentials without sending mail. Use the **Administration → LDAP** test for the directory itself. Grant workflow editing rights only to trusted operators. Non-sensitive settings can be reviewed by administrators; passwords, tokens and SSH keys are never re-displayed. Blank secret fields retain their existing encrypted values. Old hostless credentials remain compatible with tasks that define their own host.
