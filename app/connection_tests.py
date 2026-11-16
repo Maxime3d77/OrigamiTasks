@@ -172,17 +172,13 @@ def ssh(values, options=None):
                   timeout=TIMEOUT, auth_timeout=TIMEOUT, banner_timeout=TIMEOUT,
                   look_for_keys=False, allow_agent=False)
     if values.get("private_key"):
-        for cls in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey):
-            try:
-                params["pkey"] = cls.from_private_key(
-                    io.StringIO(values["private_key"]),
-                    password=values.get("passphrase") or None
-                )
-                break
-            except (paramiko.SSHException, ValueError):
-                continue
-        if "pkey" not in params:
-            raise ConnectionTestError("Clé privée SSH invalide ou phrase secrète incorrecte")
+        from .ssh_keys import load_private_key, SSHKeyError
+        try:
+            params["pkey"]=load_private_key(
+                values["private_key"],values.get("passphrase")
+            )
+        except SSHKeyError as exc:
+            raise ConnectionTestError(str(exc)) from None
     else:
         params["password"] = values["password"]
     try:
