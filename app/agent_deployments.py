@@ -64,8 +64,10 @@ def queue(payload, actor):
     allowed = {h.strip().lower() for h in config.AGENT_DEPLOY_ALLOWED_HOSTS.split(',') if h.strip()}
     if not allowed or any(host not in allowed for host, _port, _sid in targets):
         raise DeploymentError("Un serveur n'est pas autorisé dans AGENT_DEPLOY_ALLOWED_HOSTS")
-    if not config.AGENT_SERVER_URL.lower().startswith('https://'):
-        raise DeploymentError("AGENT_SERVER_URL doit être une URL HTTPS valide")
+    try:
+        agents.ensure_https(config.AGENT_SERVER_URL)
+    except ValueError:
+        raise DeploymentError("AGENT_SERVER_URL doit être une URL HTTPS valide") from None
     with db.session() as con:
         batch_id = con.execute(
             "INSERT INTO agent_deploy_batches(actor,platform,agent_group,total,status,created_at) "
@@ -100,6 +102,9 @@ def process_one():
     if not config.ALLOW_AGENT_REMOTE_DEPLOY:
         return False
     with db.session() as con:
+        # Serialize the claim across any duplicate worker thread or process.
+        # SQLite BEGIN IMMEDIATE prevents two processes choosing the same host.
+        con.execute("BEGIN IMMEDIATE")
         item = con.execute(
             "SELECT t.id,t.batch_id,t.host,t.port,t.server_id,t.credential_id,"
             "b.platform,b.agent_group FROM agent_deploy_targets t "
@@ -164,6 +169,10 @@ def loop():
 
 def start():
     global _WORKER
+    if _WORKER is not None and _WORKER.is_alive():
+        # Reuse the existing worker when tests recreate TestClient lifespan.
+        STOP.clear()
+        return
     STOP.clear()
     with db.session() as con:
         con.execute("UPDATE agent_deploy_targets SET status='interrupted',finished_at=?,"
