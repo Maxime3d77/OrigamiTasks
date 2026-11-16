@@ -1,5 +1,15 @@
 # Changelog
 
+
+## 0.3.7-rc1 — 2026-11-16
+
+- **SSH:** local OpenSSH/PEM user-private-key import; distinguish unreadable key, unknown host (SHA-256 fingerprint), changed host key, rejected authentication, and incompatible handshake; no automatic trust of unknown hosts.
+- **LDAP:** explicit certificate-verification exception via Administration → LDAP, allowed only with host-level ALLOW_INSECURE_LDAP_TLS=true, off by default and prominently warned. Prefer CRT/DER/PEM public CA import.
+- **Updates:** in-browser non-installation preflight, host updater heartbeat and Git/Docker Compose/data readiness checks.
+- **GitHub:** automatic version-tag release workflow for vX.Y.Z or vX.Y.Z-rcN, running version validation, tests, and documentation before publishing; ordinary commits never publish releases.
+- **Privacy:** anonymized server examples, bilingual security documentation and regression tests.
+
+
 ## 0.3.6-rc1 — 2026-11-16
 
 - **SSH test** against a manually supplied FQDN and port without registering a server; strict host-key verification remains enforced.
