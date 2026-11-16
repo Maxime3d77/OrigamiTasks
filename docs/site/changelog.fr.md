@@ -1,5 +1,11 @@
 # Historique des modifications
 
+## 0.3.9-rc1 — 16 novembre 2026
+
+- **SSH :** nouveau mode par défaut `SSH_HOST_KEY_POLICY=accept-new` : la première clé publique de chaque serveur est mémorisée dans `known_hosts`, sans saisie manuelle ; toute clé modifiée est bloquée. Le mode `strict` reste disponible.
+- **LDAP :** correction des recherches OpenLDAP/AD avec schéma personnalisé, évitant l'erreur locale `LDAPObjectClassError`. La CA importée vérifie toujours LDAPS/STARTTLS ; prise en charge des fichiers PEM avec BOM UTF-8.
+- **Interface/tests :** plus de validation obligatoire de chaque empreinte SSH ; l'import de CA décoche le contournement TLS dans le formulaire. Tests de non-régression et documentation EN/FR mis à jour.
+
 ## 0.3.8-rc1 — 16 novembre 2026
 
 - **SSH :** approbation explicite depuis le navigateur d'une clé d'hôte publique, après comparaison indépendante et saisie exacte de l'empreinte SHA256. Les clés d'hôte déjà connues mais modifiées restent bloquées ; les identités SSH utilisateur et leurs clés privées ne sont pas modifiées.
