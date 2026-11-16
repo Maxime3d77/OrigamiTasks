@@ -547,7 +547,7 @@ function credentialProfileFields(kind,credential){
   return '<label class="'+cls+'" '+(kind==='smtp'&&['username','password'].includes(key)?'data-smtp-auth-field':'')+'><span>'+e(label)+'</span>'+control+'</label>';
  }).join('')+'</div>'
  +(kind==='smtp'?'<div class="notice">Pour le SMTP, configure le serveur, le port, la sécurité et l’authentification. La tâche utilise automatiquement ces paramètres lorsque sa connexion est sélectionnée.</div>':'')
- +(kind==='ssh'?'<div class="notice">Identité SSH indépendante des serveurs : indique le login et un mot de passe ou une clé privée. Ajoute tes FQDN dans <b>Administration → Serveurs & groupes SSH</b>, puis choisis le serveur dans le test ou la tâche. '+(profile.host?'Cette ancienne identité conserve son serveur historique ('+e(profile.host)+') pour compatibilité.':'')+'</div>':'');
+ +(kind==='ssh'?'<div class="field full"><span>Importer le fichier de clé privée SSH du compte</span><input id="sshPrivateKeyFile" type="file" accept=".key,.pem,.openssh,.priv,.txt"><small class="hint">Le fichier reste dans le navigateur jusqu’à l’enregistrement du coffre. Formats OpenSSH ou PEM : BEGIN OPENSSH PRIVATE KEY, RSA PRIVATE KEY ou EC PRIVATE KEY. Pas la clé publique ssh-ed25519 ; jamais /etc/ssh/ssh_host_*_key.</small></div><div class="notice">Identité SSH indépendante des serveurs : indique le login et un mot de passe ou une clé privée utilisateur. La clé publique correspondante doit figurer dans authorized_keys sur le serveur cible. Ne jamais publier une clé privée. '+(profile.host?'Un ancien hôte reste enregistré pour compatibilité.':'')+'</div>':'');
 }
 function credentialKindForStep(){
  const type=state.editor?.steps_json[state.selectedStep]?.type;
@@ -1153,6 +1153,19 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  if(ev.target.name==='kind'&&ev.target.closest('#credentialManageForm')){
   document.getElementById('credentialProfile').innerHTML=credentialProfileFields(ev.target.value);
   smtpAuthFieldsVisibility();
+ }
+ if(ev.target.id==='sshPrivateKeyFile'){
+  const file=ev.target.files?.[0],textarea=ev.target.closest('form')?.elements.namedItem('private_key');
+  if(!file||!textarea)return;
+  if(file.size>24576){toast('Clé privée trop volumineuse (24 Kio max.)',false);ev.target.value='';return}
+  try{
+   const raw=new Uint8Array(await file.arrayBuffer());
+   const content=new TextDecoder('utf-8',{fatal:true}).decode(raw);
+   if(!content.includes('-----BEGIN ')||!content.includes('PRIVATE KEY-----'))
+    throw Error('Ce fichier ne contient pas une clé privée OpenSSH/PEM');
+   textarea.value=content;
+   toast('Fichier de clé privée chargé localement ; enregistrer le coffre pour le conserver');
+  }catch(ex){toast(ex.message||'Clé SSH illisible',false)}
  }
  if(ev.target.name==='auth'&&ev.target.closest('#credentialManageForm'))smtpAuthFieldsVisibility();
  if(ev.target.name==='tls_mode'&&ev.target.closest('#credentialManageForm')&&ev.target.closest('form').elements.namedItem('kind')?.value==='smtp'){
