@@ -20,6 +20,8 @@ OrigamiTasks est un **poste de pilotage d'automatisation**. Exécuter du code re
 
 Le gestionnaire de connexions permet la modification et le clonage côté serveur : aucune ancienne valeur secrète ne quitte le serveur. La suppression est refusée lorsqu'une tâche ou un datacenter référence le secret. La fenêtre de création depuis une tâche chiffre les secrets dans le coffre, sans les stocker en clair dans le workflow.
 
+La configuration LDAP/AD enregistrée via l'administration est chiffrée en SQLite ; le mot de passe du bind n'est pas renvoyé au navigateur. Le test LDAP n'exécute que des opérations de lecture. Le test SMTP ne transmet aucun message et vérifie les certificats TLS ; l'authentification SMTP sans chiffrement est refusée. Les tests de connexion sont réservés aux administrateurs et doivent être limités aux hôtes approuvés par le pare-feu sortant.
+
 ## Mesures recommandées
 
 VLAN d'administration dédié, listes d'autorisation réseau, aucune socket Docker montée, terminaison TLS, revue de code des workflows, identités SSH limitées, aucun compte root/admin pour les tâches courantes, branche Git protégée, mises à jour PROD auditées, rotation des secrets et audit externe immuable.
