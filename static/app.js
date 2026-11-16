@@ -275,40 +275,126 @@ function openCredentialBrowser(field=null,action=''){
  state.pickerField=field;state.credentialAction=action;state.pickerCredentialId=null;state.credentialSearch='';
  drawCredentialBrowser();
 }
+
+const connectionKinds=[
+ ['smtp','SMTP · Envoi d’e-mails'],['ssh','SSH / SFTP · Linux et Windows'],
+ ['ftp','FTP / FTPS · Transfert'],['ldap','LDAP / Active Directory'],
+ ['api','API · Token HTTP'],['matrix','Matrix · Bot'],['proxmox','Proxmox · API'],
+ ['generic','Identifiant générique']
+];
+const connectionSchemas={
+ smtp:[
+  ['host','Serveur SMTP / FQDN','text','smtp.example.org'],
+  ['port','Port TCP','number','587'],
+  ['tls_mode','Sécurité de transport','select','starttls',[['starttls','STARTTLS (port 587)'],['ssl','SSL/TLS direct (port 465)'],['none','Aucune (relais SMTP interne seulement)']]],
+  ['auth','Le serveur requiert une authentification','checkbox',true],
+  ['username','Identifiant SMTP','text','utilisateur@exemple.fr'],
+  ['password','Mot de passe SMTP','password',''],
+  ['from_address','Adresse expéditeur par défaut','email','noreply@exemple.fr']
+ ],
+ ssh:[
+  ['host','Serveur SSH / FQDN','text','server.example.org'],['port','Port SSH','number','22'],
+  ['username','Utilisateur SSH','text','root'],['password','Mot de passe SSH','password',''],
+  ['private_key','Clé privée OpenSSH','textarea',''],['passphrase','Phrase secrète de la clé','password','']
+ ],
+ ftp:[
+  ['host','Serveur FTP / FQDN','text','ftp.example.org'],['port','Port FTP / FTPS','number','21'],
+  ['tls_mode','Transport','select','explicit',[['explicit','FTPS explicite avec TLS'],['none','FTP non chiffré — à éviter']]],
+  ['username','Utilisateur FTP','text',''],['password','Mot de passe FTP','password','']
+ ],
+ ldap:[
+  ['uri','Adresse LDAP avec port','text','ldaps://ldap.example.org:636'],
+  ['starttls','Connexion LDAP avec STARTTLS','checkbox',false],
+  ['base_dn','Base DN','text','dc=example,dc=org'],
+  ['group_base_dn','Base DN des groupes','text','ou=Groups,dc=example,dc=org'],
+  ['username','DN du compte de liaison','text','cn=service,ou=Applications,dc=example,dc=org'],
+  ['password','Mot de passe de liaison','password','']
+ ],
+ api:[
+  ['base_url','URL de base HTTPS','text','https://api.example.org'],
+  ['token','Jeton API','password',''],
+  ['username','Utilisateur (si API Basic)','text',''],
+  ['password','Mot de passe (si API Basic)','password','']
+ ],
+ matrix:[
+  ['homeserver','URL du homeserver HTTPS','text','https://matrix.example.org'],
+  ['token','Jeton du bot Matrix','password',''],
+  ['username','Identifiant du bot (facultatif)','text','']
+ ],
+ proxmox:[
+  ['url','URL API Proxmox','text','https://pve.example.org:8006'],
+  ['username','Utilisateur / ID de token API','text','user@pve!origamitasks'],
+  ['token','Secret du jeton API','password','']
+ ],
+ generic:[
+  ['username','Utilisateur','text',''],['password','Mot de passe','password',''],
+  ['token','Jeton / clé API','password',''],['private_key','Clé privée SSH','textarea',''],
+  ['passphrase','Phrase secrète SSH','password','']
+ ]
+};
+function credentialProfileFields(kind,credential){
+ const profile=credential?.public||{},present=credential?.fields||[];
+ const schema=connectionSchemas[kind]||connectionSchemas.generic;
+ return '<div class="form-grid credential-protocol-fields">'+schema.map(([key,label,typ,fallback,choices])=>{
+  const existing=profile[key]??'';
+  const value=existing===''?fallback:existing;
+  let control='';
+  if(typ==='checkbox')control='<input type="checkbox" name="'+key+'" '+((typeof existing==='boolean'?existing:fallback)?'checked':'')+'>';
+  else if(typ==='select')control='<select name="'+key+'">'+option(choices,existing||fallback)+'</select>';
+  else if(typ==='textarea')control='<textarea name="'+key+'" rows="4" placeholder="'+e(present.includes(key)?'Déjà renseigné · vide = conserver':'Clé privée ou secret')+'"></textarea>';
+  else control='<input name="'+key+'" type="'+typ+'" '+(typ==='number'?'min="1" max="65535" ':'')
+    +' value="'+e(typ==='password'?'':existing||'')+'" placeholder="'+e(typ==='password'&&present.includes(key)?'Déjà renseigné · vide = conserver':fallback||'')+'" '
+    +(kind==='smtp'&&key==='host'?'required':'')+'>';
+  if(typ==='number')control='<input type="number" name="'+key+'" min="1" max="65535" value="'+e(existing||fallback||'')+'" required>';
+  const cls=typ==='textarea'?'field full':typ==='checkbox'?'field checkbox':'field';
+  return '<label class="'+cls+'" '+(kind==='smtp'&&['username','password'].includes(key)?'data-smtp-auth-field':'')+'><span>'+e(label)+'</span>'+control+'</label>';
+ }).join('')+'</div>'
+ +(kind==='smtp'?'<div class="notice">Pour le SMTP, configure le serveur, le port, la sécurité et l’authentification. La tâche utilise automatiquement ces paramètres lorsque sa connexion est sélectionnée.</div>':'');
+}
+function credentialKindForStep(){
+ const type=state.editor?.steps_json[state.selectedStep]?.type;
+ return ({email:'smtp',ssh:'ssh',sftp:'ssh',ftp:'ftp',ansible:'ssh',matrix:'matrix',directory:'ldap',http:'api',proxmox:'proxmox'})[type]||'generic';
+}
+function smtpAuthFieldsVisibility(){
+ const form=document.getElementById('credentialManageForm');
+ if(!form)return;
+ const enabled=form.elements.namedItem('auth')?.checked;
+ form.querySelectorAll('[data-smtp-auth-field]').forEach(el=>el.hidden=!enabled);
+}
 function drawCredentialBrowser(){
  const selected=state.credentials.find(c=>c.id===state.pickerCredentialId);
- const kinds=[['ssh','SSH / SFTP'],['smtp','SMTP'],['ftp','FTP / FTPS'],['api','API / Jeton'],['ldap','LDAP / AD'],['generic','Générique']];
+ const clone=state.credentialAction==='clone',edit=state.credentialAction==='edit';
  let body='';
  if(state.credentialAction){
-  const clone=state.credentialAction==='clone',edit=state.credentialAction==='edit';
-  const name=clone?(selected?.name||'')+' (copie)':(edit?selected?.name:'');
+  const kind=selected?.kind||credentialKindForStep();
+  const name=clone?(selected?.name||'')+' (copie)':(edit?selected?.name||'':'');
   body='<button class="btn tiny" data-action="credential-list">← Retour aux connexions</button>'
    +'<form id="credentialManageForm"><div class="form-grid">'
    +'<div class="field"><span>Nom de la connexion</span><input name="name" value="'+e(name)+'" maxlength="120" required></div>'
-   +'<div class="field"><span>Type de connexion</span><select name="kind" '+(clone?'disabled':'')+'>'+option(kinds,selected?.kind||credentialKindForStep())+'</select></div></div>'
-   +(clone?'<div class="notice">La copie conserve les secrets chiffrés sans les afficher. Tu pourras les modifier ensuite.</div>':
-    '<div class="form-grid">'
-    +'<div class="field"><span>Identifiant</span><input name="username" autocomplete="off" placeholder="'+(edit&&selected?.fields?.includes('username')?'Déjà renseigné · laisser vide pour conserver':'Utilisateur')+'"></div>'
-    +'<div class="field"><span>Mot de passe</span><input name="password" type="password" autocomplete="new-password" placeholder="'+(edit&&selected?.fields?.includes('password')?'Déjà renseigné · laisser vide pour conserver':'Mot de passe')+'"></div>'
-    +'<div class="field full"><span>Jeton / clé API</span><input name="token" type="password" autocomplete="new-password" placeholder="'+(edit&&selected?.fields?.includes('token')?'Déjà renseigné · laisser vide pour conserver':'Jeton')+'"></div>'
-    +'<div class="field full"><span>Clé SSH privée</span><textarea name="private_key" rows="3" placeholder="'+(edit&&selected?.fields?.includes('private_key')?'Clé existante conservée si vide':'Clé privée PEM / OpenSSH')+'"></textarea></div>'
-    +'<div class="field"><span>Passphrase SSH</span><input name="passphrase" type="password" autocomplete="new-password"></div></div>'
-    +'<div class="notice">'+(edit?'Seuls les champs renseignés seront remplacés. Les autres secrets restent chiffrés et inchangés.':'Les secrets sont stockés chiffrés dans le coffre et jamais dans le workflow.')+'</div>')
-   +'<button class="btn primary" type="submit">'+(clone?'Créer la copie':edit?'Enregistrer les modifications':'Créer et chiffrer la connexion')+'</button></form>';
+   +'<div class="field"><span>Protocole / type de connexion</span><select name="kind" '+(edit||clone?'disabled':'')+'>'+option(connectionKinds,kind)+'</select></div></div>'
+   +(clone?'<div class="notice">La copie conserve les paramètres et secrets chiffrés. Aucune valeur sensible n’est affichée.</div>':
+    '<div id="credentialProfile">'+credentialProfileFields(kind,edit?selected:null)+'</div>'
+    +'<div class="hint">Les mots de passe et jetons restent masqués ; laisser ces champs vides en modification conserve leurs valeurs.</div>')
+   +'<div class="tool-row" style="margin-top:16px"><button class="btn primary" type="submit">'+(clone?'Cloner cette connexion':edit?'Enregistrer les modifications':'Créer et chiffrer la connexion')+'</button></div></form>';
  }else{
-  body='<div class="tool-row"><input id="credentialSearch" placeholder="Rechercher une connexion (nom, type…)" value="'+e(state.credentialSearch||'')+'">'
+  const target=state.pickerField?credentialKindForStep():null;
+  body='<div class="tool-row"><input id="credentialSearch" placeholder="Rechercher une connexion (nom, type, hôte…)" value="'+e(state.credentialSearch||'')+'">'
    +'<button class="btn primary" data-action="credential-new">＋ Nouvelle connexion</button></div>'
+   +(target?'<p class="hint">Connexions conseillées pour cette tâche : '+e(connectionKinds.find(x=>x[0]===target)?.[1]||target)+'. Les anciennes connexions API ou génériques restent utilisables.</p>':'')
    +'<div class="credential-list">'+(state.credentials.map(c=>{
-      const chosen=state.editor?.steps_json[state.selectedStep]?.config?.[state.pickerField]===c.id;
-      return '<div class="credential-entry" data-credential-search="'+e((c.name+' '+c.kind).toLowerCase())+'"><div><b>'+e(c.name)+'</b><p class="hint">'+e(c.kind.toUpperCase())+' · '+e((c.fields||[]).join(', ')||'secret')+' · #'+c.id+'</p></div>'
-       +'<div class="credential-actions">'+(state.pickerField?'<button class="btn tiny primary" data-action="credential-select" data-id="'+c.id+'">Sélectionner</button>':'')
+      const compatible=!target||c.kind===target||c.kind==='generic'||(['matrix','proxmox'].includes(target)&&c.kind==='api');
+      return '<div class="credential-entry" data-credential-search="'+e((c.name+' '+c.kind+' '+(c.public?.host||c.public?.uri||c.public?.url||'')).toLowerCase())+'">'
+       +'<div><b>'+e(c.name)+'</b><p class="hint">'+e(c.kind.toUpperCase())+' · '+e(c.public?.host||c.public?.uri||c.public?.url||'')+' · #'+c.id+'</p></div>'
+       +'<div class="credential-actions">'+(state.pickerField?'<button class="btn tiny primary" data-action="credential-select" data-id="'+c.id+'" '+(compatible?'':'disabled title="Protocole non compatible"')+'>Sélectionner</button>':'')
+       +(c.kind==='smtp'?'<button class="btn tiny" data-action="credential-test" data-id="'+c.id+'">Tester SMTP</button>':'')
        +'<button class="btn tiny" data-action="credential-edit" data-id="'+c.id+'">Modifier</button>'
        +'<button class="btn tiny" data-action="credential-clone" data-id="'+c.id+'">Cloner</button>'
        +'<button class="btn tiny danger" data-action="credential-remove" data-id="'+c.id+'">Supprimer</button></div></div>';
-    }).join('')||'<p class="hint">Aucune connexion. Créez un secret pour cette tâche.</p>')+'</div>';
+    }).join('')||'<p class="hint">Aucune connexion. Crée un profil adapté au protocole.</p>')+'</div>';
  }
  openLayer('credentialLayer',state.pickerField?'Choisir une connexion sécurisée':'Connexions du coffre-fort',body);
  filterCredentialRows();
+ smtpAuthFieldsVisibility();
 }
 function filterCredentialRows(){
  $('#credentialLayer [data-credential-search]').forEach(row=>row.hidden=!(row.dataset.credentialSearch||'').includes((state.credentialSearch||'').toLowerCase()));
