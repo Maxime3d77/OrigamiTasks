@@ -100,3 +100,15 @@ LDAPS:636 with strict TLS certificate verification is preferred; LDAP:389 with v
 The **Updates** screen compares the running container `APP_VERSION` with the version stored in the latest commit on the pinned `GIT_BRANCH` from the trusted `GIT_ALLOWED_ORIGIN`. The separate host-side `ops/update-worker.py` checks once on start and at most hourly, reporting installed/latest version, **latest commit date** (not necessarily a release date), commit count behind and last checked time.
 
 `GIT_ALLOWED_ORIGIN` must match exactly `git remote get-url origin`. When deploying a recipe branch, set `GIT_BRANCH` accordingly. If the trusted origin is not configured, the worker is missing, or the local commit does not fast-forward to the tracked branch, the UI reports **Check unavailable**, never a false up-to-date status. Applying updates always requires explicit administrator approval.
+
+## LDAP trusted CA import
+
+In **Administration → LDAP / Active Directory**, upload the **public CA** that signed the LDAPS server certificate (`.crt` / `.pem`, maximum 128 KiB). The PEM certificates are validated and saved with restricted permissions under the persistent `/app/data/ldap-cas` directory. The CA path is populated automatically: **save the LDAP settings**, then **test the connection**. The server certificate's DNS SAN must match the configured FQDN.
+
+Certificate verification remains mandatory for **LDAPS:636** or **STARTTLS:389**. There is no skip-validation toggle, because bypassing verification could expose LDAP bind credentials to interception. **Never import a private key.**
+
+## Installed and latest versions
+
+**Updates** shows the running version, the latest commit's application version from the trusted `GIT_BRANCH` under `GIT_ALLOWED_ORIGIN`, remote **commit date**, commits behind, and the last check time. The host-side `ops/update-worker.py` checks on startup and approximately hourly; an admin may also request a check.
+
+Set `GIT_ALLOWED_ORIGIN` to the exact result of `git remote get-url origin` and `GIT_BRANCH` to the branch actually deployed. If the worker is absent, the origin is not trusted, or local and remote branches diverge, the UI reports **Check unavailable**, not a false up-to-date status. Applying updates always requires explicit approval. The displayed date is a commit date, not necessarily a release date.
