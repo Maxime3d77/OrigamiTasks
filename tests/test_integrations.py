@@ -83,7 +83,7 @@ def test_datacenter_crud_and_task_catalog(monkeypatch):
         headers={'X-CSRF-Token':c.cookies['origami_csrf']}
         available=c.get('/api/catalog').json()['available']
         assert {'ansible','matrix','proxmox'}.issubset({item['type'] for item in available})
-        secret=c.post('/api/credentials',headers=headers,json={'name':'pve-for-test','kind':'api','payload':{'username':'bot@pve!origami','token':'secret-pve-for-tests'}})
+        secret=c.post('/api/credentials',headers=headers,json={'name':'pve-for-test','kind':'proxmox','payload':{'url':'https://pve.example.org:8006','username':'bot@pve!origami','token':'secret-pve-for-tests'}})
         assert secret.status_code==200
         cred_id=secret.json()['id']
         bad=c.post('/api/datacenters',headers=headers,json={'name':'invalid','url':'https://unapproved.local:8006','credential_id':cred_id})
