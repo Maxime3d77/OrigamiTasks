@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 from cryptography.fernet import Fernet
 from argon2 import PasswordHasher, exceptions as argon_exceptions
 from fastapi import HTTPException, Request
-from . import config, db
+from . import config, db, ldap_settings
 
 ph = PasswordHasher()
 
@@ -50,28 +50,29 @@ def initialize_admin():
 
 def ldap_authenticate(username, password):
     """LDAP users must bind successfully; directory group DNs map to job ACL and roles."""
-    if not config.LDAP_URI:
+    settings=ldap_settings.current()
+    if not settings['enabled'] or not settings['uri']:
         return None
-    if not (config.LDAP_URI.startswith('ldaps://') or config.LDAP_STARTTLS):
+    if not (settings['uri'].startswith('ldaps://') or settings['starttls']):
         raise RuntimeError('LDAP refuse toute liaison en clair : LDAPS ou STARTTLS requis')
     try:
         from ldap3 import Server, Connection, SUBTREE, Tls
         from ldap3.utils.conv import escape_filter_chars
         from ldap3.core.exceptions import LDAPException
-        uri = config.LDAP_URI
-        tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=config.LDAP_CA_CERT or None)
+        uri = settings['uri']
+        tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=settings['ca_cert'] or None)
         server = Server(uri, tls=tls, connect_timeout=8)
-        svc = Connection(server, user=config.LDAP_BIND_DN, password=config.LDAP_BIND_PASSWORD,
-                         auto_bind=not config.LDAP_STARTTLS, receive_timeout=8)
-        if config.LDAP_STARTTLS:
+        svc = Connection(server, user=settings['bind_dn'], password=settings['bind_password'],
+                         auto_bind=not settings['starttls'], receive_timeout=8)
+        if settings['starttls']:
             svc.open()
             if not svc.start_tls() or not svc.bind():
                 return None
-        attr = config.LDAP_USER_ATTRIBUTE
+        attr = settings['user_attribute']
         if not re.fullmatch(r'[A-Za-z][A-Za-z0-9-]*', attr):
             raise RuntimeError('LDAP_USER_ATTRIBUTE non valide')
         query = f'(&(objectClass=person)({attr}={escape_filter_chars(username)}))'
-        svc.search(config.LDAP_BASE_DN, query, SUBTREE, attributes=['cn', 'displayName', 'memberOf'])
+        svc.search(settings['base_dn'], query, SUBTREE, attributes=['cn', 'displayName', 'memberOf'])
         if len(svc.entries) != 1:
             svc.unbind()
             return None
@@ -81,29 +82,29 @@ def ldap_authenticate(username, password):
         display_name = str(entry.displayName.value or username) if 'displayName' in entry else username
         # OpenLDAP posixGroup/memberUid and groupOfNames/member often lack memberOf.
         # Resolve them through the configured group subtree before unbinding the service.
-        if config.LDAP_GROUP_BASE_DN:
+        if settings['group_base_dn']:
             safe_uid=escape_filter_chars(username)
             safe_dn=escape_filter_chars(user_dn)
             membership=f'(|(memberUid={safe_uid})(member={safe_dn})(uniqueMember={safe_dn}))'
-            svc.search(config.LDAP_GROUP_BASE_DN,membership,SUBTREE,attributes=['cn'],size_limit=300)
+            svc.search(settings['group_base_dn'],membership,SUBTREE,attributes=['cn'],size_limit=300)
             groups.extend(item.entry_dn for item in svc.entries)
-        if config.LDAP_NESTED_GROUPS:
+        if settings['nested_groups']:
             # AD LDAP_MATCHING_RULE_IN_CHAIN: nested group memberships for user DN.
-            svc.search(config.LDAP_GROUP_BASE_DN, f'(&(objectClass=group)(member:1.2.840.113556.1.4.1941:={escape_filter_chars(user_dn)}))', SUBTREE, attributes=['distinguishedName'])
+            svc.search(settings['group_base_dn'], f'(&(objectClass=group)(member:1.2.840.113556.1.4.1941:={escape_filter_chars(user_dn)}))', SUBTREE, attributes=['distinguishedName'])
             groups.extend(x.entry_dn for x in svc.entries)
         svc.unbind()
-        user_conn = Connection(server, user=user_dn, password=password, auto_bind=not config.LDAP_STARTTLS, receive_timeout=8)
-        if config.LDAP_STARTTLS:
+        user_conn = Connection(server, user=user_dn, password=password, auto_bind=not settings['starttls'], receive_timeout=8)
+        if settings['starttls']:
             user_conn.open()
             if not user_conn.start_tls() or not user_conn.bind():
                 return None
         user_conn.unbind()
         names = sorted({m.group(1).lower() for dn in groups if (m := re.search(r'CN=([^,]+)', dn, re.I))})
-        if config.LDAP_ADMIN_GROUP.lower() in names:
+        if settings['admin_group'].lower() in names:
             role = 'admin'
-        elif config.LDAP_OPERATOR_GROUP.lower() in names:
+        elif settings['operator_group'].lower() in names:
             role = 'operator'
-        elif config.LDAP_VIEWER_GROUP.lower() in names:
+        elif settings['viewer_group'].lower() in names:
             role = 'viewer'
         else:
             return None  # refuse directory users with no mapped application group

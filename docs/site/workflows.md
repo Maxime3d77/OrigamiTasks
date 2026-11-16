@@ -30,6 +30,8 @@ In **New workflow**, choose the **Trigger**: **Manual**, **Once**, **Repeat at i
 
 **View / Run / Edit** permission groups can be selected via a searchable LDAP group picker, including OpenLDAP `posixGroup` / `memberUid`. The LDAP bind account needs read access to `LDAP_GROUP_BASE_DN`. When LDAP is unavailable, the UI warns and falls back to locally known groups.
 
+Vault connection profiles now also store protocol settings. SMTP steps can inherit the host, port, security and authentication from the selected vault profile, leaving task-level technical fields optional. Directory steps can default to central LDAP administration settings.
+
 For steps requiring credentials, **Search / manage** opens the vault without leaving the workflow. Administrators can **select, create, edit, clone or delete** a connection. Secret values are never re-displayed; empty sensitive fields keep existing values when editing. **Create from a step** still encrypts the credential in the vault and stores only its ID in the workflow — no plaintext secret in `steps_json`. Referenced credentials cannot be deleted until the reference is removed.
 
 ## Retry, timeout and idempotency

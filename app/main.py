@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests
 
 
 @asynccontextmanager
@@ -416,6 +416,40 @@ def remove_folder(request:Request,path:str):
     return {'ok':True,'moved_to':parent}
 
 
+
+@app.get('/api/admin/ldap')
+def get_admin_ldap(request:Request):
+    security.require(request,role='admin')
+    with db.session() as con:
+        saved=con.execute('SELECT 1 FROM ldap_settings WHERE id=1').fetchone() is not None
+    return dict(ldap_settings.public(), source='administration' if saved else '.env')
+
+
+@app.put('/api/admin/ldap')
+def put_admin_ldap(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        values=ldap_settings.merge(payload)
+    except ldap_settings.LDAPSettingsError as exc:
+        raise HTTPException(422,str(exc)) from None
+    ldap_settings.save(values)
+    db.audit(user['username'],'ldap.settings.update','ldap','configuration protégée')
+    return ldap_settings.public(values)
+
+
+@app.post('/api/admin/ldap/test')
+def test_admin_ldap(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        values=ldap_settings.merge(payload.get('settings',{}))
+        result=ldap_settings.test(values,payload.get('test_user',''))
+    except ldap_settings.LDAPSettingsError as exc:
+        db.audit(user['username'],'ldap.settings.test.failed','ldap','lecture seule')
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ldap.settings.test','ldap','lecture seule')
+    return result
+
+
 @app.get('/api/directory/groups')
 def lookup_directory_groups(request:Request,q:str=''):
     security.require(request,role='admin')
@@ -425,22 +459,23 @@ def lookup_directory_groups(request:Request,q:str=''):
             for row in con.execute('SELECT groups_json FROM users')
             for name in json.loads(row['groups_json'] or '[]') if name}
     warning=''
-    if config.LDAP_URI and config.LDAP_GROUP_BASE_DN:
+    settings=ldap_settings.current()
+    if settings['enabled'] and settings['uri'] and settings['group_base_dn']:
         try:
             from ldap3 import Server, Connection, SUBTREE, Tls
             from ldap3.utils.conv import escape_filter_chars
-            if not (config.LDAP_URI.startswith('ldaps://') or config.LDAP_STARTTLS):
+            if not (settings['uri'].startswith('ldaps://') or settings['starttls']):
                 raise ValueError('LDAPS ou STARTTLS obligatoire')
-            server=Server(config.LDAP_URI,tls=Tls(validate=ssl.CERT_REQUIRED,ca_certs_file=config.LDAP_CA_CERT or None),connect_timeout=6)
-            conn=Connection(server,user=config.LDAP_BIND_DN,password=config.LDAP_BIND_PASSWORD,
-                            auto_bind=not config.LDAP_STARTTLS,receive_timeout=8)
-            if config.LDAP_STARTTLS:
+            server=Server(settings['uri'],tls=Tls(validate=ssl.CERT_REQUIRED,ca_certs_file=settings['ca_cert'] or None),connect_timeout=6)
+            conn=Connection(server,user=settings['bind_dn'],password=settings['bind_password'],
+                            auto_bind=not settings['starttls'],receive_timeout=8)
+            if settings['starttls']:
                 conn.open()
                 if not conn.start_tls() or not conn.bind(): raise ValueError('Bind LDAP refusé')
             filt='(|(objectClass=group)(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=posixGroup))'
             if q:
                 filt='(&'+filt+'(cn=*'+escape_filter_chars(q)+'*))'
-            conn.search(config.LDAP_GROUP_BASE_DN,filt,SUBTREE,attributes=['cn','description'],size_limit=100)
+            conn.search(settings['group_base_dn'],filt,SUBTREE,attributes=['cn','description'],size_limit=100)
             for item in conn.entries:
                 name=str(item.cn.value or '') if 'cn' in item else ''
                 if name: found[name.lower()]={'name':name,'dn':item.entry_dn,'source':'LDAP'}
@@ -625,7 +660,13 @@ def list_credentials(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
         items=con.execute('SELECT * FROM credentials ORDER BY name').fetchall()
-    return {'items':[dict(id=r['id'],name=r['name'],kind=r['kind'],created_at=r['created_at'],updated_at=r['updated_at'],fields=list(security.decrypt(r['encrypted_payload']).keys())) for r in items]}
+    result=[]
+    for row in items:
+        values=security.decrypt(row['encrypted_payload'])
+        result.append({'id':row['id'],'name':row['name'],'kind':row['kind'],
+                       'created_at':row['created_at'],'updated_at':row['updated_at'],
+                       'fields':list(values),'public':connections.public(values)})
+    return {'items':result}
 
 
 @app.post('/api/credentials')
@@ -635,18 +676,20 @@ def create_credential(payload:dict[str,Any],request:Request):
     fields=payload.get('payload',{})
     if not name or len(name)>120 or not isinstance(fields,dict) or len(json.dumps(fields))>30000:
         raise HTTPException(422,'Coffre invalide')
-    if not fields or not any(str(x) for x in fields.values()):
-        raise HTTPException(422,'Au moins une valeur de secret requise')
-    encrypted=security.encrypt({str(k):str(v) for k,v in fields.items() if v is not None})
+    kind=str(payload.get('kind','generic'))
+    try:
+        values=connections.normalize(kind,fields,is_new=True)
+    except connections.ConnectionError as exc:
+        raise HTTPException(422,str(exc)) from None
     with db.session() as con:
         try:
             cur=con.execute('INSERT INTO credentials (name,kind,encrypted_payload,created_at,updated_at) VALUES (?,?,?,?,?)',
-                            (name,str(payload.get('kind','generic'))[:30],encrypted,db.now(),db.now()))
+                            (name,kind,security.encrypt(values),db.now(),db.now()))
         except db.sqlite3.IntegrityError:
             raise HTTPException(409,'Ce nom de coffre existe déjà')
-    db.audit(user['username'],'vault.create',cur.lastrowid,name)
-    return {'id':cur.lastrowid}
-
+        credential_id=cur.lastrowid
+    db.audit(user['username'],'vault.create',credential_id,name)
+    return {'id':credential_id}
 
 
 @app.put('/api/credentials/{credential_id}')
@@ -659,19 +702,45 @@ def update_credential(credential_id:int,payload:dict[str,Any],request:Request):
     with db.session() as con:
         row=con.execute('SELECT * FROM credentials WHERE id=?',(credential_id,)).fetchone()
         if not row: raise HTTPException(404,'Identifiant introuvable')
+        kind=str(payload.get('kind') or row['kind'])
+        if kind!=row['kind']:
+            raise HTTPException(422,'Type de connexion non modifiable : cloner ou créer une nouvelle connexion')
         values=security.decrypt(row['encrypted_payload'])
-        values.update({str(k):str(v) for k,v in updates.items() if v is not None and str(v)})
-        for key in payload.get('remove_fields',[]):
-            if key in ('username','password','token','private_key','passphrase'): values.pop(key,None)
-        if not values: raise HTTPException(422,'Au moins un champ secret est obligatoire')
+        remove=payload.get('remove_fields',[])
+        if not isinstance(remove,list):
+            raise HTTPException(422,'Liste de champs à supprimer invalide')
+        for key in remove:
+            if key in connections.SECRET_KEYS: values.pop(key,None)
+        try:
+            values=connections.normalize(kind,updates,values,is_new=False)
+        except connections.ConnectionError as exc:
+            raise HTTPException(422,str(exc)) from None
         try:
             con.execute('UPDATE credentials SET name=?,kind=?,encrypted_payload=?,updated_at=? WHERE id=?',
-                        (name,str(payload.get('kind') or row['kind'])[:30],
-                         security.encrypt(values),db.now(),credential_id))
+                        (name,kind,security.encrypt(values),db.now(),credential_id))
         except db.sqlite3.IntegrityError:
             raise HTTPException(409,'Ce nom de coffre existe déjà')
     db.audit(user['username'],'vault.update',credential_id,name)
     return {'ok':True}
+
+
+@app.post('/api/credentials/{credential_id}/test')
+def test_credential(credential_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    with db.session() as con:
+        row=con.execute('SELECT kind,encrypted_payload FROM credentials WHERE id=?',(credential_id,)).fetchone()
+    if not row: raise HTTPException(404,'Connexion introuvable')
+    try:
+        result=connection_tests.run(row['kind'], security.decrypt(row['encrypted_payload']))
+    except connection_tests.ConnectionTestError as exc:
+        db.audit(user['username'],'vault.test.failed',credential_id,row['kind'])
+        raise HTTPException(422,str(exc)) from None
+    except Exception as exc:
+        db.audit(user['username'],'vault.test.failed',credential_id,row['kind'])
+        # No raw server exception or decrypted credential is ever returned.
+        raise HTTPException(422,'Test '+str(row['kind'])+' impossible ('+type(exc).__name__+')') from None
+    db.audit(user['username'],'vault.test',credential_id,row['kind'])
+    return result
 
 
 @app.post('/api/credentials/{credential_id}/clone')

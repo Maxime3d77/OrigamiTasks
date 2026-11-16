@@ -69,6 +69,10 @@ CREATE TABLE IF NOT EXISTS webhooks (
  job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
  token_hash TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ldap_settings (
+ id INTEGER PRIMARY KEY CHECK(id=1), encrypted_config TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS credentials (
  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, kind TEXT NOT NULL,
  encrypted_payload TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL

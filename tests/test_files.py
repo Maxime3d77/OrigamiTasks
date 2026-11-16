@@ -42,7 +42,8 @@ def test_smtp_html_and_attachment_are_assembled_without_network(tmp_path,monkeyp
     sent=[]
     class Fake:
         def __init__(self,host,port,timeout):pass
-        def starttls(self):pass
+        def ehlo(self):pass
+        def starttls(self,context=None):pass
         def login(self,user,password):pass
         def send_message(self,msg):sent.append(msg)
         def quit(self):pass

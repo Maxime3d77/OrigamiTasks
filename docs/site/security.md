@@ -20,6 +20,12 @@ OrigamiTasks is an **automation control plane**. Running a script is a powerful 
 
 Credential editing and cloning are server-side operations: existing secret values never return to the browser. Credentials referenced by a task or datacenter cannot be deleted. Creating credentials from a workflow step still encrypts them in the vault and stores only the credential ID in the workflow.
 
+LDAP/AD administration settings are encrypted in SQLite; service-account passwords are never returned to the browser. The LDAP test performs read-only searches. SMTP testing never sends mail, verifies TLS certificates, and rejects unencrypted password authentication. Only administrators can test outbound connections; restrict their destinations with an egress firewall.
+
+LDAP/AD settings saved via the admin UI are encrypted in SQLite. LDAP tests perform read-only bind/search operations and never return service credentials. SMTP tests do not send mail, verify TLS certificates and reject authentication without TLS. Only administrators can run connection tests; enforce network egress restrictions.
+
+Credential tests are administrator-only and audited. They never execute SSH commands, transfer files, send mail or modify directory objects. FTP without TLS does not transmit credentials. Generic API diagnostics require an explicit allow-list (`CONNECTION_TEST_ALLOWED_HOSTS`) and use GET only, without following redirects. A successful HTTP status is not a universal proof of token validity. Network egress restrictions are still necessary.
+
 ## Recommended deployment controls
 
 Dedicated management VLAN, upstream allow-lists, no Docker socket mounts, TLS termination, mandatory code review, restricted SSH principals, no administrator/root service account for routine jobs, protected Git branch, audited production updates, secrets rotation and immutable external audit log.

@@ -27,3 +27,18 @@ Vérifier activation du workflow, expression cron, horloge du serveur, unicité 
 ## Mise à jour bloquée en attente
 
 Le worker côté hôte peut être absent ou ne pas joindre l'origine Git autorisée. Examiner systemd/journal, branche, permissions et propreté du checkout. Ne pas donner au worker root des origines Git arbitraires.
+
+## Connexion administrateur : redirection contenant un mot de passe
+
+Si le navigateur affiche `/?username=...&password=...` ou si les logs montrent un `GET /` avec `password=`, **arrêter les tentatives immédiatement**. Cela signifie que l'événement JavaScript du formulaire n'a pas été intercepté : le serveur n'a pas reçu de demande `POST /api/login`, quel que soit le mot de passe stocké en base. Le défaut a été corrigé en **v0.3.1-rc2** :
+
+- Le formulaire HTML utilise `method="post"` ; le mot de passe ne peut plus être envoyé dans une URL lors d'une soumission native.
+- Un fichier `/assets/login.js` autonome gère la connexion POST en JSON même si le reste de l'application échoue à s'initialiser.
+- Les URLs JavaScript/CSS sont versionnées pour forcer le navigateur à récupérer les nouvelles ressources.
+- Les listeners `submit` du cœur de l'application sont enregistrés avant l'initialisation.
+
+Pour confirmer : `curl -fsS http://127.0.0.1:8091/api/health` doit afficher `0.3.1-rc2`. Dans l'onglet Réseau du navigateur, la connexion doit être un **POST /api/login** et non un GET avec mot de passe. Faire `Ctrl+Maj+R` après mise à jour.
+
+**Incident de confidentialité** : un mot de passe déjà présent dans une URL est potentiellement conservé dans l'historique du navigateur, les logs d'accès du serveur et du reverse proxy, et leurs sauvegardes. Faire tourner les identifiants concernés, limiter l'accès aux journaux et traiter leur conservation selon la politique d'incident. Ne pas publier les URLs ou logs bruts contenant des secrets.
+
+Un changement de `ADMIN_PASSWORD` dans `.env` ne modifie pas un hash existant en SQLite ; consulter la procédure de récupération du compte local si un véritable `POST /api/login` échoue.

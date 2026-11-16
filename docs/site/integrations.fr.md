@@ -22,7 +22,9 @@ Exemple :
 
 ## Email / SMTP
 
-Configurer hôte, port, expéditeur, destinataire, sujet, corps et credentials. Utiliser 587 STARTTLS ou 465 TLS implicite. En v0.2, les emails acceptent un corps texte, un corps HTML facultatif (`html_body`) et des pièces jointes (`attachments`) limitées à 10 fichiers / 10 Mo dans `data/transfers`. Les modèles avancés, les emails entrants IMAP et le chiffrement S/MIME sont prévus.
+Dans **Coffre-fort**, créer une connexion **SMTP** : serveur/FQDN, port (587 STARTTLS, 465 SSL/TLS direct ou 25 pour un relais interne), protocole de sécurité, activation ou non de l'authentification, identifiant/mot de passe si besoin et expéditeur par défaut. Les secrets sont chiffrés. Cliquer sur **Tester SMTP** pour valider connexion, TLS et authentification **sans envoyer de message**. L'authentification est interdite sans TLS.
+
+Dans le bloc workflow **Envoyer un email**, sélectionner cette connexion puis renseigner les destinataires, le sujet et le corps. Hôte, port et expéditeur peuvent être laissés vides pour réutiliser le coffre. Les champs techniques de la tâche restent disponibles pour des surcharges explicites. En v0.2, les emails acceptent un corps texte, un corps HTML facultatif (`html_body`) et des pièces jointes (`attachments`) limitées à 10 fichiers / 10 Mo dans `data/transfers`. Les modèles avancés, les emails entrants IMAP et le chiffrement S/MIME sont prévus.
 
 ## HTTP et transferts
 

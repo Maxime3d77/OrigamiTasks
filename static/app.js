@@ -15,8 +15,8 @@ const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
 const badgeTags=tags=>tags.map(t=>`<span class="chip tag">#${e(t)}</span>`).join('');
-function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',updates:'Mises à jour',datacenters:'Datacenters',agents:'Agents Linux / Windows',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
-function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
+function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'Datacenters',agents:'Agents Linux / Windows',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
+function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
 function dashboard(){const s=state.summary;return title('Vue d’ensemble','Votre centre de contrôle de l’automatisation.','<button class="btn primary" data-action="create">＋ Nouveau workflow</button>')+`<div class="stats-grid">
  <div class="stat-card featured"><span class="label">Workflows disponibles</span><span class="stat-icon">◈</span><div class="value">${s.jobs||0}</div><div class="sub">${s.enabled||0} workflows actifs</div></div>
  <div class="stat-card"><span class="label">Exécutions réussies</span><span class="stat-icon">✓</span><div class="value">${s.success||0}</div><div class="sub">sur les 100 dernières</div></div>
@@ -50,7 +50,62 @@ function jobs(){
   +(cards||empty('Aucun workflow','Sélectionnez un autre dossier ou créez votre première automatisation.'))+'</div></section></div>';
 }
 function runs(){return title('Journal d’exécution','Chaque événement, chaque branche et chaque sortie de script.')+`<div class="panel"><div class="panel-title"><h2>Historique (${state.runs.length})</h2><button class="btn tiny" data-action="refresh">↻ Actualiser</button></div>${runsTable(state.runs)}</div>`}
-function vault(){if(!roleAdmin())return title('Coffre-fort','Réservé aux administrateurs.')+`<div class="notice">Le coffre de secrets est accessible aux seuls administrateurs.</div>`;return title('Coffre-fort','Credentials chiffrés au repos. Les valeurs ne sont jamais renvoyées par l’API.','<button class="btn primary" data-action="new-credential">＋ Nouveau secret</button>')+`<div class="panel"><div class="panel-title"><h2>Identités et connexions</h2><span class="hint">${state.credentials.length} identifiants</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Type</th><th>Créé le</th><th></th></tr></thead><tbody>${state.credentials.map(c=>`<tr><td class="name-cell">◇ ${e(c.name)}</td><td>${e(c.kind)}</td><td class="muted">${dt(c.created_at)}</td><td><button class="btn tiny" data-action="credential-edit" data-id="${c.id}">Modifier</button> <button class="btn tiny" data-action="credential-clone" data-id="${c.id}">Cloner</button> <button class="btn tiny danger" data-action="delete-credential" data-id="${c.id}">Supprimer</button></td></tr>`).join('')}</tbody></table></div>${!state.credentials.length?empty('Coffre vide','Ajoutez un identifiant SSH, SFTP, SMTP ou API.'):''}</div><div class="notice">Les secrets sont chiffrés avec Fernet et la clé VAULT_KEY externe au dépôt. Pour les scripts, les valeurs de l'identifiant sélectionné sont fournies via ORIGAMI_USERNAME / ORIGAMI_PASSWORD / ORIGAMI_TOKEN. Un administrateur qui peut créer des scripts doit être considéré comme privilégié.</div>`}
+function vault(){if(!roleAdmin())return title('Coffre-fort','Réservé aux administrateurs.')+`<div class="notice">Le coffre de secrets est accessible aux seuls administrateurs.</div>`;return title('Coffre-fort','Credentials chiffrés au repos. Les valeurs ne sont jamais renvoyées par l’API.','<button class="btn primary" data-action="new-credential">＋ Nouveau secret</button>')+`<div class="panel"><div class="panel-title"><h2>Identités et connexions</h2><span class="hint">${state.credentials.length} identifiants</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Type</th><th>Créé le</th><th></th></tr></thead><tbody>${state.credentials.map(c=>`<tr><td class="name-cell">◇ ${e(c.name)}</td><td>${e(c.kind)}</td><td class="muted">${dt(c.created_at)}</td><td><button class="btn tiny" data-action="credential-test" data-id="${c.id}" title="Tester cette connexion sans action métier">Tester</button> <button class="btn tiny" data-action="credential-edit" data-id="${c.id}">Modifier</button> <button class="btn tiny" data-action="credential-clone" data-id="${c.id}">Cloner</button> <button class="btn tiny danger" data-action="delete-credential" data-id="${c.id}">Supprimer</button></td></tr>`).join('')}</tbody></table></div>${!state.credentials.length?empty('Coffre vide','Ajoutez un identifiant SSH, SFTP, SMTP ou API.'):''}</div><div class="notice">Les secrets sont chiffrés avec Fernet et la clé VAULT_KEY externe au dépôt. Pour les scripts, les valeurs de l'identifiant sélectionné sont fournies via ORIGAMI_USERNAME / ORIGAMI_PASSWORD / ORIGAMI_TOKEN. Un administrateur qui peut créer des scripts doit être considéré comme privilégié.</div>`}
+
+function ldapPage(){
+ if(!roleAdmin())return title('Configuration LDAP','Réservée aux administrateurs');
+ return title('LDAP / Active Directory','Configurer l’annuaire utilisé pour la connexion et rechercher les groupes.')
+ +'<div id="ldapAdminPanel" class="panel"><p class="hint">Chargement des paramètres LDAP…</p></div>';
+}
+function ldapInput(label,name,value='',type='text',helper=''){
+ return '<div class="field"><span>'+e(label)+'</span><input name="'+e(name)+'" type="'+type+'" value="'+e(value??'')+'" autocomplete="off" '+(type==='password'?'autocomplete="new-password"':'')+'>'
+ +(helper?'<small class="hint">'+e(helper)+'</small>':'')+'</div>';
+}
+function ldapCheck(label,name,on){
+ return '<label class="field checkbox"><input type="checkbox" name="'+e(name)+'" '+(on?'checked':'')+'><span>'+e(label)+'</span></label>';
+}
+function ldapSettingsForm(cfg){
+ const body='<div class="panel-title"><h2>Connexion de l’annuaire</h2><span class="chip">'+e(cfg.source==='administration'?'Configuration enregistrée':'Paramètres hérités du .env')+'</span></div>'
+ +'<p class="hint">Les paramètres enregistrés ici prennent priorité sur le .env. Le mot de passe de liaison est chiffré avec VAULT_KEY et n’est jamais réaffiché. Le compte admin local reste disponible.</p>'
+ +'<form id="ldapAdminForm"><div class="form-grid">'
+ +ldapCheck('Activer la connexion LDAP', 'enabled', cfg.enabled)
+ +ldapCheck('Activer STARTTLS (ldap://, généralement port 389)', 'starttls', cfg.starttls)
+ +ldapInput('Adresse de l’annuaire','uri',cfg.uri,'text','Ex. ldaps://serveur:636 ou ldap://serveur:389 avec STARTTLS')
+ +ldapInput('DN du compte de liaison','bind_dn',cfg.bind_dn,'text','Compte de service en lecture seule')
+ +ldapInput('Mot de passe du compte de liaison','bind_password','','password',cfg.has_bind_password?'Déjà configuré — laisser vide pour conserver':'Mot de passe requis si LDAP est activé')
+ +ldapInput('Base DN des utilisateurs','base_dn',cfg.base_dn,'text','Ex. dc=example,dc=org')
+ +ldapInput('Base DN des groupes','group_base_dn',cfg.group_base_dn)
+ +'<div class="field"><span>Attribut du login utilisateur</span><select name="user_attribute">'+option([['uid','uid — OpenLDAP/Linux'],['sAMAccountName','sAMAccountName — Active Directory'],['cn','cn'],['mail','mail'],['userPrincipalName','userPrincipalName']],cfg.user_attribute)+'</select></div>'
+ +ldapInput('Groupe des administrateurs','admin_group',cfg.admin_group)
+ +ldapInput('Groupe des opérateurs','operator_group',cfg.operator_group)
+ +ldapInput('Groupe des lecteurs','viewer_group',cfg.viewer_group)
+ +ldapInput('Chemin CA TLS (dans le conteneur)','ca_cert',cfg.ca_cert,'text','Optionnel : certificat CA de confiance, sous /etc/ssl ou /app/data')
+ +ldapCheck('Utiliser la recherche des groupes AD imbriqués','nested_groups',cfg.nested_groups)
+ +'</div><div class="divider"></div>'
+ +'<div class="form-grid">'+ldapInput('Utilisateur à rechercher (test facultatif)','test_user','','text','Test en lecture seule du login, sans tenter de l’authentifier')+'</div>'
+ +'<div class="tool-row"><button type="button" class="btn" data-action="ldap-test">Tester la connexion LDAP</button><button type="submit" class="btn primary">Enregistrer la configuration</button></div>'
+ +'<div id="ldapTestResult" class="hint">Le test vérifie TLS, le bind, la base DN et une recherche des groupes. Aucune modification de l’annuaire.</div></form>';
+ return body;
+}
+async function hydrateLDAP(){
+ const host=document.getElementById('ldapAdminPanel');
+ if(!host)return;
+ try{const cfg=await api('/admin/ldap');if(document.getElementById('ldapAdminPanel')!==host)return;
+ state.ldapSettings=cfg;host.innerHTML=ldapSettingsForm(cfg)}
+ catch(ex){host.innerHTML='<div class="notice error">'+e(ex.message)+'</div>'}
+}
+function readLDAPForm(){
+ const form=document.getElementById('ldapAdminForm');
+ if(!form)throw Error('Le formulaire LDAP est fermé');
+ const f=new FormData(form),data={};
+ for(const key of ['enabled','starttls','nested_groups'])data[key]=f.has(key);
+ for(const key of ['uri','bind_dn','bind_password','base_dn','group_base_dn','user_attribute','admin_group','operator_group','viewer_group','ca_cert']){
+  if(key==='bind_password'&&!f.get(key))continue;
+  data[key]=String(f.get(key)||'').trim();
+ }
+ return {settings:data,test_user:String(f.get('test_user')||'').trim()};
+}
+
 function users(){return title('Utilisateurs & permissions','Identités LDAP et groupes affectés aux autorisations des workflows.')+`<div class="panel"><div class="panel-title"><h2>Comptes connectés</h2><span class="hint">Les rôles sont attribués à la connexion LDAP</span></div><div id="userTable">Chargement...</div></div><div class="notice">Groupes par workflow : <b>Lecture</b>, <b>Exécution</b>, <b>Modification</b>. Un utilisateur non membre d'un groupe explicitement autorisé n'accède pas au workflow. Les administrateurs disposent de tous les droits. Les groupes et rôles LDAP sont configurés dans .env.</div>`}
 const plannedCatalog=[
  ['Déclencheurs','Fichier créé/modifié, email reçu, trap SNMP, seuil Zabbix, événement Windows, dépendance entre jobs'],
@@ -82,7 +137,7 @@ function agentEnrollForm(){modal('Enrôlement manuel','<form id="agentEnrollForm
 
 function datacenters(){if(!roleAdmin())return title('Datacenters','Administration uniquement.');return title('Datacenters Proxmox','Inventaire en lecture seule des clusters indépendants.','<button class="btn primary" data-action="new-datacenter">＋ Déclarer un datacenter</button>')+`<div class="workflow-grid">${state.datacenters.map(d=>`<div class="job-card"><div class="job-card-head"><div class="job-icon">◈</div><span class="chip tag">Proxmox VE</span></div><h3>${e(d.name)}</h3><p>${e(d.url)}</p><div class="muted tinytext">Coffre #${d.credential_id}</div><div class="actions"><button class="btn primary tiny" data-action="discover-datacenter" data-id="${d.id}">⌕ Découvrir les ressources</button><button class="btn tiny danger" data-action="delete-datacenter" data-id="${d.id}">Supprimer</button></div></div>`).join('')||empty('Aucun datacenter','Déclarez votre premier cluster avec un compte API dédié.')}</div><div class="notice">Les opérations sensibles sont désactivées par défaut. Les migrations et réplications entre clusters restent au stade du plan d’architecture.</div>`}
 function openDatacenterForm(){modal('Ajouter un datacenter Proxmox',`<form id="datacenterForm"><div class="form-grid">${field('Nom','dc_name')}${field('URL HTTPS, ex. https://pve.exemple:8006','dc_url')}${selectField('Token API Proxmox', 'dc_credential',[['','— Sélectionner —'],...state.credentials.map(c=>[c.id,c.name])],'')}</div><p class="hint">Configurer PROXMOX_ALLOWED_HOSTS avant l’enregistrement. API token dédié au moindre privilège ; certificat TLS vérifié.</p><button class="btn primary" type="submit">Enregistrer</button></form>`)}
-function updates(){return title('Versions & mises à jour','Mises à jour Git déclenchées depuis l’interface, exécutées par un service de maintenance séparé.')+`<div class="panel"><div class="panel-title"><h2>OrigamiTasks v0.3.1-rc1</h2><span class="status success">Installé</span></div><p class="muted">Branche suivie : <span class="code-inline">main</span> · Origine Git configurée sur l’hôte</p><div class="tool-row"><button class="btn" data-action="update-request" data-value="check">⌕ Rechercher des mises à jour</button><button class="btn primary" data-action="update-request" data-value="apply">⇣ Installer la dernière version Git</button><button class="btn" data-action="refresh-updates">↻</button></div><div class="notice">Sécurité : la mise à jour est <b>approuvée manuellement</b> par un administrateur. Un service hôte indépendant effectue un <b>git fetch + fast-forward</b>, une sauvegarde et le redéploiement Docker. Aucun accès Docker n'est accordé au conteneur web. Installer le service <span class="code-inline">ops/update-worker.py</span> pour activer le bouton d’installation.</div></div><div class="panel"><div class="panel-title"><h2>Maintenance & tâches Git</h2></div><div id="updateStatus">Chargement...</div></div>`}
+function updates(){return title('Versions & mises à jour','Mises à jour Git déclenchées depuis l’interface, exécutées par un service de maintenance séparé.')+`<div class="panel"><div class="panel-title"><h2>OrigamiTasks v0.3.2-rc2</h2><span class="status success">Installé</span></div><p class="muted">Branche suivie : <span class="code-inline">main</span> · Origine Git configurée sur l’hôte</p><div class="tool-row"><button class="btn" data-action="update-request" data-value="check">⌕ Rechercher des mises à jour</button><button class="btn primary" data-action="update-request" data-value="apply">⇣ Installer la dernière version Git</button><button class="btn" data-action="refresh-updates">↻</button></div><div class="notice">Sécurité : la mise à jour est <b>approuvée manuellement</b> par un administrateur. Un service hôte indépendant effectue un <b>git fetch + fast-forward</b>, une sauvegarde et le redéploiement Docker. Aucun accès Docker n'est accordé au conteneur web. Installer le service <span class="code-inline">ops/update-worker.py</span> pour activer le bouton d’installation.</div></div><div class="panel"><div class="panel-title"><h2>Maintenance & tâches Git</h2></div><div id="updateStatus">Chargement...</div></div>`}
 function audit(){return title('Journal d’audit','Traçabilité des connexions, modifications, exécutions et opérations Git.')+`<div class="panel" id="auditTable">Chargement...</div>`}
 function modal(title,body,footer='',wide=false){$('#modalRoot').innerHTML=`<div class="modal-overlay"><div class="modal ${wide?'xl':''}" role="dialog" aria-modal="true"><div class="modal-head"><h2>${title}</h2><button class="close" data-action="modal-close" aria-label="Fermer">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div></div>`}
 function closeModal(){$('#modalRoot').innerHTML='';state.editor=null}
@@ -94,7 +149,7 @@ const kinds=['agent','directory','shell','powershell','ssh','ansible','matrix','
 const kindLabel={agent:'Agent Linux / Windows',directory:'LDAP / Active Directory',shell:'Shell Linux',powershell:'PowerShell local',ssh:'SSH / PowerShell distant',ansible:'Ansible Playbook',matrix:'Message Matrix',proxmox:'Proxmox VE',sftp:'Transfert SFTP',ftp:'Transfert FTP/FTPS',file:'Fichiers / Dossiers',http:'Requête HTTP',email:'Envoyer un email',delay:'Pause / attente',set_variable:'Définir une variable'};
 const FIELDS={
  agent:[['agent_id','Agent enregistré','agent'],['action','Action','select:inventory|script|processes|disk|service_status|service_start|service_stop|service_restart'],['script','Bash (Linux) ou PowerShell (Windows)','textarea'],['service','Nom du service','text'],['timeout','Timeout en secondes','number'],['approved','Confirmer action sur service','checkbox']],
- directory:[['action','Opération LDAP/AD','select:search|get_user|create_user|modify_user|group_add|group_remove|enable_user|disable_user|unlock_user|reset_password'],['uri','Serveur ldaps:// ou ldap:// STARTTLS','text'],['starttls','Utiliser STARTTLS','checkbox'],['base_dn','Base DN autorisée','text'],['target_dn','DN de compte ciblé','text'],['group_dn','DN de groupe ciblé','text'],['lookup_attribute','Rechercher par','select:sAMAccountName|uid|cn|mail|userPrincipalName'],['lookup_value','Valeur exacte recherchée','text'],['read_attributes','Attributs affichés (virgules)','text'],['attributes','Attributs JSON (création/modification)','textarea'],['member_attribute','Attribut de groupe','select:member|uniqueMember'],['credential_id','Compte de service LDAP/AD','credential'],['password_credential_id','Secret nouveau mot de passe (reset)','credential'],['approved','Confirmer écriture annuaire','checkbox']],
+ directory:[['action','Opération LDAP/AD','select:search|get_user|create_user|modify_user|group_add|group_remove|enable_user|disable_user|unlock_user|reset_password'],['uri','Serveur LDAP (facultatif si configuré en administration)','text'],['starttls','Utiliser STARTTLS','checkbox'],['base_dn','Base DN autorisée','text'],['target_dn','DN de compte ciblé','text'],['group_dn','DN de groupe ciblé','text'],['lookup_attribute','Rechercher par','select:sAMAccountName|uid|cn|mail|userPrincipalName'],['lookup_value','Valeur exacte recherchée','text'],['read_attributes','Attributs affichés (virgules)','text'],['attributes','Attributs JSON (création/modification)','textarea'],['member_attribute','Attribut de groupe','select:member|uniqueMember'],['credential_id','Compte LDAP du coffre (facultatif avec Administration / LDAP)','credential'],['password_credential_id','Secret nouveau mot de passe (reset)','credential'],['approved','Confirmer écriture annuaire','checkbox']],
 
  matrix:[['homeserver','Homeserver HTTPS','text'],['room_id','Room ID Matrix (!...:serveur)','text'],['message','Message (variables possibles)','textarea'],['credential_id','Token bot Matrix','credential']],
  ansible:[['host','Runner Ansible SSH','text'],['port','Port SSH','number'],['playbook','Playbook dans /opt/origamitasks/ansible/playbooks','text'],['inventory','Inventaire dans /opt/origamitasks/ansible/inventories','text'],['limit','Limite de groupes / hôtes','text'],['extra_vars','Variables JSON','textarea'],['check','Mode --check','checkbox'],['credential_id','Identifiant SSH du runner','credential']],
@@ -107,7 +162,7 @@ const FIELDS={
  ftp:[['host','Hôte FTP','text'],['port','Port FTP','number'],['remote_path','Fichier distant','text'],['local_path','Fichier local (transfers/)','text'],['direction','Sens','select:get|put'],['allow_plaintext','Autoriser FTP non chiffré (déconseillé)','checkbox'],['credential_id','Identifiant','credential']],
  http:[['url','URL','text'],['method','Méthode','select:GET|POST|PUT|PATCH|DELETE'],['body','Corps','textarea'],['timeout','Timeout (s)','number'],['credential_id','Token Bearer','credential']],
  file:[['action','Opération','select:list|read|write|copy|move|mkdir|delete'],['path','Chemin cible sous transfers/','text'],['source','Source copy/move sous transfers/','text'],['content','Contenu (write)','textarea'],['approved','Confirmer la suppression (delete)','checkbox']],
- email:[['host','Serveur SMTP','text'],['port','Port SMTP','number'],['ssl','SSL immédiat (sinon STARTTLS)','checkbox'],['from','Expéditeur','text'],['to','Destinataires','text'],['subject','Objet','text'],['body','Corps texte','textarea'],['html_body','Corps HTML (optionnel)','textarea'],['attachments','Pièces jointes (transfers/ séparées par virgules)','text'],['credential_id','Identifiant SMTP','credential']],
+ email:[['host','Serveur SMTP (facultatif si renseigné dans le coffre)','text'],['port','Port SMTP (facultatif)','number'],['ssl','Forcer SSL immédiat pour cette tâche','checkbox'],['from','Expéditeur (facultatif si défini dans le coffre)','text'],['to','Destinataires','text'],['subject','Objet','text'],['body','Corps texte','textarea'],['html_body','Corps HTML (optionnel)','textarea'],['attachments','Pièces jointes (transfers/ séparées par virgules)','text'],['credential_id','Connexion SMTP configurée dans le coffre','credential']],
  delay:[['seconds','Secondes (maximum 300)','number']],
  set_variable:[['name','Nom de la variable','text'],['value','Valeur','textarea']]
 };
@@ -129,6 +184,7 @@ const sidebarIcons={
  datacenters:'<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><circle cx="7" cy="6.5" r=".7"/><circle cx="7" cy="17.5" r=".7"/><path d="M11 6.5h7m-7 11h7"/>',
  users:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m1 4a5 5 0 0 1 4 5"/>',
  updates:'<path d="M12 3v12m-5-5 5 5 5-5M4 18v3h16v-3"/>',
+ ldap:'<circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 12h5m0 0V5h5m-5 7v7h5"/>',
  audit:'<path d="M7 3h9l4 4v14H7z"/><path d="M16 3v5h4M10 12h7m-7 4h7m-7-8h2"/>'
 };
 function decorateSidebar(){
@@ -209,53 +265,161 @@ function captureSchedule(v){
 }
 
 
-function credentialKindForStep(){
- const type=state.editor?.steps_json[state.selectedStep]?.type;
- return ({email:'smtp',ssh:'ssh',sftp:'ssh',ftp:'ftp',ansible:'ssh',matrix:'api',directory:'ldap',http:'api',proxmox:'api'})[type]||'generic';
-}
 function reloadCredentials(){return api('/credentials').then(r=>{state.credentials=r.items})}
 function openCredentialBrowser(field=null,action=''){
  if(state.editor)captureEditor();
  state.pickerField=field;state.credentialAction=action;state.pickerCredentialId=null;state.credentialSearch='';
  drawCredentialBrowser();
 }
+
+const connectionKinds=[
+ ['smtp','SMTP · Envoi d’e-mails'],['ssh','SSH / SFTP · Linux et Windows'],
+ ['ftp','FTP / FTPS · Transfert'],['ldap','LDAP / Active Directory'],
+ ['api','API · Token HTTP'],['matrix','Matrix · Bot'],['proxmox','Proxmox · API'],
+ ['generic','Identifiant générique']
+];
+const connectionSchemas={
+ smtp:[
+  ['host','Serveur SMTP / FQDN','text','smtp.example.org'],
+  ['port','Port TCP','number','587'],
+  ['tls_mode','Sécurité de transport','select','starttls',[['starttls','STARTTLS (port 587)'],['ssl','SSL/TLS direct (port 465)'],['none','Aucune (relais SMTP interne seulement)']]],
+  ['auth','Le serveur requiert une authentification','checkbox',true],
+  ['username','Identifiant SMTP','text','utilisateur@exemple.fr'],
+  ['password','Mot de passe SMTP','password',''],
+  ['from_address','Adresse expéditeur par défaut','email','noreply@exemple.fr']
+ ],
+ ssh:[
+  ['host','Serveur SSH / FQDN','text','server.example.org'],['port','Port SSH','number','22'],
+  ['username','Utilisateur SSH','text','root'],['password','Mot de passe SSH','password',''],
+  ['private_key','Clé privée OpenSSH','textarea',''],['passphrase','Phrase secrète de la clé','password','']
+ ],
+ ftp:[
+  ['host','Serveur FTP / FQDN','text','ftp.example.org'],['port','Port FTP / FTPS','number','21'],
+  ['tls_mode','Transport','select','explicit',[['explicit','FTPS explicite avec TLS'],['none','FTP non chiffré — à éviter']]],
+  ['username','Utilisateur FTP','text',''],['password','Mot de passe FTP','password','']
+ ],
+ ldap:[
+  ['uri','Adresse LDAP avec port','text','ldaps://ldap.example.org:636'],
+  ['starttls','Connexion LDAP avec STARTTLS','checkbox',false],
+  ['base_dn','Base DN','text','dc=example,dc=org'],
+  ['group_base_dn','Base DN des groupes','text','ou=Groups,dc=example,dc=org'],
+  ['username','DN du compte de liaison','text','cn=service,ou=Applications,dc=example,dc=org'],
+  ['password','Mot de passe de liaison','password','']
+ ],
+ api:[
+  ['base_url','URL de base HTTPS','text','https://api.example.org'],
+  ['test_path','Chemin GET de diagnostic (optionnel)','text','/health'],
+  ['token','Jeton API','password',''],
+  ['username','Utilisateur (si API Basic)','text',''],
+  ['password','Mot de passe (si API Basic)','password','']
+ ],
+ matrix:[
+  ['homeserver','URL du homeserver HTTPS','text','https://matrix.example.org'],
+  ['token','Jeton du bot Matrix','password',''],
+  ['username','Identifiant du bot (facultatif)','text','']
+ ],
+ proxmox:[
+  ['url','URL API Proxmox','text','https://pve.example.org:8006'],
+  ['username','Utilisateur / ID de token API','text','user@pve!origamitasks'],
+  ['token','Secret du jeton API','password','']
+ ],
+ generic:[
+  ['username','Utilisateur','text',''],['password','Mot de passe','password',''],
+  ['token','Jeton / clé API','password',''],['private_key','Clé privée SSH','textarea',''],
+  ['passphrase','Phrase secrète SSH','password','']
+ ]
+};
+function credentialProfileFields(kind,credential){
+ const profile=credential?.public||{},present=credential?.fields||[];
+ const schema=connectionSchemas[kind]||connectionSchemas.generic;
+ return '<div class="form-grid credential-protocol-fields">'+schema.map(([key,label,typ,fallback,choices])=>{
+  const existing=profile[key]??'';
+  const value=existing===''?fallback:existing;
+  let control='';
+  if(typ==='checkbox')control='<input type="checkbox" name="'+key+'" '+((typeof existing==='boolean'?existing:fallback)?'checked':'')+'>';
+  else if(typ==='select')control='<select name="'+key+'">'+option(choices,existing||fallback)+'</select>';
+  else if(typ==='textarea')control='<textarea name="'+key+'" rows="4" placeholder="'+e(present.includes(key)?'Déjà renseigné · vide = conserver':'Clé privée ou secret')+'"></textarea>';
+  else control='<input name="'+key+'" type="'+typ+'" '+(typ==='number'?'min="1" max="65535" ':'')
+    +' value="'+e(typ==='password'?'':existing||'')+'" placeholder="'+e(typ==='password'&&present.includes(key)?'Déjà renseigné · vide = conserver':fallback||'')+'" '
+    +(kind==='smtp'&&key==='host'?'required':'')+'>';
+  if(typ==='number')control='<input type="number" name="'+key+'" min="1" max="65535" value="'+e(existing||fallback||'')+'" required>';
+  const cls=typ==='textarea'?'field full':typ==='checkbox'?'field checkbox':'field';
+  return '<label class="'+cls+'" '+(kind==='smtp'&&['username','password'].includes(key)?'data-smtp-auth-field':'')+'><span>'+e(label)+'</span>'+control+'</label>';
+ }).join('')+'</div>'
+ +(kind==='smtp'?'<div class="notice">Pour le SMTP, configure le serveur, le port, la sécurité et l’authentification. La tâche utilise automatiquement ces paramètres lorsque sa connexion est sélectionnée.</div>':'');
+}
+function credentialKindForStep(){
+ const type=state.editor?.steps_json[state.selectedStep]?.type;
+ return ({email:'smtp',ssh:'ssh',sftp:'ssh',ftp:'ftp',ansible:'ssh',matrix:'matrix',directory:'ldap',http:'api',proxmox:'proxmox'})[type]||'generic';
+}
+function smtpAuthFieldsVisibility(){
+ const form=document.getElementById('credentialManageForm');
+ if(!form)return;
+ const enabled=form.elements.namedItem('auth')?.checked;
+ form.querySelectorAll('[data-smtp-auth-field]').forEach(el=>el.hidden=!enabled);
+}
 function drawCredentialBrowser(){
  const selected=state.credentials.find(c=>c.id===state.pickerCredentialId);
- const kinds=[['ssh','SSH / SFTP'],['smtp','SMTP'],['ftp','FTP / FTPS'],['api','API / Jeton'],['ldap','LDAP / AD'],['generic','Générique']];
+ const clone=state.credentialAction==='clone',edit=state.credentialAction==='edit';
  let body='';
  if(state.credentialAction){
-  const clone=state.credentialAction==='clone',edit=state.credentialAction==='edit';
-  const name=clone?(selected?.name||'')+' (copie)':(edit?selected?.name:'');
+  const kind=selected?.kind||credentialKindForStep();
+  const name=clone?(selected?.name||'')+' (copie)':(edit?selected?.name||'':'');
   body='<button class="btn tiny" data-action="credential-list">← Retour aux connexions</button>'
    +'<form id="credentialManageForm"><div class="form-grid">'
    +'<div class="field"><span>Nom de la connexion</span><input name="name" value="'+e(name)+'" maxlength="120" required></div>'
-   +'<div class="field"><span>Type de connexion</span><select name="kind" '+(clone?'disabled':'')+'>'+option(kinds,selected?.kind||credentialKindForStep())+'</select></div></div>'
-   +(clone?'<div class="notice">La copie conserve les secrets chiffrés sans les afficher. Tu pourras les modifier ensuite.</div>':
-    '<div class="form-grid">'
-    +'<div class="field"><span>Identifiant</span><input name="username" autocomplete="off" placeholder="'+(edit&&selected?.fields?.includes('username')?'Déjà renseigné · laisser vide pour conserver':'Utilisateur')+'"></div>'
-    +'<div class="field"><span>Mot de passe</span><input name="password" type="password" autocomplete="new-password" placeholder="'+(edit&&selected?.fields?.includes('password')?'Déjà renseigné · laisser vide pour conserver':'Mot de passe')+'"></div>'
-    +'<div class="field full"><span>Jeton / clé API</span><input name="token" type="password" autocomplete="new-password" placeholder="'+(edit&&selected?.fields?.includes('token')?'Déjà renseigné · laisser vide pour conserver':'Jeton')+'"></div>'
-    +'<div class="field full"><span>Clé SSH privée</span><textarea name="private_key" rows="3" placeholder="'+(edit&&selected?.fields?.includes('private_key')?'Clé existante conservée si vide':'Clé privée PEM / OpenSSH')+'"></textarea></div>'
-    +'<div class="field"><span>Passphrase SSH</span><input name="passphrase" type="password" autocomplete="new-password"></div></div>'
-    +'<div class="notice">'+(edit?'Seuls les champs renseignés seront remplacés. Les autres secrets restent chiffrés et inchangés.':'Les secrets sont stockés chiffrés dans le coffre et jamais dans le workflow.')+'</div>')
-   +'<button class="btn primary" type="submit">'+(clone?'Créer la copie':edit?'Enregistrer les modifications':'Créer et chiffrer la connexion')+'</button></form>';
+   +'<div class="field"><span>Protocole / type de connexion</span><select name="kind" '+(edit||clone?'disabled':'')+'>'+option(connectionKinds,kind)+'</select></div></div>'
+   +(clone?'<div class="notice">La copie conserve les paramètres et secrets chiffrés. Aucune valeur sensible n’est affichée.</div>':
+    '<div id="credentialProfile">'+credentialProfileFields(kind,edit?selected:null)+'</div>'
+    +'<div class="hint">Les mots de passe et jetons restent masqués ; laisser ces champs vides en modification conserve leurs valeurs.</div>')
+   +'<div class="tool-row" style="margin-top:16px"><button class="btn primary" type="submit">'+(clone?'Cloner cette connexion':edit?'Enregistrer les modifications':'Créer et chiffrer la connexion')+'</button>'+(edit?'<button class="btn" type="button" data-action="credential-test" data-id="'+selected.id+'">Tester la connexion enregistrée</button>':'')+'</div>'+(edit?'<p class="hint">Le test utilise les paramètres déjà enregistrés : enregistrer d’abord les éventuelles modifications.</p>':'')+'</form>';
  }else{
-  body='<div class="tool-row"><input id="credentialSearch" placeholder="Rechercher une connexion (nom, type…)" value="'+e(state.credentialSearch||'')+'">'
+  const target=state.pickerField?credentialKindForStep():null;
+  body='<div class="tool-row"><input id="credentialSearch" placeholder="Rechercher une connexion (nom, type, hôte…)" value="'+e(state.credentialSearch||'')+'">'
    +'<button class="btn primary" data-action="credential-new">＋ Nouvelle connexion</button></div>'
+   +(target?'<p class="hint">Connexions conseillées pour cette tâche : '+e(connectionKinds.find(x=>x[0]===target)?.[1]||target)+'. Les anciennes connexions API ou génériques restent utilisables.</p>':'')
    +'<div class="credential-list">'+(state.credentials.map(c=>{
-      const chosen=state.editor?.steps_json[state.selectedStep]?.config?.[state.pickerField]===c.id;
-      return '<div class="credential-entry" data-credential-search="'+e((c.name+' '+c.kind).toLowerCase())+'"><div><b>'+e(c.name)+'</b><p class="hint">'+e(c.kind.toUpperCase())+' · '+e((c.fields||[]).join(', ')||'secret')+' · #'+c.id+'</p></div>'
-       +'<div class="credential-actions">'+(state.pickerField?'<button class="btn tiny primary" data-action="credential-select" data-id="'+c.id+'">Sélectionner</button>':'')
+      const compatible=!target||c.kind===target||c.kind==='generic'||(['matrix','proxmox'].includes(target)&&c.kind==='api');
+      return '<div class="credential-entry" data-credential-search="'+e((c.name+' '+c.kind+' '+(c.public?.host||c.public?.uri||c.public?.url||'')).toLowerCase())+'">'
+       +'<div><b>'+e(c.name)+'</b><p class="hint">'+e(c.kind.toUpperCase())+' · '+e(c.public?.host||c.public?.uri||c.public?.url||'')+' · #'+c.id+'</p></div>'
+       +'<div class="credential-actions">'+(state.pickerField?'<button class="btn tiny primary" data-action="credential-select" data-id="'+c.id+'" '+(compatible?'':'disabled title="Protocole non compatible"')+'>Sélectionner</button>':'')
+       +'<button class="btn tiny" data-action="credential-test" data-id="'+c.id+'">Tester</button>'
        +'<button class="btn tiny" data-action="credential-edit" data-id="'+c.id+'">Modifier</button>'
        +'<button class="btn tiny" data-action="credential-clone" data-id="'+c.id+'">Cloner</button>'
        +'<button class="btn tiny danger" data-action="credential-remove" data-id="'+c.id+'">Supprimer</button></div></div>';
-    }).join('')||'<p class="hint">Aucune connexion. Créez un secret pour cette tâche.</p>')+'</div>';
+    }).join('')||'<p class="hint">Aucune connexion. Crée un profil adapté au protocole.</p>')+'</div>';
  }
  openLayer('credentialLayer',state.pickerField?'Choisir une connexion sécurisée':'Connexions du coffre-fort',body);
  filterCredentialRows();
+ smtpAuthFieldsVisibility();
 }
 function filterCredentialRows(){
- $('#credentialLayer [data-credential-search]').forEach(row=>row.hidden=!(row.dataset.credentialSearch||'').includes((state.credentialSearch||'').toLowerCase()));
+ $$('#credentialLayer [data-credential-search]').forEach(row=>{
+  row.hidden=!(row.dataset.credentialSearch||'').includes((state.credentialSearch||'').toLowerCase());
+ });
+}
+
+async function testCredentialConnection(id,button){
+ const entry=state.credentials.find(c=>c.id===id);
+ if(!entry)return toast('Connexion introuvable',false);
+ if(button)button.disabled=true;
+ try{
+  const result=await api('/credentials/'+id+'/test','POST');
+  const rows=(result.checks||[]).map(item=>{
+   const success=item.status==='success';
+   return '<div class="connection-test-row"><span class="connection-test-mark '+(success?'passed':'untested')+'">'+(success?'✓':'—')+'</span><div><strong>'+e(item.name)+'</strong><p class="hint">'+e(item.detail)+'</p></div></div>';
+  }).join('');
+  openLayer('credentialTestLayer','Diagnostic · '+entry.name,
+    '<div class="notice">'+e(result.message||'Test effectué')+'</div>'
+    +'<div class="connection-test-list">'+rows+'</div>'
+    +'<p class="hint">Ces diagnostics ne lancent aucune commande SSH, aucun transfert, aucun email et aucune écriture LDAP. Les contrôles dépendent du protocole.</p>'
+    +'<div class="tool-row"><button class="btn primary" data-action="layer-close" data-layer="credentialTestLayer">Fermer</button></div>');
+ }catch(ex){
+  openLayer('credentialTestLayer','Échec du test · '+entry.name,
+   '<div class="notice error">'+e(ex.message)+'</div>'
+   +'<p class="hint">Vérifier la cible, les certificats, les autorisations réseau et le compte utilisé. Aucun secret n’est affiché.</p>'
+   +'<div class="tool-row"><button class="btn" data-action="layer-close" data-layer="credentialTestLayer">Fermer</button></div>');
+ }finally{if(button)button.disabled=false}
 }
 function credentialSelected(id){
  const step=state.editor?.steps_json[state.selectedStep];
@@ -305,7 +469,7 @@ async function saveEditor(){captureEditor();const j=state.editor;if(!j.name.trim
 async function runJob(id){try{const r=await api('/jobs/'+id+'/run','POST');toast('Exécution #'+r.run_id+' mise en file');await refresh();showPage('runs');await openRun(r.run_id)}catch(ex){toast(ex.message,false)}}
 async function openRun(id){try{const r=await api('/runs/'+id);state.selectedRun=r;modal('Exécution #'+r.id+' — '+e(r.job_name),`<div class="tool-row">${labelStatus(r.status)}<span class="hint">Déclenché par ${e(r.requested_by)} · ${dt(r.queued_at)}</span></div>${r.error?`<div class="notice error">${e(r.error)}</div>`:''}<h3>Résultats par étape</h3>${r.steps.map(s=>`<div class="step-log"><div class="step-header">${labelStatus(s.status)}<b>${e(s.name)}</b><span class="muted">${e(s.type)} · essai ${s.attempt} · code ${s.exit_code??'—'}</span></div><pre>${e(s.output||'(aucune sortie)')}</pre></div>`).join('')||'<p class="muted">Exécution en attente. Réactualisez dans quelques secondes.</p>'}`,`<button class="btn" data-action="run-detail" data-id="${id}">↻ Actualiser</button><button class="btn primary" data-action="modal-close">Fermer</button>`,true)}catch(ex){toast(ex.message,false)}}
 async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit')).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
-function bindLocal(){hydrateAdmins()}
+function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP()}
 async function refresh(){await load();render()}
 async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='layer-close'){closeLayer(b.dataset.layer);return}
  if(a==='folder-manage'){foldersBrowser();return}
@@ -325,27 +489,50 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='credential-list'){state.credentialAction='';state.pickerCredentialId=null;drawCredentialBrowser();return}
  if(a==='credential-edit'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='edit';drawCredentialBrowser();return}
  if(a==='credential-clone'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='clone';drawCredentialBrowser();return}
+ if(a==='credential-test'){
+  await testCredentialConnection(id,b);return
+ }
  if(a==='credential-remove'){if(!confirm('Supprimer définitivement cette connexion ? Une connexion utilisée par un workflow ne pourra pas être supprimée.'))return;await api('/credentials/'+id,'DELETE');await reloadCredentials();drawCredentialBrowser();if(state.page==='vault')render();toast('Connexion supprimée');return}
  if(a==='group-browser'){await openGroupBrowser(b.dataset.role);return}
  if(a==='group-toggle'){const arr=state.editor.acl_json[state.groupRole]||[],group=b.dataset.name.toLowerCase();state.editor.acl_json[state.groupRole]=arr.includes(group)?arr.filter(x=>x!==group):[...arr,group];drawGroupBrowser();return}
  if(a==='group-done'){closeLayer('groupLayer');renderEditor();return}
+ if(a==='ldap-test'){
+  const data=readLDAPForm(),target=document.getElementById('ldapTestResult');
+  if(target)target.textContent='Test LDAP en cours…';
+  try{const result=await api('/admin/ldap/test','POST',data);
+   if(target)target.innerHTML='<span class="status success">Test réussi</span> '+e(result.message)+' · '+result.group_sample_count+' groupe(s) échantillonnés'+(result.user_tested?' · Utilisateur '+(result.user_found?'trouvé':'introuvable'):'');
+  }catch(ex){if(target)target.innerHTML='<div class="notice error">'+e(ex.message)+'</div>'}return
+ }
  if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-step'){captureEditor();state.editor.steps_json.push(addStep());state.selectedStep=state.editor.steps_json.length-1;renderEditor();return}if(a==='step-up'||a==='step-down'){captureEditor();const arr=state.editor.steps_json,i=state.selectedStep,j=i+(a==='step-up'?-1:1);if(j>=0&&j<arr.length){[arr[i],arr[j]]=[arr[j],arr[i]];state.selectedStep=j}renderEditor();return}if(a==='delete-step'){captureEditor();if(state.editor.steps_json.length<=1)return toast('Un workflow doit conserver une étape dans cet éditeur',false);const removed=state.editor.steps_json.splice(state.selectedStep,1)[0];state.editor.steps_json.forEach(x=>{for(const edge of ['on_success','on_failure'])if(x[edge]===removed.id)x[edge]=''});state.selectedStep=Math.min(state.selectedStep,state.editor.steps_json.length-1);renderEditor();return}if(a==='delete-job'){if(!confirm('Supprimer définitivement ce workflow ? Son historique sera conservé.'))return;await api('/jobs/'+id,'DELETE');closeModal();toast('Workflow supprimé');await refresh();showPage('jobs');return}if(a==='delete-credential'){if(!confirm('Supprimer ce secret ? Les workflows qui l’utilisent ne pourront plus s’authentifier.'))return;await api('/credentials/'+id,'DELETE');toast('Secret supprimé');await refresh();return}if(a==='refresh'){await refresh();return}if(a==='update-request'){if(b.dataset.value==='apply'&&!confirm('Installer le dernier commit de la branche Git autorisée et redémarrer les services ?'))return;await api('/updates/request','POST',{action:b.dataset.value});toast('Demande envoyée au service de maintenance');hydrateAdmins();return}if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
- if(ev.target.id==='credentialManageForm'){
-  ev.preventDefault();const f=new FormData(ev.target),action=state.credentialAction,id=state.pickerCredentialId;
-  try{
-   let result;
-   if(action==='clone'){result=await api('/credentials/'+id+'/clone','POST',{name:f.get('name')})}
-   else{
-    const payload={};for(const key of ['username','password','token','private_key','passphrase'])if(String(f.get(key)||'').trim())payload[key]=f.get(key);
-    result=await api(action==='edit'?'/credentials/'+id:'/credentials',action==='edit'?'PUT':'POST',{name:f.get('name'),kind:f.get('kind'),payload});
-   }
-   await reloadCredentials();toast('Connexion enregistrée');
-   if(state.editor&&state.pickerField&&result?.id){credentialSelected(result.id)}
-   else{state.credentialAction='';state.pickerCredentialId=null;drawCredentialBrowser();if(state.page==='vault')render()}
-  }catch(ex){toast(ex.message,false)}return
+ if(ev.target.id==='ldapAdminForm'){ev.preventDefault();
+  try{const data=readLDAPForm();await api('/admin/ldap','PUT',data.settings);toast('Configuration LDAP enregistrée');await hydrateLDAP()}
+  catch(ex){toast(ex.message,false)}return
  }
  
+ if(ev.target.id==='credentialManageForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),action=state.credentialAction,id=state.pickerCredentialId,kind=String(f.get('kind')||state.credentials.find(c=>c.id===id)?.kind||'generic');
+  try{
+   let result;
+   if(action==='clone')result=await api('/credentials/'+id+'/clone','POST',{name:f.get('name')});
+   else{
+    const payload={};
+    for(const [key,label,typ] of (connectionSchemas[kind]||connectionSchemas.generic)){
+      if(typ==='checkbox'){payload[key]=f.has(key);continue}
+      const value=String(f.get(key)??'').trim();
+      if(!value)continue;
+      payload[key]=typ==='number'?Number(value):value;
+    }
+    result=await api(action==='edit'?'/credentials/'+id:'/credentials',action==='edit'?'PUT':'POST',
+                     {name:f.get('name'),kind,payload});
+   }
+   await reloadCredentials();toast('Connexion sécurisée enregistrée');
+   if(state.editor&&state.pickerField&&result?.id)credentialSelected(result.id);
+   else{state.credentialAction='';state.pickerCredentialId=null;drawCredentialBrowser();if(state.page==='vault')render()}
+  }catch(ex){toast(ex.message,false)}
+  return
+ }
  if(ev.target.id==='folderCreateForm'){
   ev.preventDefault();const f=new FormData(ev.target);
   try{const r=await api('/folders','POST',{parent:f.get('parent'),name:f.get('name')});state.folderSelected=r.path;await reloadFolders();drawFolderBrowser();toast('Dossier créé')}catch(ex){toast(ex.message,false)}return
@@ -361,8 +548,18 @@ async function handleSubmit(ev){
  if(ev.target.id==='agentDeployForm'){ev.preventDefault();const f=new FormData(ev.target);if(!f.get('approved'))return toast('Confirmation requise',false);try{const r=await api('/agents/deploy','POST',{name:f.get('name')||f.get('host'),host:f.get('host'),port:Number(f.get('port')||22),platform:f.get('platform'),group:f.get('group'),credential_id:Number(f.get('credential_id')),approved:true});closeModal();toast('Agent #'+r.id+' : installation envoyée');await refresh()}catch(ex){toast(ex.message,false)}return}
  if(ev.target.id==='datacenterForm'){ev.preventDefault();const f=new FormData(ev.target);try{await api('/datacenters','POST',{name:f.get('dc_name'),url:f.get('dc_url'),credential_id:Number(f.get('dc_credential'))});closeModal();toast('Datacenter ajouté');await refresh()}catch(ex){toast(ex.message,false)}return}if(ev.target.id==='loginForm'){ev.preventDefault();const form=new FormData(ev.target);$('#authError').textContent='';try{await api('/login','POST',{username:form.get('username'),password:form.get('password')});const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#userAvatar').textContent=initials();$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);await refresh();showPage('dashboard')}catch(ex){$('#authError').textContent=ex.message}}else if(ev.target.id==='credentialForm'){ev.preventDefault();const f=new FormData(ev.target);const payload={};for(const k of ['username','password','token','private_key','passphrase'])if(f.get(k)?.trim())payload[k]=f.get(k);try{await api('/credentials','POST',{name:f.get('name'),kind:f.get('kind'),payload});closeModal();toast('Secret chiffré et enregistré');await refresh()}catch(ex){toast(ex.message,false)}}}
 function initTheme(){let theme=localStorage.getItem('origami-theme')||'dark';document.body.className='theme-'+theme;$('#themeToggle').textContent={dark:'☾',light:'☀',cyber:'✧'}[theme]||'☾'}
-async function bootstrap(){initTheme();decorateSidebar();try{const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);$('#userAvatar').textContent=initials();await load();showPage('dashboard')}catch{$('#auth').hidden=false;$('#application').hidden=true}document.addEventListener('click',handleClick);document.addEventListener('submit',handleSubmit);document.addEventListener('input',ev=>{
+async function bootstrap(){document.addEventListener('submit',handleSubmit);try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initialisation:',ex)}try{const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);$('#userAvatar').textContent=initials();await load();showPage('dashboard')}catch{$('#auth').hidden=false;$('#application').hidden=true}document.addEventListener('click',handleClick);document.addEventListener('input',ev=>{
  if(ev.target.id==='credentialSearch'){state.credentialSearch=ev.target.value;filterCredentialRows()}
  if(ev.target.id==='groupSearch'){state.groupQuery=ev.target.value;clearTimeout(state.groupTimer);state.groupTimer=setTimeout(searchGroups,250)}
- if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',ev=>{if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config={};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
+ if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',ev=>{
+ if(ev.target.name==='kind'&&ev.target.closest('#credentialManageForm')){
+  document.getElementById('credentialProfile').innerHTML=credentialProfileFields(ev.target.value);
+  smtpAuthFieldsVisibility();
+ }
+ if(ev.target.name==='auth'&&ev.target.closest('#credentialManageForm'))smtpAuthFieldsVisibility();
+ if(ev.target.name==='tls_mode'&&ev.target.closest('#credentialManageForm')&&ev.target.closest('form').elements.namedItem('kind')?.value==='smtp'){
+  const port=ev.target.closest('form').elements.namedItem('port');
+  if(port&&['25','465','587'].includes(port.value))port.value=ev.target.value==='ssl'?465:ev.target.value==='none'?25:587;
+ }
+ if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config={};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
 bootstrap();
