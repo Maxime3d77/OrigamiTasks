@@ -65,20 +65,33 @@ def import_ca(pem_text=None, der_base64=None):
     residue=_re.sub(r'-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----','',pem_text)
     if residue.strip():
         raise LDAPSettingsError("Le fichier PEM doit contenir uniquement des certificats")
+    accepted=[]
+    ignored_non_ca=0
+    subjects=[]
     for block in blocks:
         try:
             cert=x509.load_pem_x509_certificate(block.encode('ascii'))
-        except (ValueError,UnicodeError) as exc:
-            raise LDAPSettingsError("Certificat PEM illisible") from None
+        except (ValueError,UnicodeError):
+            raise LDAPSettingsError("Certificat PEM illisible dans la chaîne") from None
         try:
             basic=cert.extensions.get_extension_for_class(x509.BasicConstraints).value
-            if not basic.ca:
-                raise LDAPSettingsError("Importer un certificat d’autorité de certification (CA)")
+            is_ca=bool(basic.ca)
         except x509.ExtensionNotFound:
-            # Legacy CAs may lack this extension; TLS verification ultimately
-            # decides whether OpenSSL accepts the certificate chain.
-            pass
-    normal='\n'.join(blocks)+'\n'
+            # Legacy trust anchors can lack BasicConstraints. Only a
+            # self-issued legacy root may be retained without the CA extension.
+            is_ca=(cert.subject==cert.issuer)
+        if is_ca:
+            accepted.append(cert.public_bytes(Encoding.PEM).decode('ascii').strip())
+            subjects.append(cert.subject.rfc4514_string())
+        else:
+            ignored_non_ca+=1
+    if not accepted:
+        raise LDAPSettingsError(
+            "Ce fichier contient uniquement des certificats serveur (CA:FALSE). "
+            "Importer la CA émettrice, avec CA:TRUE."
+        )
+    # Keep public CA certificates only, even when a server leaf is bundled.
+    normal='\n'.join(accepted)+'\n'
     digest=hashlib.sha256(normal.encode()).hexdigest()
     root=config.DATA/'ldap-cas'
     root.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -92,7 +105,7 @@ def import_ca(pem_text=None, der_base64=None):
         else:
             with os.fdopen(fd,'w',encoding='ascii') as handle:
                 handle.write(normal)
-    return {'path':str(path),'fingerprint_sha256':digest,'certificate_count':len(blocks)}
+    return {'path':str(path),'fingerprint_sha256':digest,'certificate_count':len(accepted), 'ignored_non_ca_count':ignored_non_ca,'ca_subjects':subjects}
 
 
 def defaults():

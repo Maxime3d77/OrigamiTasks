@@ -70,7 +70,7 @@ function ldapSettingsForm(cfg){
  +'<form id="ldapAdminForm"><div class="form-grid">'
  +ldapCheck('Activer la connexion LDAP', 'enabled', cfg.enabled)
  +ldapCheck('Activer STARTTLS (ldap://, généralement port 389)', 'starttls', cfg.starttls)
- +'<div class="field full"><label class="field checkbox ldap-insecure-toggle"><input type="checkbox" name="skip_cert_verification" '+(cfg.skip_cert_verification?'checked':'')+' '+(!cfg.insecure_tls_allowed?'disabled':'')+'><span>Exception avancée : ignorer la vérification du certificat LDAP</span></label><small class="hint">DANGEREUX : le chiffrement demeure actif mais l’identité du serveur n’est plus vérifiée. Cela expose les identifiants à une interception. Autorisation hôte requise : ALLOW_INSECURE_LDAP_TLS=true ; désactivée par défaut.</small></div>'
+ +'<div class="field full"><label class="field checkbox ldap-insecure-toggle"><input type="checkbox" name="skip_cert_verification" '+(cfg.skip_cert_verification?'checked':'')+' '+(!cfg.insecure_tls_allowed?'disabled':'')+'><span>Exception avancée : ignorer la vérification du certificat LDAP</span></label><small class="hint">DANGEREUX : le chiffrement demeure actif mais l’identité du serveur n’est plus vérifiée. Cela expose les identifiants à une interception. La case est grisée tant que ALLOW_INSECURE_LDAP_TLS=true n’est pas défini dans le .env de l’hôte et le conteneur recréé. Préférer l’import de la CA pour conserver la validation TLS.</small></div>'
  +(cfg.skip_cert_verification?'<div class="notice error">Attention : la vérification des certificats LDAPS/STARTTLS est désactivée pour cet annuaire. Remettre une CA valide dès que possible.</div>':'')
  +ldapInput('Adresse de l’annuaire','uri',cfg.uri,'text','Ex. ldaps://serveur:636 ou ldap://serveur:389 avec STARTTLS')
  +ldapInput('DN du compte de liaison','bind_dn',cfg.bind_dn,'text','Compte de service en lecture seule')
@@ -637,6 +637,9 @@ function credentialTestFields(entry){
    +sshTargetPicker('server_id','',false)
    +'<div class="tool-row"><button type="button" class="btn tiny" data-action="ssh-goto-inventory">Gérer les serveurs / groupes</button></div></div>'
    +(publicData.host?'<div class="ssh-test-mode" data-ssh-test-mode="legacy" hidden><p class="hint">Ancien serveur du coffre : '+e(publicData.host)+'. Aucun enregistrement modifié.</p></div>':'')
+   +'<div class="ssh-trust-section"><button type="button" class="btn" data-action="ssh-hostkey-inspect">Vérifier la clé d’hôte du serveur</button>'
+   +'<p class="hint">Une clé privée importée d’un autre poste fonctionne normalement. Ce contrôle concerne uniquement la clé publique du SERVEUR, indépendante de ton compte SSH.</p>'
+   +'<div id="sshHostTrustPanel" aria-live="polite"></div></div>'
    +testOptionCheck('check_sftp','Tester également le sous-système SFTP','Lit uniquement les métadonnées du répertoire courant.')
    +testOptionCheck('check_whoami','Exécuter la commande de diagnostic whoami','Commande fixe, en lecture seule ; aucune autre commande autorisée.');
  }
@@ -759,6 +762,73 @@ async function submitCredentialTest(form){
   if(target)target.innerHTML='<div class="notice error"><strong>Échec du diagnostic</strong> — '+e(ex.message)+'</div>'
    +'<p class="hint">Vérifier le serveur, les identifiants, les certificats et les listes de destinations autorisées.</p>';
  }finally{if(submit)submit.disabled=false}
+}
+
+
+function sshTrustTarget(form){
+ const data=new FormData(form);
+ const mode=String(data.get('ssh_target_mode')||'manual');
+ if(mode==='manual'){
+  const host=String(data.get('manual_host')||'').trim();
+  if(!host)throw Error('Renseigner le FQDN du serveur à contrôler');
+  const port=Number(data.get('manual_port')||22);
+  if(!Number.isInteger(port)||port<1||port>65535)throw Error('Port SSH invalide');
+  return {host,port};
+ }
+ if(mode==='inventory'){
+  const id=Number(data.get('server_id'));
+  const record=state.sshInventory.servers.find(x=>x.id===id);
+  if(!record)throw Error('Sélectionner un serveur dans l’inventaire');
+  return {host:record.fqdn,port:record.port};
+ }
+ if(mode==='legacy'){
+  const cred=state.credentials.find(x=>x.id===Number(form.dataset.id));
+  const host=cred?.public?.host;
+  if(!host)throw Error('Cet identifiant n’a pas d’ancien serveur');
+  return {host,port:Number(cred.public.port||22)};
+ }
+ throw Error('Mode de sélection SSH invalide');
+}
+async function inspectSSHHostKey(){
+ const form=document.getElementById('credentialTestForm');
+ const panel=document.getElementById('sshHostTrustPanel');
+ if(!form||!panel)return;
+ panel.innerHTML='<div class="notice">Lecture de la clé publique SSH présentée par le serveur…</div>';
+ try{
+  const target=sshTrustTarget(form);
+  const result=await api('/ssh/host-key/inspect','POST',target);
+  const changed=result.status==='changed';
+  panel.innerHTML='<div class="ssh-trust-card" data-host="'+e(result.host)+'" data-port="'+e(result.port)+'" data-fingerprint="'+e(result.fingerprint)+'">'
+   +'<strong>Empreinte SSH du serveur</strong>'
+   +'<p class="hint">'+e(result.host)+':'+e(result.port)+' · '+e(result.algorithm)+'</p>'
+   +'<code class="ssh-trust-fingerprint">'+e(result.fingerprint)+'</code>'
+   +(result.trusted?'<div class="notice">Clé d’hôte déjà approuvée pour ce serveur.</div>':
+     changed?'<div class="notice error">ATTENTION : la clé d’hôte existante est différente. Aucune approbation possible via l’interface ; contrôler ce changement sur la console du serveur.</div>':
+     '<p class="hint">Comparer cette empreinte à celle vérifiée directement sur la console de la cible, par exemple avec <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256</code> (adapter l’algorithme si besoin).</p>'
+    +'<label class="field"><span>Recopier l’empreinte SHA256 vérifiée sur le serveur</span><input name="verified_fingerprint" autocomplete="off" spellcheck="false" placeholder="SHA256:..." maxlength="110"></label>'
+    +'<label class="ssh-trust-checkbox"><input type="checkbox" name="verified_out_of_band"><span>J’ai comparé l’empreinte avec celle obtenue directement sur le serveur, par un canal fiable.</span></label>'
+    +'<button type="button" class="btn primary" data-action="ssh-hostkey-approve">Approuver cette clé d’hôte</button>')
+   +'</div>';
+ }catch(ex){panel.innerHTML='<div class="notice error">'+e(ex.message)+'</div>'}
+}
+async function approveSSHHostKey(){
+ const card=document.querySelector('#sshHostTrustPanel .ssh-trust-card');
+ if(!card)return;
+ const typed=card.querySelector('[name="verified_fingerprint"]')?.value.trim();
+ const confirmed=card.querySelector('[name="verified_out_of_band"]')?.checked;
+ if(!confirmed||typed!==card.dataset.fingerprint)
+  return toast('Comparer sur la console du serveur puis recopier son empreinte SHA256 exacte',false);
+ const button=card.querySelector('[data-action="ssh-hostkey-approve"]');
+ if(button)button.disabled=true;
+ try{
+  const result=await api('/ssh/host-key/approve','POST',{
+   host:card.dataset.host,port:Number(card.dataset.port),
+   fingerprint:typed,verified_out_of_band:true
+  });
+  toast(result.already_trusted?'Clé d’hôte déjà approuvée':'Clé d’hôte SSH enregistrée dans known_hosts');
+  await inspectSSHHostKey();
+ }catch(ex){toast(ex.message,false)}
+ finally{if(button)button.disabled=false}
 }
 
 function credentialSelected(id){
@@ -968,6 +1038,8 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='credential-edit'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='edit';drawCredentialBrowser();return}
  if(a==='credential-clone'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='clone';drawCredentialBrowser();return}
  if(a==='credential-test'){openCredentialTestWizard(id);return}
+ if(a==='ssh-hostkey-inspect'){await inspectSSHHostKey();return}
+ if(a==='ssh-hostkey-approve'){await approveSSHHostKey();return}
  if(a==='credential-remove'){if(!confirm('Supprimer définitivement cette connexion ? Une connexion utilisée par un workflow ne pourra pas être supprimée.'))return;await api('/credentials/'+id,'DELETE');await reloadCredentials();drawCredentialBrowser();if(state.page==='vault')render();toast('Connexion supprimée');return}
  if(a==='group-browser'){await openGroupBrowser(b.dataset.role);return}
  if(a==='group-toggle'){const arr=state.editor.acl_json[state.groupRole]||[],group=b.dataset.name.toLowerCase();state.editor.acl_json[state.groupRole]=arr.includes(group)?arr.filter(x=>x!==group):[...arr,group];drawGroupBrowser();return}
@@ -995,7 +1067,12 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    const result=await api('/admin/ldap/ca','POST',payload);
    const input=document.querySelector('#ldapAdminForm [name="ca_cert"]');
    if(input)input.value=result.path;
-   toast(result.certificate_count+' certificat(s) CA importé(s). Enregistrer la configuration LDAP.');
+   toast(result.certificate_count+' certificat(s) CA importé(s).'+(result.ignored_non_ca_count?' '+result.ignored_non_ca_count+' certificat(s) serveur ignoré(s).':'')+' Enregistrer la configuration LDAP.');
+   const output=document.getElementById('ldapTestResult');
+   if(output)output.innerHTML='<div class="notice"><strong>CA importée</strong> : '+e(result.certificate_count)+' certificat(s) de confiance'
+     +(result.ignored_non_ca_count?' · '+e(result.ignored_non_ca_count)+' certificat(s) serveur ignoré(s)':'')
+     +'<p class="hint">'+(result.ca_subjects||[]).map(e).join(' · ')+'</p>'
+     +'<strong>Enregistrer la configuration</strong> puis lancer le test de connexion LDAP.</div>';
   }catch(ex){toast(ex.message,false)}
   finally{b.disabled=false;b.textContent=original}
   return
@@ -1141,6 +1218,10 @@ async function bootstrap(){document.addEventListener('submit',handleSubmit);
  },{passive:false});
 try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initialisation:',ex)}try{const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);$('#userAvatar').textContent=initials();await load();showPage('dashboard')}catch{$('#auth').hidden=false;$('#application').hidden=true}document.addEventListener('click',handleClick);document.addEventListener('input',ev=>{
  if(ev.target.id==='credentialSearch'){state.credentialSearch=ev.target.value;filterCredentialRows()}
+ if(ev.target.matches('#credentialTestForm [name="manual_host"]')){
+  const panel=document.getElementById('sshHostTrustPanel');
+  if(panel)panel.innerHTML='';
+ }
  if(ev.target.matches('[data-ssh-filter-search]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
  if(ev.target.id==='sshInventorySearch'){state.sshInventorySearch=ev.target.value;
   $('.ssh-server-row[data-ssh-search]').forEach(row=>row.hidden=!row.dataset.sshSearch.includes(ev.target.value.toLowerCase()));
@@ -1149,7 +1230,13 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',async ev=>{
  if(ev.target.matches('[data-ssh-filter-group]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
  if(ev.target.id==='sshInventoryGroupFilter'){state.sshInventoryGroupFilter=ev.target.value;render();}
- if(ev.target.closest('#credentialTestForm'))updateCredentialTestVisibility();
+ if(ev.target.closest('#credentialTestForm')){
+   if(ev.target.matches('[name="ssh_target_mode"],[name="manual_host"],[name="manual_port"],[name="server_id"],[data-ssh-filter-group]')){
+    const panel=document.getElementById('sshHostTrustPanel');
+    if(panel)panel.innerHTML='';
+   }
+   updateCredentialTestVisibility();
+  }
  if(ev.target.name==='kind'&&ev.target.closest('#credentialManageForm')){
   document.getElementById('credentialProfile').innerHTML=credentialProfileFields(ev.target.value);
   smtpAuthFieldsVisibility();

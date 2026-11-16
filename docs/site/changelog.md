@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.8-rc1 — 2026-11-16
+
+- **SSH:** browser-assisted public server host-key pinning, requiring independently verified SHA256 fingerprint confirmation. Changed existing keys remain blocked. User SSH private keys and vault identities are never altered by host-key approval.
+- **LDAP:** import mixed CRT/PEM chains containing CA and server-leaf certificates; store CAs only and report excluded non-CA certificates.
+- **UI:** readable import status, explanation of disabled TLS verification bypass, SSH/LDAP regression tests and bilingual documentation.
+
+
 
 ## 0.3.7-rc1 — 2026-11-16
 

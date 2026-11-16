@@ -205,3 +205,16 @@
  .graph-surface{height:50vh;min-height:290px;max-height:none}
  .ssh-test-mode .form-grid{grid-template-columns:minmax(0,1fr)}
 }
+
+/* SSH key onboarding uses an exact out-of-band fingerprint confirmation. */
+.ssh-trust-section{display:flex;flex-direction:column;align-items:flex-start;gap:9px;min-width:0;padding:11px 0}
+.ssh-trust-section>.hint{line-height:1.5;margin:0}
+.ssh-trust-section #sshHostTrustPanel{width:100%;max-width:100%;min-width:0}
+.ssh-trust-card{display:flex;flex-direction:column;align-items:flex-start;gap:11px;padding:14px;border:1px solid var(--stroke);border-radius:12px;background:var(--panel2);min-width:0}
+.ssh-trust-card>p{margin:0;line-height:1.55}
+.ssh-trust-fingerprint{max-width:100%;padding:8px 11px;background:var(--panel);border-radius:8px;overflow-wrap:anywhere;word-break:break-word;user-select:text}
+.ssh-trust-card .field{width:100%;min-width:0}
+.ssh-trust-card .field input{width:100%;max-width:100%;min-width:0;font-family:monospace}
+.ssh-trust-checkbox{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;align-items:start;min-width:0;font-size:12px;line-height:1.5;cursor:pointer}
+.ssh-trust-checkbox input[type=checkbox]{width:18px;min-width:18px;max-width:18px;height:18px;min-height:18px;margin:2px 0 0;padding:0;accent-color:var(--yellow)}
+.ssh-trust-checkbox span{min-width:0;overflow-wrap:anywhere}

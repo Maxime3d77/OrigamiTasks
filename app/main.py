@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys
 
 
 @asynccontextmanager
@@ -732,6 +732,39 @@ def summary(request:Request):
 
 
 # SSH inventory is separate from the encrypted login/key vault.
+# Manual host-key onboarding: admin-only, no private credentials sent.
+@app.post('/api/ssh/host-key/inspect')
+def inspect_ssh_host_key(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if set(payload)-{'host','port'}:
+        raise HTTPException(422,'Paramètres SSH inconnus')
+    try:
+        result=host_keys.inspect(payload.get('host'),payload.get('port',22))
+    except host_keys.HostKeyError as exc:
+        db.audit(user['username'],'ssh.hostkey.inspect.failed','ssh','lecture seule')
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.hostkey.inspect',result['host'],'empreinte publique consultée')
+    return result
+
+
+@app.post('/api/ssh/host-key/approve')
+def approve_ssh_host_key(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if set(payload)-{'host','port','fingerprint','verified_out_of_band'}:
+        raise HTTPException(422,'Paramètres de confiance SSH inconnus')
+    db.audit(user['username'],'ssh.hostkey.approve.attempt','ssh','confirmation requise')
+    try:
+        result=host_keys.approve(
+            payload.get('host'),payload.get('port',22),
+            payload.get('fingerprint'),payload.get('verified_out_of_band',False))
+    except host_keys.HostKeyError as exc:
+        db.audit(user['username'],'ssh.hostkey.approve.failed','ssh','empreinte non approuvée')
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.hostkey.approve',result['host'],
+             'empreinte publique '+result['fingerprint'])
+    return result
+
+
 @app.get('/api/ssh/inventory')
 def get_ssh_inventory(request:Request):
     security.require(request,role='admin')
