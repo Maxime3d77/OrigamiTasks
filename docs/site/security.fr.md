@@ -24,6 +24,8 @@ La configuration LDAP/AD enregistrée via l'administration est chiffrée en SQLi
 
 La configuration LDAP/AD enregistrée via l’administration est chiffrée en SQLite. Le test LDAP réalise uniquement un bind et des recherches en lecture seule, sans retourner le mot de passe. Le test SMTP ne transmet aucun message, vérifie les certificats TLS et refuse l’authentification sans TLS. Les tests sont réservés aux administrateurs ; le pare-feu sortant doit limiter les hôtes joignables.
 
+Les tests des connexions sont réservés aux administrateurs et audités. Aucun test ne lance de commande SSH, ne transfère de fichier, n’envoie d’e-mail ou ne modifie l’annuaire. Pour FTP en clair, aucun mot de passe n’est transmis. Les tests d’API génériques nécessitent une liste d’hôtes explicitement autorisés (`CONNECTION_TEST_ALLOWED_HOSTS`) et utilisent uniquement GET, sans suivre les redirections. Un succès HTTP ne garantit pas toujours la validité du jeton. Le filtrage réseau sortant reste indispensable.
+
 ## Mesures recommandées
 
 VLAN d'administration dédié, listes d'autorisation réseau, aucune socket Docker montée, terminaison TLS, revue de code des workflows, identités SSH limitées, aucun compte root/admin pour les tâches courantes, branche Git protégée, mises à jour PROD auditées, rotation des secrets et audit externe immuable.
