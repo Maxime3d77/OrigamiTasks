@@ -133,7 +133,7 @@ def ftp(values):
             return ok("ftp", "Serveur FTP joignable ; identifiants non testés sur une liaison en clair.",
                       [check("Connectivité FTP", "Bannière FTP reçue"),
                        untested("Authentification", "Non testée : le serveur ne propose pas TLS")])
-        except (OSError, EOFError, ftplib.all_errors) as exc:
+        except ftplib.all_errors as exc:
             raise ConnectionTestError("FTP : connexion impossible ("+type(exc).__name__+")") from None
         finally:
             try:
@@ -150,7 +150,7 @@ def ftp(values):
                   [check("Connectivité FTP", "Bannière reçue"),
                    check("TLS", "Canal de commande sécurisé et données protégées"),
                    check("Authentification", "Compte accepté")])
-    except (OSError, EOFError, ssl.SSLError, ftplib.all_errors) as exc:
+    except ftplib.all_errors as exc:
         raise ConnectionTestError("FTPS : échec du transport/TLS ou des identifiants ("+
                                   type(exc).__name__+")") from None
     finally:
