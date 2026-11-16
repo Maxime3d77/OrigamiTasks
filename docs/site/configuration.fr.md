@@ -11,12 +11,18 @@ Le fichier `.env.example` constitue la liste de référence des paramètres. Red
 | `ORIGAMI_EXECUTOR_WORKERS` | Nombre d'exécutions concurrentes | `2` au départ, une seule instance API |
 | `MAX_STEP_SECONDS` | Limite d'une étape | `1800` |
 | `MATRIX_ALLOWED_HOSTS` | Hôtes Matrix HTTPS autorisés | ex. `matrix.example.org` |
-| `PROXMOX_ALLOWED_HOSTS` | API Proxmox autorisées et tests de connexion | ex. `pve.example.org:8006` |
+| `PROXMOX_ALLOWED_HOSTS` | Ancienne liste des hôtes (connecteurs génériques historiques) | **Inutile pour les DC/token Proxmox enregistrés dans l'interface** |
 | `CONNECTION_TEST_ALLOWED_HOSTS` | Hôtes HTTPS autorisés pour les tests de jetons API génériques | Vide par défaut ; ajouter seulement des hôtes approuvés |
 | `PROXMOX_CA_CERT` | CA PEM de confiance montée dans le conteneur | Si CA interne |
 | `SSH_HOST_KEY_POLICY` | Acceptation des clés d'hôte | `accept-new` par défaut ; `strict` si contrôle manuel exigé |
 | `ALLOW_PROXMOX_ACTIONS` | Active les actions VM encadrées | `false` avant revue |
 | `GIT_ALLOWED_ORIGIN` | Origine Git autorisée au service de mise à jour | Dépôt protégé uniquement |
+
+## Administration Proxmox sans modification de `.env`
+
+Dans **Coffre-fort**, créer une connexion de type **Proxmox · API** avec `https://pve.example.org:8006`, un identifiant `user@realm!tokenname` et le secret de jeton. Dans **Administration → DC Proxmox**, cliquer **Déclarer un DC Proxmox**, choisir ce jeton et saisir **la même URL HTTPS**. L'hôte est immédiatement autorisé pour le diagnostic et l'inventaire, même si `PROXMOX_ALLOWED_HOSTS` est absent ou contient d'anciens serveurs : aucune modification du `.env`. L'interface permet de rechercher les DC dans un grand parc.
+
+Une URL différente de celle associée au jeton est rejetée pour éviter d'envoyer un token à un autre hôte. Le certificat HTTPS est toujours vérifié : si la CA interne n'est pas connue, fournir une chaîne valide via `PROXMOX_CA_CERT` ou le magasin de confiance. Les opérations VM sensibles restent protégées par les droits Proxmox **et** les contrôles d'OrigamiTasks : l'enregistrement d'un DC ne donne pas de privilèges supplémentaires au jeton.
 
 ## LDAP / Active Directory
 
