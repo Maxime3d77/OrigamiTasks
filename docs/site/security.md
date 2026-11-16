@@ -22,6 +22,8 @@ Credential editing and cloning are server-side operations: existing secret value
 
 LDAP/AD administration settings are encrypted in SQLite; service-account passwords are never returned to the browser. The LDAP test performs read-only searches. SMTP testing never sends mail, verifies TLS certificates, and rejects unencrypted password authentication. Only administrators can test outbound connections; restrict their destinations with an egress firewall.
 
+LDAP/AD settings saved via the admin UI are encrypted in SQLite. LDAP tests perform read-only bind/search operations and never return service credentials. SMTP tests do not send mail, verify TLS certificates and reject authentication without TLS. Only administrators can run connection tests; enforce network egress restrictions.
+
 ## Recommended deployment controls
 
 Dedicated management VLAN, upstream allow-lists, no Docker socket mounts, TLS termination, mandatory code review, restricted SSH principals, no administrator/root service account for routine jobs, protected Git branch, audited production updates, secrets rotation and immutable external audit log.
