@@ -88,8 +88,8 @@ def tick():
             nxt = None if mode == 'once' else check_schedule(schedule)
             # Single DB transaction ensures one enqueue per due schedule.
             con.execute('UPDATE jobs SET next_run_at=? WHERE id=?', (nxt, job['id']))
-            con.execute('INSERT INTO runs (job_id,job_name,steps_snapshot,trigger,requested_by,queued_at,status) VALUES (?,?,?,?,?,?,?)',
-                        (job['id'], job['name'], job['steps_json'], 'schedule', 'scheduler', db.now(), 'queued'))
+            con.execute('INSERT INTO runs (job_id,job_name,steps_snapshot,notification_json,trigger,requested_by,queued_at,status) VALUES (?,?,?,?,?,?,?,?)',
+                        (job['id'], job['name'], job['steps_json'], job['notification_json'], 'schedule', 'scheduler', db.now(), 'queued'))
 
 
 def loop():
