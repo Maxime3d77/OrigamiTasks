@@ -18,6 +18,8 @@ LDAP_VIEWER_GROUP = os.getenv('LDAP_VIEWER_GROUP', 'origamitasks-viewers')
 LDAP_USER_ATTRIBUTE = os.getenv('LDAP_USER_ATTRIBUTE', 'sAMAccountName')
 LDAP_STARTTLS = os.getenv('LDAP_STARTTLS', 'false').lower() == 'true'
 LDAP_CA_CERT = os.getenv('LDAP_CA_CERT', '')
+# Explicit, high-risk exception, independently gated on the host.
+ALLOW_INSECURE_LDAP_TLS = os.getenv('ALLOW_INSECURE_LDAP_TLS', 'false').lower() == 'true'
 LDAP_GROUP_BASE_DN = os.getenv('LDAP_GROUP_BASE_DN', LDAP_BASE_DN)
 LDAP_NESTED_GROUPS = os.getenv('LDAP_NESTED_GROUPS', 'false').lower() == 'true'
 GIT_BRANCH = os.getenv('GIT_BRANCH', 'main')
