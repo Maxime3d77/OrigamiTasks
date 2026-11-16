@@ -60,7 +60,7 @@ def ldap_authenticate(username, password):
         from ldap3.utils.conv import escape_filter_chars
         from ldap3.core.exceptions import LDAPException
         uri = settings['uri']
-        tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=settings['ca_cert'] or None)
+        tls = ldap_settings.tls_for(settings)
         server = Server(uri, tls=tls, connect_timeout=8)
         svc = Connection(server, user=settings['bind_dn'], password=settings['bind_password'],
                          auto_bind=not settings['starttls'], receive_timeout=8)
