@@ -70,7 +70,7 @@ function ldapSettingsForm(cfg){
  +'<form id="ldapAdminForm"><div class="form-grid">'
  +ldapCheck('Activer la connexion LDAP', 'enabled', cfg.enabled)
  +ldapCheck('Activer STARTTLS (ldap://, généralement port 389)', 'starttls', cfg.starttls)
- +'<div class="field full"><label class="field checkbox ldap-insecure-toggle"><input type="checkbox" name="skip_cert_verification" '+(cfg.skip_cert_verification?'checked':'')+' '+(!cfg.insecure_tls_allowed?'disabled':'')+'><span>Exception avancée : ignorer la vérification du certificat LDAP</span></label><small class="hint">DANGEREUX : le chiffrement demeure actif mais l’identité du serveur n’est plus vérifiée. Cela expose les identifiants à une interception. Autorisation hôte requise : ALLOW_INSECURE_LDAP_TLS=true ; désactivée par défaut.</small></div>'
+ +'<div class="field full"><label class="field checkbox ldap-insecure-toggle"><input type="checkbox" name="skip_cert_verification" '+(cfg.skip_cert_verification?'checked':'')+' '+(!cfg.insecure_tls_allowed?'disabled':'')+'><span>Exception avancée : ignorer la vérification du certificat LDAP</span></label><small class="hint">DANGEREUX : le chiffrement demeure actif mais l’identité du serveur n’est plus vérifiée. Cela expose les identifiants à une interception. La case est grisée tant que ALLOW_INSECURE_LDAP_TLS=true n’est pas défini dans le .env de l’hôte et le conteneur recréé. Préférer l’import de la CA pour conserver la validation TLS.</small></div>'
  +(cfg.skip_cert_verification?'<div class="notice error">Attention : la vérification des certificats LDAPS/STARTTLS est désactivée pour cet annuaire. Remettre une CA valide dès que possible.</div>':'')
  +ldapInput('Adresse de l’annuaire','uri',cfg.uri,'text','Ex. ldaps://serveur:636 ou ldap://serveur:389 avec STARTTLS')
  +ldapInput('DN du compte de liaison','bind_dn',cfg.bind_dn,'text','Compte de service en lecture seule')
@@ -1067,7 +1067,12 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    const result=await api('/admin/ldap/ca','POST',payload);
    const input=document.querySelector('#ldapAdminForm [name="ca_cert"]');
    if(input)input.value=result.path;
-   toast(result.certificate_count+' certificat(s) CA importé(s). Enregistrer la configuration LDAP.');
+   toast(result.certificate_count+' certificat(s) CA importé(s).'+(result.ignored_non_ca_count?' '+result.ignored_non_ca_count+' certificat(s) serveur ignoré(s).':'')+' Enregistrer la configuration LDAP.');
+   const output=document.getElementById('ldapTestResult');
+   if(output)output.innerHTML='<div class="notice"><strong>CA importée</strong> : '+e(result.certificate_count)+' certificat(s) de confiance'
+     +(result.ignored_non_ca_count?' · '+e(result.ignored_non_ca_count)+' certificat(s) serveur ignoré(s)':'')
+     +'<p class="hint">'+(result.ca_subjects||[]).map(e).join(' · ')+'</p>'
+     +'<strong>Enregistrer la configuration</strong> puis lancer le test de connexion LDAP.</div>';
   }catch(ex){toast(ex.message,false)}
   finally{b.disabled=false;b.textContent=original}
   return
