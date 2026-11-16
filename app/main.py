@@ -212,6 +212,32 @@ def validate_job(payload):
             raise HTTPException(422,'Type d’étape inconnu')
         if not isinstance(step.get('config'),dict) or len(json.dumps(step['config']))>50_000:
             raise HTTPException(422,'Configuration d’étape invalide')
+        connection_mode=step['config'].get('connection_mode')
+        if connection_mode is not None:
+            if connection_mode not in ('manual','vault'):
+                raise HTTPException(422,'Mode de connexion invalide')
+            typ=step.get('type')
+            kind={'email':'smtp','http':'api','ssh':'ssh','sftp':'ssh',
+                  'ansible':'ssh','ftp':'ftp','matrix':'matrix','directory':'ldap'}.get(typ)
+            if not kind:
+                raise HTTPException(422,'Mode coffre/manuel non applicable à cette tâche')
+            cid=step['config'].get('credential_id')
+            need_cred=(connection_mode=='vault' and typ not in ('directory',)) or (
+                typ in ('ssh','sftp','ansible','matrix'))
+            if need_cred and not cid:
+                raise HTTPException(422,'Sélectionner un identifiant '+kind.upper()+' du coffre')
+            if cid:
+                with db.session() as check_con:
+                    cred=check_con.execute("SELECT kind FROM credentials WHERE id=?",(cid,)).fetchone()
+                if not cred or cred['kind']!=kind:
+                    raise HTTPException(422,'Le compte sélectionné doit être une connexion '+kind.upper())
+            if connection_mode=='vault' and typ in ('ssh','sftp','ansible') and not step['config'].get('ssh_server_id'):
+                raise HTTPException(422,'Sélectionner un serveur SSH de l’inventaire')
+            if connection_mode=='manual' and typ=='email':
+                if not step['config'].get('host') or not step['config'].get('from'):
+                    raise HTTPException(422,'SMTP manuel : serveur et expéditeur obligatoires')
+            if connection_mode=='manual' and typ=='http' and not step['config'].get('url'):
+                raise HTTPException(422,'API manuelle : URL obligatoire')
         if step.get('type') in ('ssh','sftp','ansible') and step['config'].get('ssh_server_id'):
             try:
                 ssh_inventory.server(step['config']['ssh_server_id'])
@@ -297,8 +323,9 @@ def add_datacenter(payload:dict[str,Any],request:Request):
     except (integrations.IntegrationError,ValueError,TypeError) as exc:
         raise HTTPException(422,str(exc))
     with db.session() as con:
-        credential_exists=con.execute('SELECT 1 FROM credentials WHERE id=?',(credential_id,)).fetchone()
-        if not credential_exists: raise HTTPException(422,'Credential introuvable')
+        credential_exists=con.execute('SELECT kind FROM credentials WHERE id=?',(credential_id,)).fetchone()
+        if not credential_exists or credential_exists['kind']!='proxmox':
+            raise HTTPException(422,'Un jeton Proxmox du coffre-fort est obligatoire')
         try:
             cur=con.execute('INSERT INTO datacenters(name,url,credential_id,created_at) VALUES (?,?,?,?)',
                             (name,origin,credential_id,db.now()))
