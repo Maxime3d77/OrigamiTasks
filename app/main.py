@@ -2,6 +2,7 @@
 import json
 import re
 import secrets
+import ssl
 import hmac
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -202,10 +203,11 @@ def validate_job(payload):
         next_run = scheduler.check_schedule(schedule) if payload.get('enabled',True) else None
     except (ValueError,KeyError) as exc:
         raise HTTPException(422,'Planification: '+str(exc))
+    folder=folder_path(payload.get('folder','Général'))
     return {
         'name':name,
         'description':str(payload.get('description',''))[:2000],
-        'folder':str(payload.get('folder','Général')).strip()[:100] or 'Général',
+        'folder':folder,
         'tags_json':json.dumps([str(x).strip()[:40] for x in payload.get('tags_json',[]) if str(x).strip()][:20],ensure_ascii=False),
         'acl_json':json.dumps({k:[str(g).strip().lower()[:120] for g in acl.get(k,[]) if str(g).strip()] for k in ('view','run','edit')},ensure_ascii=False),
         'steps_json':json.dumps(steps,ensure_ascii=False),
@@ -310,6 +312,133 @@ def delete_datacenter(dc_id:int,request:Request):
         con.execute('DELETE FROM datacenters WHERE id=?',(dc_id,))
     db.audit(user['username'],'datacenter.delete',dc_id,row['name'])
     return {'ok':True}
+
+
+
+# Folders use stable slash-delimited paths; deleting a folder never deletes workflows.
+def folder_path(value):
+    path = str(value or '').strip()
+    parts = path.split('/')
+    if not path or len(path)>150 or len(parts)>12 or any(
+        not part or part in ('.','..') or len(part)>70 or any(ord(c)<32 for c in part)
+        for part in parts
+    ):
+        raise HTTPException(422,'Chemin de dossier invalide')
+    return path
+
+
+def known_folders(con):
+    paths={'Général'}
+    for row in con.execute('SELECT path FROM workflow_folders UNION SELECT folder AS path FROM jobs'):
+        raw=row['path']
+        if not raw: continue
+        parts=raw.split('/')
+        for i in range(1,len(parts)+1):
+            paths.add('/'.join(parts[:i]))
+    return paths
+
+
+@app.get('/api/folders')
+def list_folders(request:Request):
+    security.require(request)
+    with db.session() as con:
+        paths=known_folders(con)
+        counts={row['folder']:row['n'] for row in con.execute('SELECT folder,COUNT(*) AS n FROM jobs GROUP BY folder')}
+    return {'items':[{'path':p,'name':p.rsplit('/',1)[-1],
+            'parent':p.rsplit('/',1)[0] if '/' in p else '',
+            'count':counts.get(p,0),'depth':p.count('/')} for p in sorted(paths,key=lambda x:(x.count('/'),x.casefold()))]}
+
+
+@app.post('/api/folders')
+def create_folder(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    parent=str(payload.get('parent') or '').strip()
+    name=folder_path(payload.get('name',''))
+    if '/' in name: raise HTTPException(422,'Un nom de dossier ne peut pas contenir /')
+    with db.session() as con:
+        if parent:
+            parent=folder_path(parent)
+            if parent not in known_folders(con): raise HTTPException(404,'Dossier parent introuvable')
+        path=folder_path(parent+'/'+name if parent else name)
+        if path in known_folders(con): raise HTTPException(409,'Ce dossier existe déjà')
+        con.execute('INSERT INTO workflow_folders (path,created_at) VALUES (?,?)',(path,db.now()))
+    db.audit(user['username'],'folder.create',path)
+    return {'path':path}
+
+
+@app.put('/api/folders')
+def rename_folder(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    old=folder_path(payload.get('path',''))
+    name=folder_path(payload.get('name',''))
+    if '/' in name or old=='Général': raise HTTPException(422,'Renommage de dossier interdit')
+    prefix=old.rsplit('/',1)[0]+'/' if '/' in old else ''
+    new=folder_path(prefix+name)
+    with db.session() as con:
+        paths=known_folders(con)
+        if old not in paths: raise HTTPException(404,'Dossier introuvable')
+        subtree={p for p in paths if p==old or p.startswith(old+'/')}
+        destinations={new+p[len(old):] for p in subtree}
+        if (paths-subtree)&destinations: raise HTTPException(409,'Collision avec un dossier existant')
+        rows=con.execute('SELECT path FROM workflow_folders').fetchall()
+        for row in rows:
+            src=row['path']
+            if src in subtree:
+                con.execute('UPDATE workflow_folders SET path=? WHERE path=?',(new+src[len(old):],src))
+        con.execute("UPDATE jobs SET folder=?||substr(folder, length(?)+1) WHERE folder=? OR substr(folder,1,length(?)+1)=?||'/'",
+                    (new,old,old,old,old))
+    db.audit(user['username'],'folder.rename',old,new)
+    return {'path':new}
+
+
+@app.delete('/api/folders')
+def remove_folder(request:Request,path:str):
+    user=security.require(request,role='admin',mutate=True)
+    old=folder_path(path)
+    if old=='Général': raise HTTPException(422,'Dossier Général protégé')
+    with db.session() as con:
+        if old not in known_folders(con): raise HTTPException(404,'Dossier introuvable')
+        parent=old.rsplit('/',1)[0] if '/' in old else 'Général'
+        con.execute("UPDATE jobs SET folder=? WHERE folder=? OR substr(folder,1,length(?)+1)=?||'/'",(parent,old,old,old))
+        con.execute("DELETE FROM workflow_folders WHERE path=? OR substr(path,1,length(?)+1)=?||'/'",(old,old,old))
+    db.audit(user['username'],'folder.delete',old,'workflows déplacés vers '+parent)
+    return {'ok':True,'moved_to':parent}
+
+
+@app.get('/api/directory/groups')
+def lookup_directory_groups(request:Request,q:str=''):
+    security.require(request,role='admin')
+    q=q.strip()[:80]
+    with db.session() as con:
+        found={name.lower():{'name':name,'source':'Utilisateurs connus','dn':''}
+            for row in con.execute('SELECT groups_json FROM users')
+            for name in json.loads(row['groups_json'] or '[]') if name}
+    warning=''
+    if config.LDAP_URI and config.LDAP_GROUP_BASE_DN:
+        try:
+            from ldap3 import Server, Connection, SUBTREE, Tls
+            from ldap3.utils.conv import escape_filter_chars
+            if not (config.LDAP_URI.startswith('ldaps://') or config.LDAP_STARTTLS):
+                raise ValueError('LDAPS ou STARTTLS obligatoire')
+            server=Server(config.LDAP_URI,tls=Tls(validate=ssl.CERT_REQUIRED,ca_certs_file=config.LDAP_CA_CERT or None),connect_timeout=6)
+            conn=Connection(server,user=config.LDAP_BIND_DN,password=config.LDAP_BIND_PASSWORD,
+                            auto_bind=not config.LDAP_STARTTLS,receive_timeout=8)
+            if config.LDAP_STARTTLS:
+                conn.open()
+                if not conn.start_tls() or not conn.bind(): raise ValueError('Bind LDAP refusé')
+            filt='(|(objectClass=group)(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=posixGroup))'
+            if q:
+                filt='(&'+filt+'(cn=*'+escape_filter_chars(q)+'*))'
+            conn.search(config.LDAP_GROUP_BASE_DN,filt,SUBTREE,attributes=['cn','description'],size_limit=100)
+            for item in conn.entries:
+                name=str(item.cn.value or '') if 'cn' in item else ''
+                if name: found[name.lower()]={'name':name,'dn':item.entry_dn,'source':'LDAP'}
+            conn.unbind()
+        except Exception as exc:
+            warning='Recherche LDAP indisponible : '+type(exc).__name__
+    items=sorted((v for v in found.values() if not q or q.casefold() in v['name'].casefold()),
+                 key=lambda x:x['name'].casefold())[:100]
+    return {'items':items,'warning':warning}
 
 
 @app.get('/api/jobs')
@@ -484,8 +613,8 @@ def summary(request:Request):
 def list_credentials(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
-        items=con.execute('SELECT id,name,kind,created_at,updated_at FROM credentials ORDER BY name').fetchall()
-    return {'items':[dict(r) for r in items]}
+        items=con.execute('SELECT * FROM credentials ORDER BY name').fetchall()
+    return {'items':[dict(id=r['id'],name=r['name'],kind=r['kind'],created_at=r['created_at'],updated_at=r['updated_at'],fields=list(security.decrypt(r['encrypted_payload']).keys())) for r in items]}
 
 
 @app.post('/api/credentials')
@@ -508,12 +637,63 @@ def create_credential(payload:dict[str,Any],request:Request):
     return {'id':cur.lastrowid}
 
 
+
+@app.put('/api/credentials/{credential_id}')
+def update_credential(credential_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    name=str(payload.get('name','')).strip()
+    updates=payload.get('payload',{})
+    if not name or len(name)>120 or not isinstance(updates,dict) or len(json.dumps(updates))>30000:
+        raise HTTPException(422,'Champs du coffre invalides')
+    with db.session() as con:
+        row=con.execute('SELECT * FROM credentials WHERE id=?',(credential_id,)).fetchone()
+        if not row: raise HTTPException(404,'Identifiant introuvable')
+        values=security.decrypt(row['encrypted_payload'])
+        values.update({str(k):str(v) for k,v in updates.items() if v is not None and str(v)})
+        for key in payload.get('remove_fields',[]):
+            if key in ('username','password','token','private_key','passphrase'): values.pop(key,None)
+        if not values: raise HTTPException(422,'Au moins un champ secret est obligatoire')
+        try:
+            con.execute('UPDATE credentials SET name=?,kind=?,encrypted_payload=?,updated_at=? WHERE id=?',
+                        (name,str(payload.get('kind') or row['kind'])[:30],
+                         security.encrypt(values),db.now(),credential_id))
+        except db.sqlite3.IntegrityError:
+            raise HTTPException(409,'Ce nom de coffre existe déjà')
+    db.audit(user['username'],'vault.update',credential_id,name)
+    return {'ok':True}
+
+
+@app.post('/api/credentials/{credential_id}/clone')
+def clone_credential(credential_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    name=str(payload.get('name','')).strip()
+    if not name or len(name)>120: raise HTTPException(422,'Nom de copie invalide')
+    with db.session() as con:
+        row=con.execute('SELECT * FROM credentials WHERE id=?',(credential_id,)).fetchone()
+        if not row: raise HTTPException(404,'Identifiant introuvable')
+        try:
+            cur=con.execute('INSERT INTO credentials (name,kind,encrypted_payload,created_at,updated_at) VALUES (?,?,?,?,?)',
+                            (name,row['kind'],security.encrypt(security.decrypt(row['encrypted_payload'])),db.now(),db.now()))
+        except db.sqlite3.IntegrityError:
+            raise HTTPException(409,'Ce nom de coffre existe déjà')
+        new_id=cur.lastrowid
+    db.audit(user['username'],'vault.clone',new_id,'source #'+str(credential_id))
+    return {'id':new_id}
+
+
 @app.delete('/api/credentials/{credential_id}')
 def delete_credential(credential_id:int,request:Request):
     user=security.require(request,role='admin',mutate=True)
     with db.session() as con:
         exists=con.execute('SELECT name FROM credentials WHERE id=?',(credential_id,)).fetchone()
         if not exists: raise HTTPException(404,'Coffre introuvable')
+        if con.execute('SELECT 1 FROM datacenters WHERE credential_id=? LIMIT 1',(credential_id,)).fetchone():
+            raise HTTPException(409,'Identifiant utilisé par un datacenter')
+        jobs=con.execute('SELECT steps_json FROM jobs').fetchall()
+        if any(str(step.get('config',{}).get(k,''))==str(credential_id)
+               for row in jobs for step in json.loads(row['steps_json'])
+               for k in ('credential_id','password_credential_id')):
+            raise HTTPException(409,'Identifiant utilisé par un workflow')
         con.execute('DELETE FROM credentials WHERE id=?',(credential_id,))
     db.audit(user['username'],'vault.delete',credential_id,exists['name'])
     return {'ok':True}
