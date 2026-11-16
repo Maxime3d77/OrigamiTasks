@@ -173,7 +173,7 @@ def execute(step, ctx):
     # overrides the network target, but never places secrets inline.
     if mode == 'vault':
         hidden = {
-            'email': ('host','port','ssl','from'),
+            'email': ('host','port','ssl','tls_mode','from'),
             'ssh': ('host','port'),
             'sftp': ('host','port'),
             'ansible': ('host','port'),
@@ -311,9 +311,10 @@ def execute(step, ctx):
             media = mimetypes.guess_type(file.name)[0] or 'application/octet-stream'
             main_type,sub_type = media.split('/',1)
             msg.add_attachment(file.read_bytes(), maintype=main_type, subtype=sub_type, filename=file.name)
-        mode = 'ssl' if opts.get('ssl') else cred.get('tls_mode') or 'starttls'
+        mode = opts.get('tls_mode') if opts.get('tls_mode') in ('starttls','ssl','none') else (
+            'ssl' if opts.get('ssl') else cred.get('tls_mode') or 'starttls')
         profile = dict(cred, host=opts.get('host') or cred.get('host'),
-                       port=opts.get('port') or cred.get('port') or (465 if mode=='ssl' else 587),
+                       port=opts.get('port') or cred.get('port') or (465 if mode=='ssl' else 25 if mode=='none' else 587),
                        tls_mode=mode)
         try:
             conn=connections.open_smtp(profile,timeout=timeout)
