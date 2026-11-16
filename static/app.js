@@ -299,7 +299,7 @@ const FIELDS={
  ssh:[['ssh_server_id','Serveur cible (inventaire SSH)','ssh-target'],['host','Hôte manuel (ancienne configuration)','text'],['port','Port SSH','number'],['platform','Système distant','select:linux|windows'],['script','Script distant','textarea'],['timeout','Timeout (s)','number'],['credential_id','Identifiant SSH','credential']],
  sftp:[['ssh_server_id','Serveur cible (inventaire SSH)','ssh-target'],['host','Hôte manuel (ancienne configuration)','text'],['port','Port SSH','number'],['remote_path','Fichier distant','text'],['local_path','Fichier local (transfers/)','text'],['direction','Sens','select:get|put'],['credential_id','Identifiant','credential']],
  ftp:[['host','Hôte FTP','text'],['port','Port FTP','number'],['remote_path','Fichier distant','text'],['local_path','Fichier local (transfers/)','text'],['direction','Sens','select:get|put'],['allow_plaintext','Autoriser FTP non chiffré (déconseillé)','checkbox'],['credential_id','Identifiant','credential']],
- http:[['url','URL','text'],['method','Méthode','select:GET|POST|PUT|PATCH|DELETE'],['body','Corps','textarea'],['timeout','Timeout (s)','number'],['credential_id','Token Bearer','credential']],
+ http:[['url','URL complète (manuel)','text'],['path','Chemin relatif (coffre)','text'],['method','Méthode','select:GET|POST|PUT|PATCH|DELETE'],['body','Corps','textarea'],['timeout','Timeout (s)','number'],['credential_id','Token Bearer','credential']],
  file:[['action','Opération','select:list|read|write|copy|move|mkdir|delete'],['path','Chemin cible sous transfers/','text'],['source','Source copy/move sous transfers/','text'],['content','Contenu (write)','textarea'],['approved','Confirmer la suppression (delete)','checkbox']],
  email:[['host','Serveur SMTP (facultatif si renseigné dans le coffre)','text'],['port','Port SMTP (facultatif)','number'],['ssl','Forcer SSL immédiat pour cette tâche','checkbox'],['from','Expéditeur (facultatif si défini dans le coffre)','text'],['to','Destinataires','text'],['subject','Objet','text'],['body','Corps texte','textarea'],['html_body','Corps HTML (optionnel)','textarea'],['attachments','Pièces jointes (transfers/ séparées par virgules)','text'],['credential_id','Connexion SMTP configurée dans le coffre','credential']],
  delay:[['seconds','Secondes (maximum 300)','number']],
@@ -548,8 +548,8 @@ function drawCredentialBrowser(){
   body='<div class="tool-row"><input id="credentialSearch" placeholder="Rechercher une connexion (nom, type, hôte…)" value="'+e(state.credentialSearch||'')+'">'
    +'<button class="btn primary" data-action="credential-new">＋ Nouvelle connexion</button></div>'
    +(target?'<p class="hint">Connexions conseillées pour cette tâche : '+e(connectionKinds.find(x=>x[0]===target)?.[1]||target)+'. Les anciennes connexions API ou génériques restent utilisables.</p>':'')
-   +'<div class="credential-list">'+(state.credentials.map(c=>{
-      const compatible=!target||c.kind===target||c.kind==='generic'||(['matrix','proxmox'].includes(target)&&c.kind==='api');
+   +'<div class="credential-list">'+(state.credentials.filter(c=>!target||target==='generic'||c.kind===target||(['matrix','proxmox'].includes(target)&&c.kind==='api')).map(c=>{
+      const compatible=!target||target==='generic'||c.kind===target||(['matrix','proxmox'].includes(target)&&c.kind==='api');
       return '<div class="credential-entry" data-credential-search="'+e((c.name+' '+c.kind+' '+(c.public?.host||c.public?.uri||c.public?.url||'')).toLowerCase())+'">'
        +'<div><b>'+e(c.name)+'</b><p class="hint">'+e(c.kind.toUpperCase())+' · '+e(c.public?.host||c.public?.uri||c.public?.url||'')+' · #'+c.id+'</p></div>'
        +'<div class="credential-actions">'+(state.pickerField?'<button class="btn tiny primary" data-action="credential-select" data-id="'+c.id+'" '+(compatible?'':'disabled title="Protocole non compatible"')+'>Sélectionner</button>':'')
@@ -739,7 +739,60 @@ function drawGroupBrowser(){
  openLayer('groupLayer','Sélection des groupes — '+({view:'Lecture',run:'Exécution',edit:'Modification'}[state.groupRole]||''),body);
 }
 
-function stepConfigFields(step){return (FIELDS[step.type]||[]).map(([key,label,type])=>{const value=step.config?.[key]??'';if(type==='textarea')return `<div class="field full"><span>${label}</span><textarea name="cfg_${key}">${e(value)}</textarea></div>`;if(type==='checkbox')return field(label,'cfg_'+key,value,'checkbox');if(type==='agent'){return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.agents.filter(a=>a.enrolled&&!a.revoked).map(a=>[a.id,a.name+' ('+a.platform+')'])],value)}if(type==='datacenter'){return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.datacenters.map(d=>[d.id,d.name])],value)}if(type==='ssh-target')return sshTargetPicker('cfg_'+key,value,false);if(type==='credential')return credentialField(label,key,value);if(type.startsWith('select:'))return selectField(label,'cfg_'+key,type.slice(7).split('|').map(x=>[x,x]),value);return field(label,'cfg_'+key,value,type) }).join('')}
+const CONNECTION_STEP_TYPES={
+ email:{manual:['host','port','ssl','from'],vault:['credential_id']},
+ ssh:{manual:['host','port'],vault:['ssh_server_id']},
+ sftp:{manual:['host','port'],vault:['ssh_server_id']},
+ ansible:{manual:['host','port'],vault:['ssh_server_id']},
+ ftp:{manual:['host','port','allow_plaintext'],vault:[]},
+ matrix:{manual:['homeserver'],vault:[]},
+ directory:{manual:['uri','starttls','base_dn'],vault:[]},
+ http:{manual:['url'],vault:['path']}
+};
+const CONNECTION_MODE_HELP={
+ email:{vault:'Hôte, port, chiffrement et expéditeur fournis par le coffre SMTP.',
+ manual:'Paramètres SMTP du relais saisis ici, sans identifiant ni mot de passe inline. Pour SMTP authentifié, sélectionner le coffre.'},
+ ssh:{vault:'Choisir un serveur inventorié et une identité SSH du coffre.',
+ manual:'FQDN/port manuels, mais identité SSH du coffre obligatoire pour la clé ou le mot de passe.'},
+ sftp:{vault:'Cible d’inventaire et identité SSH du coffre.',manual:'FQDN/port manuels, secrets conservés au coffre.'},
+ ansible:{vault:'Runner inventorié et compte SSH du coffre.',manual:'Runner saisi manuellement, identité SSH du coffre.'},
+ ftp:{vault:'Hôte, port, sécurité et compte depuis le coffre FTP.',manual:'Hôte/port manuels ; compte FTP du coffre facultatif si connexion anonyme.'},
+ matrix:{vault:'Homeserver et token Matrix du coffre.',manual:'Homeserver manuel, token bot toujours issu du coffre.'},
+ directory:{vault:'Utiliser le coffre LDAP ou l’administration centrale.',manual:'Paramètres réseau LDAP personnalisés, secrets toujours dans le coffre.'},
+ http:{vault:'URL de base et token API depuis le coffre ; chemin relatif par étape.',manual:'URL saisie directement ; pour authentification, utiliser le coffre API.'}
+};
+function stepConnectionMode(step){
+ if(step.config?.connection_mode)return step.config.connection_mode;
+ return step.config?.credential_id?'vault':'manual';
+}
+function connectionModeWidget(step){
+ if(!CONNECTION_STEP_TYPES[step.type])return '';
+ const mode=stepConnectionMode(step),help=CONNECTION_MODE_HELP[step.type]||{};
+ return '<div class="connection-source-select"><div class="field"><span>Configuration de la connexion</span><select name="cfg_connection_mode">'
+  +option([['vault','Utiliser le coffre-fort (recommandé)'],['manual','Configuration réseau manuelle']],mode)
+  +'</select></div><p class="hint">'+e(help[mode]||'')+'</p></div>';
+}
+function stepConfigFields(step){
+ const schema=CONNECTION_STEP_TYPES[step.type],mode=stepConnectionMode(step);
+ const fields=FIELDS[step.type]||[];
+ return connectionModeWidget(step)+fields.filter(([key])=>{
+  if(!schema)return true;
+  if(key==='credential_id')return (step.type==='email'||step.type==='http')?mode==='vault':true;
+  if(schema.manual.includes(key))return mode==='manual';
+  if(schema.vault.includes(key))return mode==='vault';
+  return true;
+ }).map(([key,label,type])=>{
+  const value=step.config?.[key]??'';
+  if(type==='textarea')return '<div class="field full"><span>'+e(label)+'</span><textarea name="cfg_'+e(key)+'">'+e(value)+'</textarea></div>';
+  if(type==='checkbox')return field(label,'cfg_'+key,value,'checkbox');
+  if(type==='agent')return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.agents.filter(a=>a.enrolled&&!a.revoked).map(a=>[a.id,a.name+' ('+a.platform+')'])],value);
+  if(type==='datacenter')return selectField(label,'cfg_'+key,[['','— Sélectionner —'],...state.datacenters.map(d=>[d.id,d.name])],value);
+  if(type==='ssh-target')return sshTargetPicker('cfg_'+key,value,false);
+  if(type==='credential')return credentialField(label,key,value);
+  if(type.startsWith('select:'))return selectField(label,'cfg_'+key,type.slice(7).split('|').map(x=>[x,x]),value);
+  return field(label,'cfg_'+key,value,type);
+ }).join('');
+}
 function branches(step){const s=state.editor.steps_json;const targets=[['','Automatique (étape suivante)'],['END','Fin avec succès'],['FAIL','Fin avec échec'],...s.filter(x=>x.id!==step.id).map(x=>[x.id,x.name])];return `${selectField('Si réussite','on_success',targets,step.on_success||'')}${selectField('Si échec','on_failure',[['','Arrêt en échec'],...targets.slice(1)],step.on_failure||'')}`}
 function renderEditor(){const j=state.editor;const selected=j.steps_json[state.selectedStep];const body=`<div class="editor-meta">${field('Nom du workflow','job_name',j.name)}${folderEditorField(j.folder)}${field('Tags (séparés par des virgules)','job_tags',j.tags_json.join(', '))}</div><div class="editor-meta"><div class="field"><span>Description</span><input name="job_description" value="${e(j.description)}"></div>${scheduleFields(j.schedule_json||{})}</div><div class="editor-meta">${groupEditorField('Groupes lecture','view',j.acl_json.view)}${groupEditorField('Groupes exécution','run',j.acl_json.run)}${groupEditorField('Groupes modification','edit',j.acl_json.edit)}</div><div class="field checkbox"><input type="checkbox" name="job_enabled" ${j.enabled?'checked':''}><span>Workflow actif</span></div><div class="editor-columns"><section class="editor-graph"><div class="panel-title"><h2>Graphe d’exécution</h2><span class="hint">Succès / échec</span></div><div class="graph-legend"><span>Succès</span><span>Échec</span></div><div class="graph-surface" id="workflowGraph">${renderGraph(j.steps_json,state.selectedStep)}</div><div class="step-list">${j.steps_json.map((s,i)=>`<button class="step-pill ${i===state.selectedStep?'selected':''}" data-action="select-step" data-index="${i}">${i+1}. ${e(s.name)}<small>${e(kindLabel[s.type])}</small></button>`).join('')}</div></section><section class="editor-side"><div class="panel-title"><h2>Configurer l’étape ${state.selectedStep+1}</h2><span class="hint">${j.steps_json.length} étapes</span></div><div class="editor-actions"><button class="btn tiny" data-action="add-step">＋ Ajouter</button><button class="btn tiny" data-action="step-up">↑</button><button class="btn tiny" data-action="step-down">↓</button><button class="btn tiny danger" data-action="delete-step">Supprimer</button></div><div class="form-grid">${field('Nom de l’étape','step_name',selected.name)}${selectField('Type','step_type',kinds.map(k=>[k,kindLabel[k]]),selected.type)}</div><div class="subheading">Paramètres de la tâche</div><div class="step-config">${stepConfigFields(selected)}</div><div class="divider"></div><div class="subheading">Gestion des erreurs</div><div class="form-grid">${field('Nouvelles tentatives (0–5)','step_retries',selected.retries||0,'number')}${field('Attente entre tentatives (s)','step_retry_delay',selected.retry_delay??2,'number')}</div><div class="divider"></div><div class="subheading">Branches conditionnelles</div><div class="form-grid">${branches(selected)}</div><div class="divider"></div><div class="subheading">Condition avant exécution</div><div class="field checkbox"><input name="cond_enabled" type="checkbox" ${selected.condition?.enabled?'checked':''}><span>Activer cette condition</span></div><div class="form-grid">${selectField('Source','cond_source',[['last_status','État de la précédente étape'],['last_exit_code','Code retour précédent'],['last_output','Sortie précédente'],['variable','Variable']],selected.condition?.source||'last_status')}${selectField('Comparaison','cond_operator',[['equals','Égal'],['not_equals','Différent'],['contains','Contient'],['not_contains','Ne contient pas'],['exists','Existe']],selected.condition?.operator||'equals')}${field('Valeur attendue','cond_value',selected.condition?.value||'')}${field('Nom de la variable','cond_key',selected.condition?.key||'')}</div></section></div>`;
 modal(j.id?'Modifier le workflow':'Nouveau workflow',body,`<button class="btn" data-action="modal-close">Annuler</button>${j.id&&roleAdmin()?`<button class="btn danger" data-action="delete-job" data-id="${j.id}">Supprimer</button>`:''}<button class="btn primary" data-action="save-job">✓ Enregistrer</button>`,true);showScheduleMode()}
