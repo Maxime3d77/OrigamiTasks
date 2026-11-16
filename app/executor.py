@@ -13,7 +13,7 @@ import time
 from email.message import EmailMessage
 from pathlib import Path
 import httpx
-from . import db, config, security, integrations, agents, directory
+from . import db, config, security, integrations, agents, directory, connections, ldap_settings
 
 
 class StepError(Exception):
@@ -105,7 +105,7 @@ def _ssh(command, opts, cred, timeout):
     user = cred.get('username') or opts.get('username')
     if not user:
         raise StepError('Utilisateur SSH manquant')
-    kwargs = dict(hostname=opts['host'], port=int(opts.get('port') or 22), username=user,
+    kwargs = dict(hostname=opts.get('host') or cred.get('host'), port=int(opts.get('port') or cred.get('port') or 22), username=user,
                   timeout=min(timeout, 30), auth_timeout=min(timeout, 30), look_for_keys=False, allow_agent=False)
     if cred.get('private_key'):
         key = cred['private_key']
@@ -185,8 +185,8 @@ def execute(step, ctx):
         except (ValueError,TypeError) as exc:
             raise StepError('Agent : '+str(exc))
     elif typ == 'directory':
-        if not opts.get('credential_id'):
-            raise StepError('LDAP/AD : choisir un identifiant de coffre dédié')
+        if not opts.get('credential_id') and not ldap_settings.current()['enabled']:
+            raise StepError('LDAP/AD : choisir une connexion de coffre ou configurer Administration → LDAP')
         try:
             output = directory.execute(opts,cred)
         except (directory.DirectoryError,ValueError) as exc:
@@ -232,9 +232,15 @@ def execute(step, ctx):
         except httpx.RequestError as exc:
             raise StepError('HTTP : '+str(exc))
     elif typ == 'email':
+        if not (opts.get('host') or cred.get('host')):
+            raise StepError('SMTP : serveur manquant dans la tâche et le coffre')
+        if not (opts.get('from') or cred.get('from_address')):
+            raise StepError('SMTP : adresse expéditeur manquante')
+        if not opts.get('to'):
+            raise StepError('SMTP : destinataires manquants')
         msg = EmailMessage()
-        msg['From'] = opts['from']
-        msg['To'] = opts['to']
+        msg['From'] = opts.get('from') or cred.get('from_address') or ''
+        msg['To'] = opts.get('to') or ''
         msg['Subject'] = opts.get('subject', 'OrigamiTasks')
         msg.set_content(opts.get('body', ''))
         if opts.get('html_body'):
@@ -256,19 +262,23 @@ def execute(step, ctx):
             media = mimetypes.guess_type(file.name)[0] or 'application/octet-stream'
             main_type,sub_type = media.split('/',1)
             msg.add_attachment(file.read_bytes(), maintype=main_type, subtype=sub_type, filename=file.name)
-        host, port = opts['host'], int(opts.get('port') or 587)
-        if opts.get('ssl'):
-            conn = smtplib.SMTP_SSL(host, port, timeout=timeout)
-        else:
-            conn = smtplib.SMTP(host, port, timeout=timeout)
+        mode = 'ssl' if opts.get('ssl') else cred.get('tls_mode') or 'starttls'
+        profile = dict(cred, host=opts.get('host') or cred.get('host'),
+                       port=opts.get('port') or cred.get('port') or (465 if mode=='ssl' else 587),
+                       tls_mode=mode)
         try:
-            if not opts.get('ssl'):
-                conn.starttls()
-            if cred.get('username'):
-                conn.login(cred['username'], cred.get('password', ''))
+            conn=connections.open_smtp(profile,timeout=timeout)
+        except Exception as exc:
+            raise StepError('SMTP : échec de connexion/authentification ('+type(exc).__name__+')') from None
+        try:
             conn.send_message(msg)
+        except Exception as exc:
+            raise StepError('SMTP : échec d’envoi ('+type(exc).__name__+')') from None
         finally:
-            conn.quit()
+            try:
+                conn.quit()
+            except (OSError, smtplib.SMTPException):
+                conn.close()
         code, output = 0, 'Message envoyé à ' + opts['to']
     elif typ == 'file':
         action = str(opts.get('action') or '')
@@ -319,10 +329,10 @@ def execute(step, ctx):
             raise StepError('Action fichier inconnue')
     elif typ == 'ftp':
         # No plaintext FTP by default. Require explicit opt-in for legacy servers.
-        plain = bool(opts.get('allow_plaintext', False))
+        plain = bool(opts.get('allow_plaintext', False) or cred.get('tls_mode')=='none')
         client = ftplib.FTP() if plain else ftplib.FTP_TLS()
         try:
-            client.connect(opts['host'], int(opts.get('port') or 21), timeout=timeout)
+            client.connect(opts.get('host') or cred.get('host'), int(opts.get('port') or cred.get('port') or 21), timeout=timeout)
             client.login(cred.get('username') or opts.get('username', 'anonymous'), cred.get('password') or '')
             if not plain: client.prot_p()
             local = resolve_local(opts['local_path'])
