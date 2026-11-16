@@ -167,7 +167,8 @@ def ssh(values, options=None):
     client.load_system_host_keys()
     if config.KNOWN_HOSTS.is_file():
         client.load_host_keys(str(config.KNOWN_HOSTS))
-    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    from .ssh_keys import strict_host_key_policy, SSHUnknownHostKey
+    client.set_missing_host_key_policy(strict_host_key_policy())
     params = dict(hostname=host, port=_port(values.get("port"), 22), username=user,
                   timeout=TIMEOUT, auth_timeout=TIMEOUT, banner_timeout=TIMEOUT,
                   look_for_keys=False, allow_agent=False)
@@ -204,13 +205,15 @@ def ssh(values, options=None):
                 raise ConnectionTestError("SSH : whoami a échoué ou dépassé le délai")
             checks.append(check("Commande distante", "whoami terminé sans modification"))
         return ok("ssh", "Clé d’hôte et authentification SSH vérifiées.", checks)
+    except SSHUnknownHostKey as exc:
+        raise ConnectionTestError(str(exc)) from None
     except paramiko.BadHostKeyException:
         raise ConnectionTestError("SSH : empreinte d'hôte différente de la clé approuvée") from None
     except paramiko.AuthenticationException:
         raise ConnectionTestError("SSH : authentification refusée par le serveur") from None
     except paramiko.SSHException:
         raise ConnectionTestError(
-            "SSH : protocole/clé d'hôte non validé. Vérifier known_hosts et l'algorithme de clé."
+            "SSH : échec de négociation du protocole SSH ou algorithmes incompatibles. Clé d'hôte inconnue et empreinte différente sont signalées séparément."
         ) from None
     except (OSError, TimeoutError, EOFError):
         raise ConnectionTestError("SSH : hôte injoignable, sous-système indisponible ou délai dépassé") from None
