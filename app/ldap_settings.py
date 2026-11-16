@@ -1,6 +1,8 @@
 """Editable LDAP settings overlay: .env defaults, encrypted SQLite overrides, safe bind test."""
 import re
 import ssl
+import hashlib
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -15,6 +17,54 @@ BOOL = {'enabled', 'starttls', 'nested_groups'}
 
 class LDAPSettingsError(Exception):
     pass
+
+
+def import_ca(pem_text):
+    """Store a validated public CA PEM file in the persistent app-data volume.
+
+    Private keys are rejected; server certificate verification remains required.
+    The resulting path can be selected as LDAP_CA_CERT in the admin form.
+    """
+    if not isinstance(pem_text,str) or not 100<=len(pem_text)<=131072:
+        raise LDAPSettingsError("Certificat PEM invalide (128 Kio maximum)")
+    if 'PRIVATE KEY' in pem_text or '\x00' in pem_text:
+        raise LDAPSettingsError("Ne jamais importer une clé privée ; fournir uniquement la CA publique")
+    import re as _re
+    from cryptography import x509
+    blocks=_re.findall(r'-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----',pem_text)
+    if not 1<=len(blocks)<=10:
+        raise LDAPSettingsError("Importer de 1 à 10 certificats CA PEM")
+    residue=_re.sub(r'-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----','',pem_text)
+    if residue.strip():
+        raise LDAPSettingsError("Le fichier PEM doit contenir uniquement des certificats")
+    for block in blocks:
+        try:
+            cert=x509.load_pem_x509_certificate(block.encode('ascii'))
+        except (ValueError,UnicodeError) as exc:
+            raise LDAPSettingsError("Certificat PEM illisible") from None
+        try:
+            basic=cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+            if not basic.ca:
+                raise LDAPSettingsError("Importer un certificat d’autorité de certification (CA)")
+        except x509.ExtensionNotFound:
+            # Legacy CAs may lack this extension; TLS verification ultimately
+            # decides whether OpenSSL accepts the certificate chain.
+            pass
+    normal='\n'.join(blocks)+'\n'
+    digest=hashlib.sha256(normal.encode()).hexdigest()
+    root=config.DATA/'ldap-cas'
+    root.mkdir(parents=True,exist_ok=True,mode=0o700)
+    path=root/(digest+'.pem')
+    if not path.exists():
+        flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
+        try:
+            fd=os.open(path,flags,0o600)
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(fd,'w',encoding='ascii') as handle:
+                handle.write(normal)
+    return {'path':str(path),'fingerprint_sha256':digest,'certificate_count':len(blocks)}
 
 
 def defaults():
