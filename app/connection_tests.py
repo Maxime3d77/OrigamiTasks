@@ -229,10 +229,10 @@ def matrix(values):
 
 
 def proxmox(values):
-    """Read-only API version route: confirms valid token without VM actions."""
+    """Read-only access/permissions route: validates token without VM actions."""
     base = _allowed_origin(values.get("url"), config.PROXMOX_ALLOWED_HOSTS)
     try:
-        data = integrations.proxmox_request(base, values, "/api2/json/version",
+        data = integrations.proxmox_request(base, values, "/api2/json/access/permissions",
                                             timeout=TIMEOUT)
         if not isinstance(data, dict):
             raise ConnectionTestError("Proxmox : réponse API inattendue")
