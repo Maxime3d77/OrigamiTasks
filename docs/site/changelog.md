@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2-rc2 — 2026-11-16
+
+- Added **Test** action for all vault connection types, with a detailed read-only result dialog and per-check status.
+- SSH: strict known-host verification and authentication without remote commands. FTPS: TLS and login without file operations; plaintext FTP only checks reachability, never sending a password.
+- LDAP: TLS, bind, optional base read; Matrix: authenticated `whoami`; Proxmox: protected permission read. Generic HTTPS API: allowlisted GET only and explicit warning that HTTP 2xx does not necessarily prove token identity.
+- Added `CONNECTION_TEST_ALLOWED_HOSTS` for generic API diagnostics, protocol-specific regression tests, and updated English/French guidance.
+
+
 ## 0.3.2-rc1 — 2026-11-16
 
 - Added **Administration → LDAP / Active Directory** with encrypted live settings and read-only bind/group diagnostics.
