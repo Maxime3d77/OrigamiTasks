@@ -470,6 +470,18 @@ def put_admin_ldap(payload:dict[str,Any],request:Request):
     return ldap_settings.public(values)
 
 
+@app.post('/api/admin/ldap/ca')
+def upload_ldap_ca(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=ldap_settings.import_ca(payload.get('pem'))
+    except ldap_settings.LDAPSettingsError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ldap.ca.import',result['fingerprint_sha256'][:16],
+             str(result['certificate_count'])+' certificat(s) publics')
+    return result
+
+
 @app.post('/api/admin/ldap/test')
 def test_admin_ldap(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
