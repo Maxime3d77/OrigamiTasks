@@ -50,7 +50,7 @@ function jobs(){
   +(cards||empty('Aucun workflow','Sélectionnez un autre dossier ou créez votre première automatisation.'))+'</div></section></div>';
 }
 function runs(){return title('Journal d’exécution','Chaque événement, chaque branche et chaque sortie de script.')+`<div class="panel"><div class="panel-title"><h2>Historique (${state.runs.length})</h2><button class="btn tiny" data-action="refresh">↻ Actualiser</button></div>${runsTable(state.runs)}</div>`}
-function vault(){if(!roleAdmin())return title('Coffre-fort','Réservé aux administrateurs.')+`<div class="notice">Le coffre de secrets est accessible aux seuls administrateurs.</div>`;return title('Coffre-fort','Credentials chiffrés au repos. Les valeurs ne sont jamais renvoyées par l’API.','<button class="btn primary" data-action="new-credential">＋ Nouveau secret</button>')+`<div class="panel"><div class="panel-title"><h2>Identités et connexions</h2><span class="hint">${state.credentials.length} identifiants</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Type</th><th>Créé le</th><th></th></tr></thead><tbody>${state.credentials.map(c=>`<tr><td class="name-cell">◇ ${e(c.name)}</td><td>${e(c.kind)}</td><td class="muted">${dt(c.created_at)}</td><td><button class="btn tiny" data-action="credential-edit" data-id="${c.id}">Modifier</button> <button class="btn tiny" data-action="credential-clone" data-id="${c.id}">Cloner</button> <button class="btn tiny danger" data-action="delete-credential" data-id="${c.id}">Supprimer</button></td></tr>`).join('')}</tbody></table></div>${!state.credentials.length?empty('Coffre vide','Ajoutez un identifiant SSH, SFTP, SMTP ou API.'):''}</div><div class="notice">Les secrets sont chiffrés avec Fernet et la clé VAULT_KEY externe au dépôt. Pour les scripts, les valeurs de l'identifiant sélectionné sont fournies via ORIGAMI_USERNAME / ORIGAMI_PASSWORD / ORIGAMI_TOKEN. Un administrateur qui peut créer des scripts doit être considéré comme privilégié.</div>`}
+function vault(){if(!roleAdmin())return title('Coffre-fort','Réservé aux administrateurs.')+`<div class="notice">Le coffre de secrets est accessible aux seuls administrateurs.</div>`;return title('Coffre-fort','Credentials chiffrés au repos. Les valeurs ne sont jamais renvoyées par l’API.','<button class="btn primary" data-action="new-credential">＋ Nouveau secret</button>')+`<div class="panel"><div class="panel-title"><h2>Identités et connexions</h2><span class="hint">${state.credentials.length} identifiants</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Type</th><th>Créé le</th><th></th></tr></thead><tbody>${state.credentials.map(c=>`<tr><td class="name-cell">◇ ${e(c.name)}</td><td>${e(c.kind)}</td><td class="muted">${dt(c.created_at)}</td><td>${c.kind==="smtp"?`<button class="btn tiny" data-action="credential-test" data-id="${c.id}">Tester</button>`:""} <button class="btn tiny" data-action="credential-edit" data-id="${c.id}">Modifier</button> <button class="btn tiny" data-action="credential-clone" data-id="${c.id}">Cloner</button> <button class="btn tiny danger" data-action="delete-credential" data-id="${c.id}">Supprimer</button></td></tr>`).join('')}</tbody></table></div>${!state.credentials.length?empty('Coffre vide','Ajoutez un identifiant SSH, SFTP, SMTP ou API.'):''}</div><div class="notice">Les secrets sont chiffrés avec Fernet et la clé VAULT_KEY externe au dépôt. Pour les scripts, les valeurs de l'identifiant sélectionné sont fournies via ORIGAMI_USERNAME / ORIGAMI_PASSWORD / ORIGAMI_TOKEN. Un administrateur qui peut créer des scripts doit être considéré comme privilégié.</div>`}
 
 function ldapPage(){
  if(!roleAdmin())return title('Configuration LDAP','Réservée aux administrateurs');
@@ -265,10 +265,6 @@ function captureSchedule(v){
 }
 
 
-function credentialKindForStep(){
- const type=state.editor?.steps_json[state.selectedStep]?.type;
- return ({email:'smtp',ssh:'ssh',sftp:'ssh',ftp:'ftp',ansible:'ssh',matrix:'api',directory:'ldap',http:'api',proxmox:'api'})[type]||'generic';
-}
 function reloadCredentials(){return api('/credentials').then(r=>{state.credentials=r.items})}
 function openCredentialBrowser(field=null,action=''){
  if(state.editor)captureEditor();
@@ -467,6 +463,11 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='credential-list'){state.credentialAction='';state.pickerCredentialId=null;drawCredentialBrowser();return}
  if(a==='credential-edit'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='edit';drawCredentialBrowser();return}
  if(a==='credential-clone'){if(!document.getElementById('credentialLayer'))openCredentialBrowser();state.pickerCredentialId=id;state.credentialAction='clone';drawCredentialBrowser();return}
+ if(a==='credential-test'){
+  toast('Test de connexion SMTP en cours…');
+  try{const result=await api('/credentials/'+id+'/test','POST');toast(result.message)}
+  catch(ex){toast(ex.message,false)}return
+ }
  if(a==='credential-remove'){if(!confirm('Supprimer définitivement cette connexion ? Une connexion utilisée par un workflow ne pourra pas être supprimée.'))return;await api('/credentials/'+id,'DELETE');await reloadCredentials();drawCredentialBrowser();if(state.page==='vault')render();toast('Connexion supprimée');return}
  if(a==='group-browser'){await openGroupBrowser(b.dataset.role);return}
  if(a==='group-toggle'){const arr=state.editor.acl_json[state.groupRole]||[],group=b.dataset.name.toLowerCase();state.editor.acl_json[state.groupRole]=arr.includes(group)?arr.filter(x=>x!==group):[...arr,group];drawGroupBrowser();return}
@@ -486,20 +487,28 @@ async function handleSubmit(ev){
  }
  
  if(ev.target.id==='credentialManageForm'){
-  ev.preventDefault();const f=new FormData(ev.target),action=state.credentialAction,id=state.pickerCredentialId;
+  ev.preventDefault();
+  const f=new FormData(ev.target),action=state.credentialAction,id=state.pickerCredentialId,kind=String(f.get('kind')||state.credentials.find(c=>c.id===id)?.kind||'generic');
   try{
    let result;
-   if(action==='clone'){result=await api('/credentials/'+id+'/clone','POST',{name:f.get('name')})}
+   if(action==='clone')result=await api('/credentials/'+id+'/clone','POST',{name:f.get('name')});
    else{
-    const payload={};for(const key of ['username','password','token','private_key','passphrase'])if(String(f.get(key)||'').trim())payload[key]=f.get(key);
-    result=await api(action==='edit'?'/credentials/'+id:'/credentials',action==='edit'?'PUT':'POST',{name:f.get('name'),kind:f.get('kind'),payload});
+    const payload={};
+    for(const [key,label,typ] of (connectionSchemas[kind]||connectionSchemas.generic)){
+      if(typ==='checkbox'){payload[key]=f.has(key);continue}
+      const value=String(f.get(key)??'').trim();
+      if(!value)continue;
+      payload[key]=typ==='number'?Number(value):value;
+    }
+    result=await api(action==='edit'?'/credentials/'+id:'/credentials',action==='edit'?'PUT':'POST',
+                     {name:f.get('name'),kind,payload});
    }
-   await reloadCredentials();toast('Connexion enregistrée');
-   if(state.editor&&state.pickerField&&result?.id){credentialSelected(result.id)}
+   await reloadCredentials();toast('Connexion sécurisée enregistrée');
+   if(state.editor&&state.pickerField&&result?.id)credentialSelected(result.id);
    else{state.credentialAction='';state.pickerCredentialId=null;drawCredentialBrowser();if(state.page==='vault')render()}
-  }catch(ex){toast(ex.message,false)}return
+  }catch(ex){toast(ex.message,false)}
+  return
  }
- 
  if(ev.target.id==='folderCreateForm'){
   ev.preventDefault();const f=new FormData(ev.target);
   try{const r=await api('/folders','POST',{parent:f.get('parent'),name:f.get('name')});state.folderSelected=r.path;await reloadFolders();drawFolderBrowser();toast('Dossier créé')}catch(ex){toast(ex.message,false)}return
@@ -518,5 +527,15 @@ function initTheme(){let theme=localStorage.getItem('origami-theme')||'dark';doc
 async function bootstrap(){document.addEventListener('submit',handleSubmit);try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initialisation:',ex)}try{const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);$('#userAvatar').textContent=initials();await load();showPage('dashboard')}catch{$('#auth').hidden=false;$('#application').hidden=true}document.addEventListener('click',handleClick);document.addEventListener('input',ev=>{
  if(ev.target.id==='credentialSearch'){state.credentialSearch=ev.target.value;filterCredentialRows()}
  if(ev.target.id==='groupSearch'){state.groupQuery=ev.target.value;clearTimeout(state.groupTimer);state.groupTimer=setTimeout(searchGroups,250)}
- if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',ev=>{if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config={};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
+ if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',ev=>{
+ if(ev.target.name==='kind'&&ev.target.closest('#credentialManageForm')){
+  document.getElementById('credentialProfile').innerHTML=credentialProfileFields(ev.target.value);
+  smtpAuthFieldsVisibility();
+ }
+ if(ev.target.name==='auth'&&ev.target.closest('#credentialManageForm'))smtpAuthFieldsVisibility();
+ if(ev.target.name==='tls_mode'&&ev.target.closest('#credentialManageForm')&&ev.target.closest('form').elements.namedItem('kind')?.value==='smtp'){
+  const port=ev.target.closest('form').elements.namedItem('port');
+  if(port&&['25','465','587'].includes(port.value))port.value=ev.target.value==='ssl'?465:ev.target.value==='none'?25:587;
+ }
+ if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config={};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
 bootstrap();
