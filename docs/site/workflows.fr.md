@@ -17,6 +17,18 @@ La planification propose **Manuel**, **Une seule fois**, **Assistant de répéti
 
 Pour gérer un échec, utiliser le bouton **« ＋ Si échec »** sur une étape : il ajoute une nouvelle tâche reliée automatiquement à la branche rouge `on_failure`. Par défaut, la récupération termine en **FAIL** pour **conserver l'alerte d'échec du workflow** ; changer explicitement la sortie de la tâche de récupération en `END` pour marquer une véritable reprise réussie. On peut insérer d'autres étapes dans la branche à l'aide des liaisons.
 
+## Configuration des connexions et des branches d'échec
+
+Les étapes **SMTP, SSH/SFTP, FTP/FTPS, HTTP, Matrix, LDAP et runner Ansible** proposent désormais **Connexion du coffre** (recommandée) ou **Paramètres réseau manuels**. Seuls les champs correspondants sont affichés.
+
+Pour une tâche **E-mail / SMTP**, le mode **coffre** propose uniquement la connexion SMTP et le destinataire, le sujet, le corps et les pièces jointes : l'hôte, le port, TLS et l'expéditeur viennent du coffre. Les anciens paramètres techniques cachés ne prennent pas le dessus. Le mode **manuel** expose hôte, port, sécurité (STARTTLS, SSL direct ou relais interne sans TLS), expéditeur et message. Il convient à un relais **sans authentification** ; pour des identifiants SMTP, utiliser le coffre. Les mots de passe ne sont jamais stockés dans une tâche.
+
+Les tâches **SSH/SFTP/Ansible** utilisent une identité SSH du coffre et soit un serveur d'inventaire, soit un FQDN manuel. Une tâche HTTP peut utiliser une URL de base et un token du coffre avec un chemin relatif, ou une URL complète en mode manuel.
+
+Les modes de planification sont **Manuel**, **Une fois**, **Assistant de répétition** (1/5/10/15/30 minutes, heure, jour, semaine et durée personnalisée) et **Cron avancé**. Seuls les champs du mode choisi s'affichent.
+
+Pour gérer une erreur, cliquer sur **« ＋ Si échec »** dans l'étape : une nouvelle tâche est reliée directement à `on_failure`. La branche termine par défaut en **FAIL**, pour conserver la visibilité de l'échec après notification ou nettoyage. Relier explicitement à `END` si la récupération doit réellement rendre le workflow réussi.
+
 ## Exemple : embranchement après sauvegarde
 
 1. **Sauvegarder** (`ssh` sur un runner Linux dédié), `on_success: notify_ok`, `on_failure: notify_fail`.
