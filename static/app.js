@@ -520,7 +520,7 @@ async function submitCredentialTest(form){
    const good=item.status==='success',warn=item.status==='warning';
    return '<div class="connection-test-row"><span class="connection-test-mark '+(good?'passed':warn?'warning':'untested')+'">'+(good?'✓':warn?'!':'—')+'</span><div><strong>'+e(item.name)+'</strong><p class="hint">'+e(item.detail)+'</p></div></div>';
   }).join('');
-  if(target)target.innerHTML='<div class="notice"><strong>Diagnostic effectué</strong> — '+e(result.message||'')+'</div>'
+  if(target)target.innerHTML='<div class="notice"><strong>Diagnostic effectué</strong> — '+e(result.message||'')+(typeof result.elapsed_ms==='number'?' <span class="hint">· '+e(result.elapsed_ms)+' ms</span>':'')+'</div>'
    +'<div class="connection-test-list">'+lines+'</div>'
    +(result.reference?'<p class="hint">Référence à rechercher dans le message : <code>'+e(result.reference)+'</code></p>':'');
  }catch(ex){
