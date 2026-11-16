@@ -890,13 +890,26 @@ def test_credential(credential_id:int,request:Request,payload:dict[str,Any]|None
     try:
         values=security.decrypt(row['encrypted_payload'])
         if row['kind']=='ssh':
+            # An SSH identity is reusable: test against a one-off FQDN without
+            # persisting that host in the vault or server inventory.
             target_id=options.get('server_id')
-            if target_id:
+            manual_host=options.get('manual_host')
+            manual_port=options.get('manual_port')
+            if target_id is not None and (manual_host is not None or manual_port is not None):
+                raise connection_tests.ConnectionTestError('Choisir une cible SSH : inventaire ou FQDN manuel, pas les deux')
+            if manual_host is not None or manual_port is not None:
+                if not isinstance(manual_host,str):
+                    raise connection_tests.ConnectionTestError('Saisir un FQDN SSH pour le test manuel')
+                if not isinstance(manual_port,(int,str)) or isinstance(manual_port,bool):
+                    raise connection_tests.ConnectionTestError('Port SSH manuel invalide')
+                values.update(host=ssh_inventory.fqdn(manual_host),port=ssh_inventory.port(manual_port))
+            elif target_id is not None:
                 target=ssh_inventory.server(target_id)
                 values.update(host=target['fqdn'],port=target['port'])
-                options={k:v for k,v in options.items() if k!='server_id'}
             elif not values.get('host'):
-                raise connection_tests.ConnectionTestError('Sélectionner un serveur de l’inventaire pour tester cette identité SSH')
+                raise connection_tests.ConnectionTestError('Saisir un FQDN SSH ou choisir un serveur de l’inventaire')
+            options={k:v for k,v in options.items()
+                     if k not in ('server_id','manual_host','manual_port')}
         result=connection_tests.run(row['kind'],values,
                                     options=options,credential_id=credential_id)
     except ssh_inventory.InventoryError as exc:
