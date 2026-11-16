@@ -284,8 +284,8 @@ def ldap(values, options=None):
     if not username or not password:
         raise ConnectionTestError("LDAP : DN et mot de passe de liaison obligatoires")
     try:
-        ca_cert = ldap_settings.current().get("ca_cert") or None
-        server = Server(uri, tls=Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=ca_cert),
+        settings=ldap_settings.current()
+        server = Server(uri, tls=ldap_settings.tls_for(settings),
                         connect_timeout=TIMEOUT)
         conn = Connection(server, user=username, password=password,
                           receive_timeout=TIMEOUT, auto_bind=not starttls)
@@ -295,7 +295,9 @@ def ldap(values, options=None):
                 if not conn.start_tls() or not conn.bind():
                     raise ConnectionTestError("LDAP : négociation STARTTLS ou bind refusé")
             base = values.get("base_dn") or ""
-            checks = [check("TLS / certificat", "Connexion chiffrée validée"),
+            checks = [warning("TLS / certificat", "Transport chiffré, mais certificat NON vérifié (exception dangereuse)")
+                      if settings.get('skip_cert_verification')
+                      else check("TLS / certificat", "Certificat et transport TLS validés"),
                       check("Authentification", "Bind du compte de service accepté")]
             if base:
                 if not conn.search(base, "(objectClass=*)", BASE, attributes=["objectClass"],
