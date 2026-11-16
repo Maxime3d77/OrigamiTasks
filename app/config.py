@@ -31,6 +31,7 @@ MAX_LOG_BYTES = int(os.getenv('MAX_LOG_BYTES', '40000'))
 MAX_STEP_SECONDS = int(os.getenv('MAX_STEP_SECONDS', '1800'))
 TRANSFER_ROOT = DATA / 'transfers'
 KNOWN_HOSTS = Path(os.getenv('SSH_KNOWN_HOSTS', str(DATA / 'known_hosts')))
+SSH_HOST_KEY_POLICY = os.getenv('SSH_HOST_KEY_POLICY', 'accept-new').strip().lower()
 
 # Restricted outbound API integrations: comma-separated exact hostnames or host:port
 CONNECTION_TEST_ALLOWED_HOSTS = os.getenv("CONNECTION_TEST_ALLOWED_HOSTS", "")
