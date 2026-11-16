@@ -44,3 +44,9 @@ Les écritures LDAP/AD sont désactivées par défaut, limitées par base DN, ce
 Les lots d'agents nécessitent une session administrateur, une confirmation explicite et un compte SSH chiffré. Toutes les cibles doivent appartenir à `AGENT_DEPLOY_ALLOWED_HOSTS`. Une file persistante conserve un résultat par machine ; les installations interrompues ne sont pas rejouées automatiquement. Les réponses et l'audit n'exposent ni mot de passe, ni clé privée, ni sortie brute d'installation.
 
 L'import LDAP n'accepte que des certificats **CA publics** PEM, avec accès au fichier restreint. Le contournement de la vérification du certificat TLS n'est pas proposé. Le mode « connexion manuelle » des workflows ne doit jamais stocker de mot de passe ou de jeton en clair.
+
+
+### Dérogation exceptionnelle de vérification LDAPS/STARTTLS
+
+Préférer importer la **CA publique émettrice** plutôt que le certificat serveur lui-même. Un fichier CRT peut être une simple feuille de certificat serveur et n'est pas une autorité CA. Pour un dépannage exceptionnel, l'administrateur hôte peut activer ALLOW_INSECURE_LDAP_TLS=true dans le .env et redémarrer le conteneur, puis cocher et enregistrer « Ignorer la vérification du certificat LDAP » dans Administration → LDAP. **Avertissement :** la connexion reste chiffrée, mais le serveur n'est plus authentifié : des identifiants LDAP peuvent être interceptés par un adversaire réseau. Cette dérogation concerne aussi l'authentification LDAP, les tests et les actions LDAP des workflows. La retirer rapidement après dépannage.
+
