@@ -267,9 +267,11 @@ def ftp(values, options=None):
             client.close()
 
 
-def ldap(values):
-    """Bind with an explicitly configured vault account, then BASE search only."""
-    from ldap3 import Server, Connection, Tls, BASE
+def ldap(values, options=None):
+    """Bind and optional scoped user/group lookups; never write LDAP objects."""
+    options = options or {}
+    from ldap3 import Server, Connection, Tls, BASE, SUBTREE
+    from ldap3.utils.conv import escape_filter_chars
     uri = str(values.get("uri") or "")
     parsed = urlsplit(uri)
     starttls = bool(values.get("starttls", False))
@@ -301,7 +303,28 @@ def ldap(values):
                                    size_limit=1):
                     raise ConnectionTestError("LDAP : bind accepté mais base DN inaccessible")
                 checks.append(check("Base DN", "Recherche en lecture seule validée"))
-            return ok("ldap", "Connexion LDAP et compte de service vérifiés ; aucune modification.",
+            test_user = _short(options, "test_user", 100)
+            if test_user:
+                if not base:
+                    raise ConnectionTestError("LDAP : base DN requise pour chercher un utilisateur")
+                attr = values.get("user_attribute") or ldap_settings.current().get("user_attribute") or "uid"
+                if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9-]*", attr):
+                    raise ConnectionTestError("LDAP : attribut de recherche invalide")
+                found = conn.search(base, "("+attr+"="+escape_filter_chars(test_user)+")",
+                                    SUBTREE, attributes=["cn"], size_limit=2)
+                checks.append(check("Recherche utilisateur", "Compte trouvé")
+                              if found else warning("Recherche utilisateur", "Utilisateur introuvable"))
+            test_group = _short(options, "test_group", 100)
+            if test_group:
+                group_base = values.get("group_base_dn") or base
+                if not group_base:
+                    raise ConnectionTestError("LDAP : base DN de groupes manquante")
+                found = conn.search(group_base,
+                                    "(cn="+escape_filter_chars(test_group)+")",
+                                    SUBTREE, attributes=["cn"], size_limit=2)
+                checks.append(check("Recherche groupe", "Groupe trouvé")
+                              if found else warning("Recherche groupe", "Groupe introuvable"))
+            return ok("ldap", "Connexion et bind LDAP vérifiés ; recherches facultatives en lecture seule.",
                       checks)
         finally:
             conn.unbind()
