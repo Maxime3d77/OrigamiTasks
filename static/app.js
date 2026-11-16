@@ -393,7 +393,9 @@ function drawCredentialBrowser(){
  smtpAuthFieldsVisibility();
 }
 function filterCredentialRows(){
- $('#credentialLayer [data-credential-search]').forEach(row=>row.hidden=!(row.dataset.credentialSearch||'').includes((state.credentialSearch||'').toLowerCase()));
+ $$('#credentialLayer [data-credential-search]').forEach(row=>{
+  row.hidden=!(row.dataset.credentialSearch||'').includes((state.credentialSearch||'').toLowerCase());
+ });
 }
 function credentialSelected(id){
  const step=state.editor?.steps_json[state.selectedStep];
