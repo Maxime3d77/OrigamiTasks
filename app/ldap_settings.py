@@ -39,12 +39,20 @@ def import_ca(pem_text=None, der_base64=None):
             if not 100<=len(raw)<=131072:
                 raise ValueError("invalid certificate size")
             cert=x509.load_der_x509_certificate(raw)
-            basic=cert.extensions.get_extension_for_class(x509.BasicConstraints).value
-            if not basic.ca:
-                raise LDAPSettingsError("Le fichier CRT est un certificat serveur, pas une autorité CA")
+            try:
+                basic=cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+            except x509.ExtensionNotFound:
+                # Match the PEM path: legacy CA roots sometimes lack this field.
+                # OpenSSL still validates the actual LDAPS chain at connection time.
+                basic=None
+            if basic is not None and not basic.ca:
+                raise LDAPSettingsError(
+                    "Ce fichier CRT contient un certificat serveur (CA:FALSE), "
+                    "pas la CA qui l'a signé. Importer la CA émettrice."
+                )
             pem_text=cert.public_bytes(Encoding.PEM).decode("ascii")
-        except (ValueError,binascii.Error,x509.ExtensionNotFound):
-            raise LDAPSettingsError("Fichier CRT/DER invalide ou sans attribut CA=true") from None
+        except (ValueError,binascii.Error):
+            raise LDAPSettingsError("Fichier CRT/DER invalide ou illisible") from None
     if not isinstance(pem_text,str) or not 100<=len(pem_text)<=131072:
         raise LDAPSettingsError("Certificat CA invalide (128 Kio maximum)")
     if 'PRIVATE KEY' in pem_text or '\x00' in pem_text:
