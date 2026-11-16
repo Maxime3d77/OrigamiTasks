@@ -318,7 +318,7 @@ def add_datacenter(payload:dict[str,Any],request:Request):
     name=str(payload.get('name','')).strip()
     if not 1<=len(name)<=100: raise HTTPException(422,'Nom du datacenter invalide')
     try:
-        origin=integrations.authorized_origin(payload.get('url'),config.PROXMOX_ALLOWED_HOSTS)
+        origin=integrations.authorized_origin(payload.get('url'),config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True)
         credential_id=int(payload.get('credential_id'))
     except (integrations.IntegrationError,ValueError,TypeError) as exc:
         raise HTTPException(422,str(exc))
