@@ -1,12 +1,18 @@
-"""Read-only, bounded diagnostics for named encrypted vault connection types.
+"""Bounded, administrator-approved diagnostics; optional explicit sends/probes.
 
-No SSH commands, file transfers, mail sending or directory writes are performed.
-Never include credentials, raw URLs or server response bodies in errors or results.
+No credentials, URL query secrets or server response bodies are returned.
 """
 import io
 import re
 import ssl
-from urllib.parse import urlsplit
+import time
+import threading
+import secrets
+import smtplib
+from datetime import datetime, timezone
+from email.message import EmailMessage
+from email.utils import make_msgid, format_datetime
+from urllib.parse import urlsplit, quote
 
 import ftplib
 import httpx
@@ -14,6 +20,10 @@ import httpx
 from . import config, connections, integrations, ldap_settings
 
 TIMEOUT = 8
+_SEND_LOCK = threading.Lock()
+_LAST_MAIL_SEND = {}
+_LAST_MATRIX_SEND = {}
+_MAIL_SEND_COOLDOWN_SECONDS = 30
 
 
 class ConnectionTestError(Exception):
@@ -30,6 +40,82 @@ def check(name, detail):
 
 def untested(name, detail):
     return {"name": name, "status": "not_tested", "detail": detail}
+
+
+
+def warning(name, detail):
+    return {"name": name, "status": "warning", "detail": detail}
+
+
+def _bool(options, key):
+    value = options.get(key, False)
+    if type(value) is not bool:
+        raise ConnectionTestError("Option de test invalide : "+key)
+    return value
+
+
+def _short(options, key, maximum, *, multiline=False):
+    value = options.get(key, "")
+    if not isinstance(value, str) or len(value) > maximum:
+        raise ConnectionTestError("Champ de test trop long ou invalide : "+key)
+    if not multiline and ("\r" in value or "\n" in value):
+        raise ConnectionTestError("Retour à la ligne interdit : "+key)
+    return value.strip()
+
+
+def _email(address):
+    # Exactly one mailbox: no header injection or bulk recipient lists.
+    if not re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}", address or ""):
+        raise ConnectionTestError("Adresse e-mail invalide : un seul destinataire est autorisé")
+    return address
+
+
+def _send_mail(values, options, credential_id):
+    if not _bool(options, "confirm_send"):
+        raise ConnectionTestError("Confirmer explicitement l'envoi de l'e-mail de test")
+    recipient = _email(_short(options, "recipient", 254))
+    sender = _email(str(values.get("from_address") or
+                        (values.get("username") if "@" in str(values.get("username") or "") else "")))
+    subject = _short(options, "subject", 120) or "[OrigamiTasks] Vérification de la messagerie"
+    body = _short(options, "message", 1500, multiline=True) or (
+        "Ceci est un e-mail de test envoyé depuis OrigamiTasks.\n"
+        "La présence du message dans la boîte valide sa réception."
+    )
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg["Subject"] = subject
+    msg["Date"] = format_datetime(datetime.now(timezone.utc))
+    msg["Message-ID"] = make_msgid(domain=sender.rsplit("@", 1)[1])
+    msg["X-OrigamiTasks-Test"] = "true"
+    msg.set_content(body+"\n\nRéférence de test : "+msg["Message-ID"]+"\n")
+
+    # Serialize send attempts per credential to prevent concurrent bypass.
+    with _SEND_LOCK:
+        if credential_id is not None:
+            last = _LAST_MAIL_SEND.get(credential_id, 0)
+            if last and time.monotonic() - last < _MAIL_SEND_COOLDOWN_SECONDS:
+                raise ConnectionTestError("Attendre 30 secondes entre deux e-mails de test pour cette connexion")
+            _LAST_MAIL_SEND[credential_id] = time.monotonic()
+        session = None
+        try:
+            session = connections.open_smtp(values, timeout=TIMEOUT)
+            refused = session.send_message(msg, from_addr=sender, to_addrs=[recipient])
+            if refused:
+                raise ConnectionTestError("Le serveur SMTP a refusé le destinataire du test")
+        except ConnectionTestError:
+            raise
+        except (OSError, TimeoutError, smtplib.SMTPException, ValueError) as exc:
+            raise ConnectionTestError(
+                "Envoi SMTP échoué ("+type(exc).__name__+") : vérifier l'expéditeur et les règles du relais"
+            ) from None
+        finally:
+            if session is not None:
+                try:
+                    session.quit()
+                except (OSError, smtplib.SMTPException):
+                    session.close()
+    return str(msg["Message-ID"])
 
 
 def _port(value, default):
@@ -64,8 +150,9 @@ def _allowed_origin(url, allowlist):
         ) from None
 
 
-def ssh(values):
-    """Paramiko connect() authenticates and verifies the pinned known_hosts key."""
+def ssh(values, options=None):
+    """Validate host key and login, plus explicitly selected read-only probes."""
+    options = options or {}
     try:
         import paramiko
     except ImportError:
@@ -100,10 +187,27 @@ def ssh(values):
         params["password"] = values["password"]
     try:
         client.connect(**params)
-        return ok("ssh", "Connexion SSH et authentification vérifiées ; aucune commande exécutée.",
-                  [check("Connectivité TCP", "Connexion établie"),
-                   check("Clé de l'hôte", "Empreinte vérifiée dans known_hosts"),
-                   check("Authentification", "Compte SSH accepté")])
+        checks = [check("Connectivité TCP", "Connexion établie"),
+                  check("Clé de l'hôte", "Empreinte vérifiée dans known_hosts"),
+                  check("Authentification", "Compte SSH accepté")]
+        if _bool(options, "check_sftp"):
+            sftp = client.open_sftp()
+            try:
+                sftp.stat(".")  # read metadata, never list/upload/download/delete
+                checks.append(check("Sous-système SFTP", "Accès au répertoire courant validé"))
+            finally:
+                sftp.close()
+        if _bool(options, "check_whoami"):
+            # Only this fixed read-only command (Windows + Linux), never arbitrary text.
+            _, stdout, _ = client.exec_command("whoami", timeout=TIMEOUT)
+            channel = stdout.channel
+            end = time.monotonic()+TIMEOUT
+            while not channel.exit_status_ready() and time.monotonic()<end:
+                time.sleep(0.1)
+            if not channel.exit_status_ready() or channel.recv_exit_status()!=0:
+                raise ConnectionTestError("SSH : whoami a échoué ou dépassé le délai")
+            checks.append(check("Commande distante", "whoami terminé sans modification"))
+        return ok("ssh", "Clé d’hôte et authentification SSH vérifiées.", checks)
     except paramiko.BadHostKeyException:
         raise ConnectionTestError("SSH : empreinte d'hôte différente de la clé approuvée") from None
     except paramiko.AuthenticationException:
@@ -112,14 +216,15 @@ def ssh(values):
         raise ConnectionTestError(
             "SSH : protocole/clé d'hôte non validé. Vérifier known_hosts et l'algorithme de clé."
         ) from None
-    except (OSError, TimeoutError):
-        raise ConnectionTestError("SSH : serveur injoignable ou délai dépassé") from None
+    except (OSError, TimeoutError, EOFError):
+        raise ConnectionTestError("SSH : hôte injoignable, sous-système indisponible ou délai dépassé") from None
     finally:
         client.close()
 
 
-def ftp(values):
-    """FTPS explicit: login and TLS control/data negotiation, no FTP file operation."""
+def ftp(values, options=None):
+    """FTPS login plus optional read-only current-directory check."""
+    options = options or {}
     host = connections.safe_host(values.get("host"))
     port = _port(values.get("port"), 21)
     mode = str(values.get("tls_mode") or "explicit")
@@ -146,10 +251,15 @@ def ftp(values):
         client.login(values.get("username") or "anonymous",
                      values.get("password") or "")
         client.prot_p()
-        return ok("ftp", "Connexion FTPS et authentification validées ; aucun transfert effectué.",
-                  [check("Connectivité FTP", "Bannière reçue"),
-                   check("TLS", "Canal de commande sécurisé et données protégées"),
-                   check("Authentification", "Compte accepté")])
+        auth_label = ("Compte accepté" if values.get("username")
+                      else "Connexion anonyme acceptée ; aucun compte utilisateur spécifique validé")
+        checks = [check("Connectivité FTP", "Bannière reçue"),
+                  check("TLS", "Canal de commande sécurisé et données protégées"),
+                  check("Authentification", auth_label)]
+        if _bool(options, "check_directory"):
+            client.pwd()
+            checks.append(check("Accès répertoire", "Commande PWD autorisée, aucun fichier transféré"))
+        return ok("ftp", "Connexion FTPS et authentification validées ; aucun transfert effectué.", checks)
     except ftplib.all_errors as exc:
         raise ConnectionTestError("FTPS : échec du transport/TLS ou des identifiants ("+
                                   type(exc).__name__+")") from None
@@ -160,9 +270,11 @@ def ftp(values):
             client.close()
 
 
-def ldap(values):
-    """Bind with an explicitly configured vault account, then BASE search only."""
-    from ldap3 import Server, Connection, Tls, BASE
+def ldap(values, options=None):
+    """Bind and optional scoped user/group lookups; never write LDAP objects."""
+    options = options or {}
+    from ldap3 import Server, Connection, Tls, BASE, SUBTREE
+    from ldap3.utils.conv import escape_filter_chars
     uri = str(values.get("uri") or "")
     parsed = urlsplit(uri)
     starttls = bool(values.get("starttls", False))
@@ -194,7 +306,30 @@ def ldap(values):
                                    size_limit=1):
                     raise ConnectionTestError("LDAP : bind accepté mais base DN inaccessible")
                 checks.append(check("Base DN", "Recherche en lecture seule validée"))
-            return ok("ldap", "Connexion LDAP et compte de service vérifiés ; aucune modification.",
+            test_user = _short(options, "test_user", 100)
+            if test_user:
+                if not base:
+                    raise ConnectionTestError("LDAP : base DN requise pour chercher un utilisateur")
+                attr = values.get("user_attribute") or ldap_settings.current().get("user_attribute") or "uid"
+                if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9-]*", attr):
+                    raise ConnectionTestError("LDAP : attribut de recherche invalide")
+                conn.search(base, "("+attr+"="+escape_filter_chars(test_user)+")",
+                            SUBTREE, attributes=["cn"], size_limit=2)
+                found = bool(getattr(conn, "entries", []))
+                checks.append(check("Recherche utilisateur", "Compte trouvé")
+                              if found else warning("Recherche utilisateur", "Utilisateur introuvable"))
+            test_group = _short(options, "test_group", 100)
+            if test_group:
+                group_base = values.get("group_base_dn") or base
+                if not group_base:
+                    raise ConnectionTestError("LDAP : base DN de groupes manquante")
+                conn.search(group_base,
+                            "(cn="+escape_filter_chars(test_group)+")",
+                            SUBTREE, attributes=["cn"], size_limit=2)
+                found = bool(getattr(conn, "entries", []))
+                checks.append(check("Recherche groupe", "Groupe trouvé")
+                              if found else warning("Recherche groupe", "Groupe introuvable"))
+            return ok("ldap", "Connexion et bind LDAP vérifiés ; recherches facultatives en lecture seule.",
                       checks)
         finally:
             conn.unbind()
@@ -204,106 +339,223 @@ def ldap(values):
         raise ConnectionTestError("LDAP : échec TLS/bind/recherche ("+type(exc).__name__+")") from None
 
 
-def matrix(values):
-    """Use the authenticated Matrix whoami endpoint, with allow-list validation."""
+def matrix(values, options=None, credential_id=None):
+    """Authenticated whoami; optional room membership check and explicit send."""
+    options = options or {}
     base = _allowed_origin(values.get("homeserver"), config.MATRIX_ALLOWED_HOSTS)
     token = values.get("token")
     if not token:
         raise ConnectionTestError("Matrix : token d'accès manquant")
+    room = _short(options, "room_id", 255)
+    check_room = _bool(options, "check_room")
+    send = _bool(options, "send_message")
+    if (check_room or send) and (not room.startswith("!") or ":" not in room):
+        raise ConnectionTestError("Matrix : indiquer l'identifiant complet de la room (!id:serveur)")
+    headers = {"Authorization": "Bearer "+token}
     try:
         with httpx.Client(timeout=TIMEOUT, follow_redirects=False, trust_env=False) as client:
-            r = client.get(base+"/_matrix/client/v3/account/whoami",
-                           headers={"Authorization": "Bearer "+token})
-        if r.status_code != 200:
-            raise ConnectionTestError("Matrix : identité du token non validée (HTTP "+str(r.status_code)+")")
-        data = r.json()
-        if not isinstance(data, dict) or not data.get("user_id"):
-            raise ConnectionTestError("Matrix : réponse whoami invalide")
-        return ok("matrix", "Token Matrix reconnu ; aucun message envoyé.",
-                  [check("HTTPS", "Homeserver accessible"),
-                   check("Identité", "Endpoint whoami a accepté le token")])
+            response = client.get(base+"/_matrix/client/v3/account/whoami", headers=headers)
+            if response.status_code != 200:
+                raise ConnectionTestError("Matrix : identité non validée (HTTP "+str(response.status_code)+")")
+            data = response.json()
+            if not isinstance(data, dict) or not isinstance(data.get("user_id"), str):
+                raise ConnectionTestError("Matrix : réponse whoami invalide")
+            checks = [check("HTTPS", "Homeserver accessible"),
+                      check("Identité", "Le jeton est reconnu par whoami")]
+            if check_room:
+                url = (base+"/_matrix/client/v3/rooms/"+quote(room, safe="")+
+                       "/state/m.room.member/"+quote(data["user_id"], safe=""))
+                membership = client.get(url, headers=headers)
+                if membership.status_code != 200:
+                    raise ConnectionTestError(
+                        "Matrix : appartenance à la room non confirmée (HTTP "+
+                        str(membership.status_code)+")"
+                    )
+                info = membership.json()
+                if not isinstance(info, dict) or info.get("membership") != "join":
+                    raise ConnectionTestError("Matrix : le bot n'est pas membre de cette room")
+                checks.append(check("Appartenance room", "Le compte est membre du salon"))
     except ConnectionTestError:
         raise
     except (httpx.HTTPError, ValueError):
         raise ConnectionTestError("Matrix : erreur réseau/TLS ou réponse inattendue") from None
 
+    if send:
+        if not _bool(options, "confirm_send"):
+            raise ConnectionTestError("Confirmer explicitement l'envoi du message de test")
+        message = _short(options, "message", 1000, multiline=True) or (
+            "[OrigamiTasks] Message de test volontaire. Vérifier sa présence dans le salon."
+        )
+        with _SEND_LOCK:
+            if credential_id is not None:
+                last = _LAST_MATRIX_SEND.get(credential_id, 0)
+                if last and time.monotonic()-last < _MAIL_SEND_COOLDOWN_SECONDS:
+                    raise ConnectionTestError("Attendre 30 secondes entre deux messages Matrix de test")
+                _LAST_MATRIX_SEND[credential_id] = time.monotonic()
+            try:
+                integrations.matrix_message(
+                    {"homeserver":base, "room_id":room, "message":message}, values,
+                    "test-"+secrets.token_hex(8), "matrix", TIMEOUT
+                )
+            except Exception as exc:
+                raise ConnectionTestError(
+                    "Matrix : envoi refusé ou impossible ("+type(exc).__name__+")"
+                ) from None
+        checks.append(check("Envoi message", "API Matrix a accepté le message ; vérifier son affichage dans la room"))
+    return ok("matrix", "Jeton Matrix validé ; tests demandés effectués.", checks)
 
-def proxmox(values):
-    """Read-only access/permissions route: validates token without VM actions."""
+
+def proxmox(values, options=None):
+    """Read-only token, node inventory and optional named-node status."""
+    options = options or {}
     base = _allowed_origin(values.get("url"), config.PROXMOX_ALLOWED_HOSTS)
     try:
-        data = integrations.proxmox_request(base, values, "/api2/json/access/permissions",
-                                            timeout=TIMEOUT)
+        data = integrations.proxmox_request(
+            base, values, "/api2/json/access/permissions", timeout=TIMEOUT
+        )
         if not isinstance(data, dict):
-            raise ConnectionTestError("Proxmox : réponse API inattendue")
-        return ok("proxmox", "Token Proxmox accepté ; aucune action sur les VM.",
-                  [check("HTTPS", "API accessible avec certificat vérifié"),
-                   check("Token API", "Requête de lecture autorisée")])
+            raise ConnectionTestError("Proxmox : réponse de permissions inattendue")
+        checks = [check("HTTPS", "Certificat API vérifié"),
+                  check("Token API", "Requête authentifiée de permissions acceptée")]
+        if _bool(options, "check_nodes"):
+            nodes = integrations.proxmox_request(base, values, "/api2/json/nodes",
+                                                 timeout=TIMEOUT)
+            if not isinstance(nodes, list):
+                raise ConnectionTestError("Proxmox : inventaire de nœuds inattendu")
+            checks.append(check("Lecture nœuds", str(len(nodes))+" nœud(s) accessibles"))
+        name = _short(options, "node", 90)
+        if name:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,89}", name):
+                raise ConnectionTestError("Proxmox : nom de nœud invalide")
+            status = integrations.proxmox_request(
+                base, values, "/api2/json/nodes/"+quote(name, safe="")+"/status",
+                timeout=TIMEOUT
+            )
+            if not isinstance(status, dict):
+                raise ConnectionTestError("Proxmox : statut de nœud inattendu")
+            checks.append(check("Statut nœud", "Lecture du nœud autorisée (aucune action VM)"))
+        return ok("proxmox", "Token Proxmox validé ; lectures demandées effectuées sans modification.",
+                  checks)
     except ConnectionTestError:
         raise
     except (httpx.HTTPError, integrations.IntegrationError, ValueError, KeyError, TypeError) as exc:
-        raise ConnectionTestError("Proxmox : refus API/TLS ou token invalide ("+
-                                  type(exc).__name__+")") from None
-
-
-def api(values):
-    """GET only to allow-listed HTTPS API. A 2xx response does not prove identity."""
-    if not config.CONNECTION_TEST_ALLOWED_HOSTS.strip():
         raise ConnectionTestError(
-            "API : renseigner CONNECTION_TEST_ALLOWED_HOSTS dans .env avant le test"
-        )
+            "Proxmox : refus API/TLS ou token invalide ("+type(exc).__name__+")"
+        ) from None
+
+
+def api(values, options=None):
+    """GET/HEAD only to allow-listed HTTPS API with configurable expected status."""
+    options = options or {}
+    if not config.CONNECTION_TEST_ALLOWED_HOSTS.strip():
+        raise ConnectionTestError("API : renseigner CONNECTION_TEST_ALLOWED_HOSTS dans .env")
     base = _allowed_origin(values.get("base_url"), config.CONNECTION_TEST_ALLOWED_HOSTS)
-    path = str(values.get("test_path") or "/")
+    path = _short(options, "path", 180) or str(values.get("test_path") or "/")
     if (not path.startswith("/") or path.startswith("//") or
         "?" in path or "#" in path or "\\" in path or
         ".." in path.split("/") or len(path) > 180):
         raise ConnectionTestError("API : chemin de test invalide")
+    method = _short(options, "method", 6).upper() or "GET"
+    if method not in ("GET", "HEAD"):
+        raise ConnectionTestError("API : seules les méthodes GET et HEAD sont permises")
+    expected = _short(options, "expected_status", 3) or "2xx"
+    if expected != "2xx" and (not expected.isdigit() or
+                              int(expected)<200 or int(expected)>599):
+        raise ConnectionTestError("API : code HTTP attendu invalide")
     headers = {}
     if values.get("token"):
         headers["Authorization"] = "Bearer "+values["token"]
     elif values.get("username") and values.get("password"):
-        # Basic authentication only over verified HTTPS.
         import base64
         raw = (values["username"]+":"+values["password"]).encode()
         headers["Authorization"] = "Basic "+base64.b64encode(raw).decode()
     try:
         with httpx.Client(timeout=TIMEOUT, follow_redirects=False, trust_env=False) as client:
-            response = client.get(base+path, headers=headers)
-        if response.status_code not in range(200, 300):
-            raise ConnectionTestError("API : réponse HTTP "+str(response.status_code)+
-                                      " ; accès non confirmé")
-        return ok("api", "GET HTTPS autorisé ; la validité métier du token dépend de l'endpoint choisi.",
+            if method=="HEAD":
+                response = client.head(base+path, headers=headers)
+            else:
+                response = client.get(base+path, headers=headers)
+        status = response.status_code
+        if status in (401, 403):
+            raise ConnectionTestError(
+                "API : identifiants refusés ou permissions insuffisantes (HTTP "+str(status)+")"
+            )
+        accepted = (200 <= status < 300) if expected=="2xx" else status==int(expected)
+        if not accepted:
+            raise ConnectionTestError(
+                "API : HTTP "+str(status)+" ; attendu "+expected+" (accès non confirmé)"
+            )
+        return ok("api", "Requête "+method+" HTTPS terminée, statut attendu obtenu.",
                   [check("HTTPS", "Certificat TLS vérifié"),
-                   check("GET de diagnostic", "HTTP "+str(response.status_code)),
-                   untested("Identité", "Une réponse 2xx ne garantit pas que le serveur a contrôlé le token")])
+                   check("Requête de diagnostic", method+" : HTTP "+str(status)),
+                   untested("Identité", "Le code HTTP ne garantit pas que le jeton a été validé")])
     except ConnectionTestError:
         raise
     except httpx.HTTPError:
         raise ConnectionTestError("API : erreur réseau ou certificat TLS") from None
 
 
-def run(kind, values):
-    if kind == "smtp":
-        try:
-            result = connections.test_smtp(values)
-        except connections.ConnectionError as exc:
-            raise ConnectionTestError(str(exc)) from None
-        mode = values.get("tls_mode") or "starttls"
-        auth = bool(result.get("authenticated"))
-        checks = [check("Connectivité SMTP", "Serveur accessible")]
-        checks.append(check("Sécurité", {"ssl":"TLS direct vérifié",
-                                         "starttls":"STARTTLS validé",
-                                         "none":"Connexion sans TLS (relais interne)"}[mode]))
-        checks.append(check("Authentification", "Identifiants acceptés") if auth
-                      else untested("Authentification", "Non requise pour ce relais"))
-        return ok("smtp", result["message"], checks)
-    registry = {"ssh": ssh, "ftp": ftp, "ldap": ldap, "matrix": matrix,
-                "proxmox": proxmox, "api": api}
+OPTION_KEYS = {
+    "smtp": {"send_email", "confirm_send", "recipient", "subject", "message"},
+    "ssh": {"check_sftp", "check_whoami"},
+    "ftp": {"check_directory"},
+    "ldap": {"test_user", "test_group"},
+    "matrix": {"check_room", "room_id", "send_message", "confirm_send", "message"},
+    "proxmox": {"check_nodes", "node"},
+    "api": {"path", "method", "expected_status"},
+    "generic": set(),
+}
+
+
+def run(kind, values, options=None, credential_id=None):
+    options = options or {}
+    if not isinstance(options, dict):
+        raise ConnectionTestError("Options de test invalides")
+    if kind not in OPTION_KEYS:
+        raise ConnectionTestError("Type de connexion non pris en charge")
+    if set(options) - OPTION_KEYS[kind]:
+        raise ConnectionTestError("Paramètre non autorisé pour ce protocole")
     if kind == "generic":
         raise ConnectionTestError(
             "Identifiant générique : aucun protocole ou serveur défini. "
-            "Choisir un profil SSH, SMTP, LDAP, API… pour tester une connexion."
+            "Choisir un profil SSH, SMTP, LDAP ou API pour le tester."
         )
-    if kind not in registry:
-        raise ConnectionTestError("Type de connexion non pris en charge")
-    return registry[kind](values)
+    if kind == "smtp":
+        sending = _bool(options, "send_email")
+        mode = values.get("tls_mode") or "starttls"
+        if mode not in ("ssl", "starttls", "none"):
+            raise ConnectionTestError("Mode SMTP invalide")
+        authenticated = bool(values.get("auth", bool(values.get("username"))))
+        if sending:
+            reference = _send_mail(values, options, credential_id)
+            message = "Message accepté par le serveur SMTP : vérifier sa présence dans la boîte destinataire."
+        else:
+            try:
+                result = connections.test_smtp(values)
+            except connections.ConnectionError as exc:
+                raise ConnectionTestError(str(exc)) from None
+            authenticated = bool(result.get("authenticated"))
+            message = result["message"]
+            reference = None
+        checks = [check("Connectivité SMTP", "Serveur accessible"),
+                  check("Sécurité", {
+                      "ssl": "SSL/TLS direct vérifié",
+                      "starttls": "STARTTLS négocié",
+                      "none": "Relais interne sans TLS"
+                  }[mode]),
+                  check("Authentification", "Identifiants SMTP acceptés")
+                  if authenticated else untested("Authentification", "Non requise")]
+        if sending:
+            checks.append(check("Remise au serveur SMTP", "Commande DATA acceptée ; référence "+reference))
+            checks.append(untested("Réception en boîte", "À vérifier dans la boîte de réception et les spams"))
+        else:
+            checks.append(untested("Envoi / réception", "Aucun message envoyé ; cocher l'envoi réel pour tester"))
+        result = ok("smtp", message, checks)
+        if reference:
+            result["reference"] = reference
+        return result
+    if kind == "matrix":
+        return matrix(values, options, credential_id)
+    registry = {"ssh": ssh, "ftp": ftp, "ldap": ldap,
+                "proxmox": proxmox, "api": api}
+    return registry[kind](values, options)

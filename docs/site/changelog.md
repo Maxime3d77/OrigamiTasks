@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.3-rc2 — 2026-11-16
+
+- Fixed protocol diagnostic checkboxes inheriting the global 100% text input width.
+- Constrained checkboxes to 18 px, preserved readable labels, and prevented horizontal dialog overflow.
+- Improved mobile layout and added a UI regression test.
+- Bumped CSS and JavaScript asset versions to refresh stale browser caches.
+
+## 0.3.3-rc1 — 2026-11-16
+
+- Added a **per-protocol credential diagnostic wizard** accessible from the vault and workflow editor.
+- **SMTP:** optional real test email with recipient, subject/body, Message-ID, clear SMTP-accepted vs inbox-delivered distinction, send rate limiting.
+- **SSH/SFTP:** optional metadata read and fixed `whoami` probe; **FTPS:** optional read-only PWD.
+- **LDAP:** optional user/group lookup; **Matrix:** room membership and explicit test message; **Proxmox:** node listing/status; **API:** GET/HEAD and expected status.
+- Explicit opt-in for sends, audited administrator-only actions, injection/secret protections and extended regression coverage.
+
+
 ## 0.3.2-rc2 — 2026-11-16
 
 - Added **Test** action for all vault connection types, with a detailed read-only result dialog and per-check status.

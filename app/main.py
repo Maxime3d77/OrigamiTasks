@@ -4,6 +4,7 @@ import re
 import secrets
 import ssl
 import hmac
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -725,21 +726,34 @@ def update_credential(credential_id:int,payload:dict[str,Any],request:Request):
 
 
 @app.post('/api/credentials/{credential_id}/test')
-def test_credential(credential_id:int,request:Request):
+def test_credential(credential_id:int,request:Request,payload:dict[str,Any]|None=None):
     user=security.require(request,role='admin',mutate=True)
+    params=payload or {}
+    options=params.get('options',{})
+    if (set(params)-{'options'} or not isinstance(options,dict) or
+        len(json.dumps(options))>5000):
+        raise HTTPException(422,'Options de diagnostic invalides')
     with db.session() as con:
         row=con.execute('SELECT kind,encrypted_payload FROM credentials WHERE id=?',(credential_id,)).fetchone()
     if not row: raise HTTPException(404,'Connexion introuvable')
+    sending=options.get('send_email') is True or options.get('send_message') is True
+    action='vault.test.send' if sending else 'vault.test'
+    if sending:
+        # Log the action before attempting network I/O; never log recipient or message body.
+        db.audit(user['username'],'vault.test.send.attempt',credential_id,row['kind'])
+    started=time.monotonic()
     try:
-        result=connection_tests.run(row['kind'], security.decrypt(row['encrypted_payload']))
+        result=connection_tests.run(row['kind'],security.decrypt(row['encrypted_payload']),
+                                    options=options,credential_id=credential_id)
     except connection_tests.ConnectionTestError as exc:
-        db.audit(user['username'],'vault.test.failed',credential_id,row['kind'])
+        db.audit(user['username'],action+'.failed',credential_id,row['kind'])
         raise HTTPException(422,str(exc)) from None
     except Exception as exc:
-        db.audit(user['username'],'vault.test.failed',credential_id,row['kind'])
-        # No raw server exception or decrypted credential is ever returned.
+        db.audit(user['username'],action+'.failed',credential_id,row['kind'])
+        # Never return raw exceptions, URLs with tokens, or decrypted credentials.
         raise HTTPException(422,'Test '+str(row['kind'])+' impossible ('+type(exc).__name__+')') from None
-    db.audit(user['username'],'vault.test',credential_id,row['kind'])
+    db.audit(user['username'],action,credential_id,row['kind'])
+    result['elapsed_ms']=round((time.monotonic()-started)*1000)
     return result
 
 

@@ -37,19 +37,20 @@ Use **Administration → LDAP / Active Directory** to configure URI and port, LD
 
 Create **protocol-specific vault profiles** for SMTP (server, port, STARTTLS / implicit SSL / unencrypted relay, optional authentication and default sender), SSH/SFTP, FTP/FTPS, LDAP, API, Matrix and Proxmox. The editor changes fields when you select a connection type. **Test SMTP** verifies TLS and optional credentials without sending mail. Use the **Administration → LDAP** test for the directory itself. Grant workflow editing rights only to trusted operators. Non-sensitive settings can be reviewed by administrators; passwords, tokens and SSH keys are never re-displayed. Blank secret fields retain their existing encrypted values. Old hostless credentials remain compatible with tasks that define their own host.
 
-### Test saved vault credentials
+### Connection diagnostic wizard
 
-From **Vault → Test**, or the vault selector inside a workflow, administrators can test saved SMTP, SSH/SFTP, FTPS, LDAP, Matrix, Proxmox and generic HTTPS API profiles. The result distinguishes connectivity, TLS/host-key validation, credential acceptance and checks that could not be established.
+From **Vault → Test** or the workflow's credential selector, each typed profile opens its own diagnostic wizard:
 
-- **SSH/SFTP:** host key must already be verified in `known_hosts`; login is tested, without running commands.
-- **FTPS:** checks the TLS control channel, login and protected data channel, without listing or transferring files. Plain FTP only verifies TCP/banner connectivity: the password is **never** sent in clear text by the diagnostic.
-- **LDAP:** LDAPS/STARTTLS, bind and optional read-only base search; no directory writes.
-- **Matrix:** authenticated `/_matrix/client/v3/account/whoami`, restricted by `MATRIX_ALLOWED_HOSTS`.
-- **Proxmox:** authenticated read-only `/api2/json/access/permissions`, restricted by `PROXMOX_ALLOWED_HOSTS`.
-- **HTTPS API:** GET-only `test_path` (default `/`), restricted by `CONNECTION_TEST_ALLOWED_HOSTS`. A 2xx response does **not** always establish whether a token was validated; use an endpoint requiring authentication. No redirects are followed.
-- **Generic** secrets without an endpoint or protocol cannot be meaningfully tested until saved as a typed connection.
+- **SMTP:** connection, TLS and optional authentication. Enable **Send a real test email**, enter **one recipient**, subject and body, then explicitly submit. OrigamiTasks sends a real message using the saved profile and returns its **Message-ID** for verification. Success means **accepted by the SMTP server**, not **delivered to the inbox**; check inbox, spam and mail server traces. One recipient per test; a successful send is rate-limited to once every 30 seconds per credential.
+- **SSH/SFTP:** pinned host key and authentication; optional read-only SFTP metadata check or explicitly selected fixed `whoami` command (Linux/Windows). No arbitrary command or file transfer.
+- **FTPS:** TLS, login and optional read-only `PWD`; no upload, deletion or directory dump. **Plain FTP:** connectivity only, never transmit passwords without TLS.
+- **LDAP/AD:** encrypted transport, bind and optional scoped username/group lookup with escaped filters; no directory changes.
+- **Matrix:** authenticated `whoami`, optional room membership check, or **explicit** test message to that room (one successful send every 30 seconds per credential). Verify it appears in the room. E2EE is not supported.
+- **Proxmox:** authenticated API permissions, optional node listing and specific node status via GET. No VM actions.
+- **HTTPS API:** read-only `GET` or `HEAD`, configurable diagnostic path and expected HTTP status (`2xx` or an exact code). Restricted to `CONNECTION_TEST_ALLOWED_HOSTS`, without redirects. HTTP 2xx does not necessarily prove token validation.
+- **Generic secrets:** no meaningful network diagnostic until associated with a protocol and destination.
 
-Only administrators can invoke tests; they are recorded in the audit trail. Use outbound firewall rules in addition to allow-lists. Secrets never appear in diagnostic output.
+By default, diagnostics **never send messages** or change remote data. Email/Matrix sends are explicit actions in the wizard. Tests require administrator privileges, are audited without disclosing secrets, and use bounded timeouts. Enforce outbound firewall rules and allow-lists.
 
 ## Remote SSH
 

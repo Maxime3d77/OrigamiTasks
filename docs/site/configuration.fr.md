@@ -37,19 +37,20 @@ Le menu **Administration → LDAP / Active Directory** permet de configurer l’
 
 Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
 
-### Tester les connexions du coffre
+### Assistant de diagnostic des connexions
 
-Depuis **Coffre-fort → Tester** ou la fenêtre de sélection d’une connexion dans un workflow, un administrateur peut lancer un diagnostic SMTP, SSH/SFTP, FTPS, LDAP, Matrix, Proxmox ou API HTTPS. La fenêtre distingue la connectivité, la vérification TLS/clé d’hôte, l’acceptation des identifiants et ce qui n’a **pas** été testé.
+Dans **Coffre-fort → Tester** ou directement depuis le sélecteur d'un workflow, chaque profil ouvre un assistant propre à son protocole :
 
-- **SSH/SFTP :** la clé d’hôte doit être préalablement vérifiée dans `known_hosts` ; authentification sans aucune commande.
-- **FTPS :** TLS, login et protection du canal de données, sans liste ni transfert de fichiers. **FTP en clair :** seule la connexion est testée, jamais l’envoi du mot de passe.
-- **LDAP :** LDAPS/STARTTLS, bind et lecture facultative de la base DN, aucune écriture.
-- **Matrix :** appel authentifié à `/_matrix/client/v3/account/whoami` ; hôte approuvé dans `MATRIX_ALLOWED_HOSTS`.
-- **Proxmox :** lecture authentifiée de `/api2/json/access/permissions` ; hôte approuvé dans `PROXMOX_ALLOWED_HOSTS`.
-- **API HTTPS :** simple GET du chemin `test_path` (défaut `/`), limité aux hôtes de `CONNECTION_TEST_ALLOWED_HOSTS`. Un code HTTP 2xx ne signifie **pas nécessairement** que le jeton est reconnu : choisir une URL nécessitant l’authentification. Aucune redirection suivie.
-- Un **identifiant générique** sans protocole ni serveur ne peut pas être testé automatiquement.
+- **SMTP :** connexion/TLS/authentification. Activer **Envoyer un e-mail de test réel**, saisir **un destinataire**, un objet et un message, puis cliquer sur **Envoyer le message de test**. OrigamiTasks effectue un véritable envoi via le profil enregistré, puis affiche le **Message-ID** pour rechercher le message. Le succès indique que le serveur SMTP a **accepté** le message ; il ne confirme **pas** la réception par la boîte. Vérifier boîte de réception, spams et journaux du système mail. Un envoi est limité à un destinataire et une tentative réussie toutes les 30 secondes par connexion.
+- **SSH / SFTP :** vérification de l'empreinte connue et de l'authentification. En option, ouverture du sous-système SFTP et lecture des métadonnées du répertoire, ou exécution explicite de la commande fixe `whoami` (Linux et Windows). Aucun transfert ni commande arbitraire.
+- **FTPS :** connexion, TLS et authentification ; lecture optionnelle du répertoire courant via `PWD`. Jamais d'upload ni de suppression. **FTP sans TLS :** connectivité uniquement, sans transmettre le mot de passe.
+- **LDAP / AD :** connexion chiffrée, bind, recherche ciblée optionnelle d'un login ou groupe sous les bases DN du profil. Filtres échappés, lecture seule.
+- **Matrix :** validation du token avec `whoami`, vérification optionnelle de l'appartenance du bot à une room, ou **envoi explicite** d'un message de test dans cette room (limité à un envoi toutes les 30 secondes par connexion). Vérifier ensuite son apparition dans la room. Aucune prise en charge E2EE.
+- **Proxmox :** permissions API, inventaire optionnel des nœuds et statut d'un nœud nommé via GET ; aucune opération sur les VM.
+- **API HTTPS :** méthode de lecture `GET` ou `HEAD`, chemin de diagnostic, statut HTTP attendu (`2xx` ou un code précis). Réservé à `CONNECTION_TEST_ALLOWED_HOSTS` ; aucune redirection suivie. Un HTTP 2xx ne démontre pas forcément la validité du token.
+- **Identifiant générique :** nécessite un protocole et une destination pour pouvoir être testé.
 
-Les tests sont réservés aux administrateurs et consignés dans l’audit. Restreindre également les flux sortants par pare-feu. Aucun mot de passe, token ou clé n’apparaît dans les résultats.
+Par défaut, les diagnostics **n'envoient aucun message** et ne modifient aucune donnée distante. Les envois SMTP/Matrix exigent un choix explicite dans l'assistant. Les tests sont réservés aux administrateurs, journalisés sans secrets et limités à des délais courts. Pour des destinations hors des listes autorisées, configurer le `.env` et filtrer les sorties réseau.
 
 ## SSH distant
 
