@@ -11,7 +11,8 @@ Le fichier `.env.example` constitue la liste de référence des paramètres. Red
 | `ORIGAMI_EXECUTOR_WORKERS` | Nombre d'exécutions concurrentes | `2` au départ, une seule instance API |
 | `MAX_STEP_SECONDS` | Limite d'une étape | `1800` |
 | `MATRIX_ALLOWED_HOSTS` | Hôtes Matrix HTTPS autorisés | ex. `matrix.example.org` |
-| `PROXMOX_ALLOWED_HOSTS` | API Proxmox autorisées | ex. `pve.example.org:8006` |
+| `PROXMOX_ALLOWED_HOSTS` | API Proxmox autorisées et tests de connexion | ex. `pve.example.org:8006` |
+| `CONNECTION_TEST_ALLOWED_HOSTS` | Hôtes HTTPS autorisés pour les tests de jetons API génériques | Vide par défaut ; ajouter seulement des hôtes approuvés |
 | `PROXMOX_CA_CERT` | CA PEM de confiance montée dans le conteneur | Si CA interne |
 | `ALLOW_PROXMOX_ACTIONS` | Active les actions VM encadrées | `false` avant revue |
 | `GIT_ALLOWED_ORIGIN` | Origine Git autorisée au service de mise à jour | Dépôt protégé uniquement |
@@ -35,6 +36,20 @@ Le menu **Administration → LDAP / Active Directory** permet de configurer l’
 ## Identifiants
 
 Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
+
+### Tester les connexions du coffre
+
+Depuis **Coffre-fort → Tester** ou la fenêtre de sélection d’une connexion dans un workflow, un administrateur peut lancer un diagnostic SMTP, SSH/SFTP, FTPS, LDAP, Matrix, Proxmox ou API HTTPS. La fenêtre distingue la connectivité, la vérification TLS/clé d’hôte, l’acceptation des identifiants et ce qui n’a **pas** été testé.
+
+- **SSH/SFTP :** la clé d’hôte doit être préalablement vérifiée dans `known_hosts` ; authentification sans aucune commande.
+- **FTPS :** TLS, login et protection du canal de données, sans liste ni transfert de fichiers. **FTP en clair :** seule la connexion est testée, jamais l’envoi du mot de passe.
+- **LDAP :** LDAPS/STARTTLS, bind et lecture facultative de la base DN, aucune écriture.
+- **Matrix :** appel authentifié à `/_matrix/client/v3/account/whoami` ; hôte approuvé dans `MATRIX_ALLOWED_HOSTS`.
+- **Proxmox :** lecture authentifiée de `/api2/json/access/permissions` ; hôte approuvé dans `PROXMOX_ALLOWED_HOSTS`.
+- **API HTTPS :** simple GET du chemin `test_path` (défaut `/`), limité aux hôtes de `CONNECTION_TEST_ALLOWED_HOSTS`. Un code HTTP 2xx ne signifie **pas nécessairement** que le jeton est reconnu : choisir une URL nécessitant l’authentification. Aucune redirection suivie.
+- Un **identifiant générique** sans protocole ni serveur ne peut pas être testé automatiquement.
+
+Les tests sont réservés aux administrateurs et consignés dans l’audit. Restreindre également les flux sortants par pare-feu. Aucun mot de passe, token ou clé n’apparaît dans les résultats.
 
 ## SSH distant
 
