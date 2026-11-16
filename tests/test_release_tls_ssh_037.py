@@ -122,3 +122,13 @@ def test_release_workflow_and_browser_preflight_contract():
     assert "preflight" in js and "worker_online" in js
     assert "update-worker-heartbeat.json" in (root/"app/main.py").read_text()
     assert "ALLOW_INSECURE_LDAP_TLS=false" in (root/".env.example").read_text()
+
+
+
+def test_published_docs_and_interface_use_generic_server_examples():
+    root=Path(__file__).resolve().parents[1]
+    for path in [*sorted((root/"docs").rglob("*.md")),
+                 root/"README.md",root/"static"/"app.js"]:
+        content=path.read_text()
+        assert "vl-exploittools-01" not in content, path
+        assert "infra.aday.fr" not in content, path
