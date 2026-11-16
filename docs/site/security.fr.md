@@ -22,6 +22,8 @@ Le gestionnaire de connexions permet la modification et le clonage côté serveu
 
 La configuration LDAP/AD enregistrée via l'administration est chiffrée en SQLite ; le mot de passe du bind n'est pas renvoyé au navigateur. Le test LDAP n'exécute que des opérations de lecture. Le test SMTP ne transmet aucun message et vérifie les certificats TLS ; l'authentification SMTP sans chiffrement est refusée. Les tests de connexion sont réservés aux administrateurs et doivent être limités aux hôtes approuvés par le pare-feu sortant.
 
+La configuration LDAP/AD enregistrée via l’administration est chiffrée en SQLite. Le test LDAP réalise uniquement un bind et des recherches en lecture seule, sans retourner le mot de passe. Le test SMTP ne transmet aucun message, vérifie les certificats TLS et refuse l’authentification sans TLS. Les tests sont réservés aux administrateurs ; le pare-feu sortant doit limiter les hôtes joignables.
+
 ## Mesures recommandées
 
 VLAN d'administration dédié, listes d'autorisation réseau, aucune socket Docker montée, terminaison TLS, revue de code des workflows, identités SSH limitées, aucun compte root/admin pour les tâches courantes, branche Git protégée, mises à jour PROD auditées, rotation des secrets et audit externe immuable.
