@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.2-rc1 — 16 novembre 2026
+
+- Ajout du menu **Administration → LDAP / Active Directory** : configuration persistante chiffrée, URI/port, TLS, bases DN, attribut de connexion, groupes de rôles et test en lecture seule.
+- Gestion des connexions propre au protocole : SMTP, SSH/SFTP, FTP/FTPS, LDAP, API, Matrix, Proxmox, générique.
+- SMTP : hôte/port, SSL ou STARTTLS, relais sans authentification, identifiants facultatifs, expéditeur par défaut et bouton de test sans envoi d'e-mail.
+- Les tâches SMTP réutilisent automatiquement les paramètres du coffre ; les paramètres techniques de tâche restent facultatifs.
+- Maintien de la compatibilité avec les anciens secrets du coffre. Tests API et sécurité ajoutés.
+
+
 ## 0.3.1-rc2 — 16 novembre 2026
 
 - Correction prioritaire du formulaire de connexion : interdiction de soumettre le mot de passe par GET.
