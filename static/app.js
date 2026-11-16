@@ -619,12 +619,20 @@ function credentialTestFields(entry){
    +'<p class="hint">Expéditeur configuré : '+e(publicData.from_address||(String(publicData.username||'').includes('@')?publicData.username:'à renseigner dans le profil SMTP'))+'</p>';
  }
  if(kind==='ssh'){
-  return '<p>Cette identité SSH peut être utilisée sur plusieurs serveurs. Choisir la cible du test : le coffre contient le login et le mot de passe ou la clé, **pas la machine**.</p>'
-   +sshTargetPicker('server_id','',!publicData.host)
-   +(publicData.host?'<div class="hint">Compatibilité : si aucun serveur n’est sélectionné, le test utilisera l’ancien hôte '+e(publicData.host)+'.</div>':'')
-   +'<div class="tool-row"><button type="button" class="btn tiny" data-action="ssh-goto-inventory">Gérer les serveurs / groupes</button></div>'
+  const modes=[['manual','Saisir un FQDN pour ce test'],['inventory','Choisir dans l’inventaire SSH']];
+  if(publicData.host)modes.push(['legacy','Utiliser l’ancien hôte enregistré']);
+  return '<p>Cette identité SSH est réutilisable : choisis un serveur seulement pour ce diagnostic. Le FQDN saisi manuellement ne sera pas enregistré.</p>'
+   +'<div class="field"><span>Mode de sélection de la cible SSH</span><select name="ssh_target_mode">'+option(modes,'manual')+'</select></div>'
+   +'<div class="ssh-test-mode" data-ssh-test-mode="manual"><div class="form-grid">'
+   +testOptionInput('manual_host','FQDN du serveur à tester','vl-exploittools-01.infra.aday.fr')
+   +'<div class="field"><span>Port SSH</span><input name="manual_port" type="number" min="1" max="65535" value="22"></div></div>'
+   +'<p class="hint">Connexion ponctuelle ; aucune création de serveur dans l’inventaire. L’empreinte SSH doit être approuvée dans known_hosts.</p></div>'
+   +'<div class="ssh-test-mode" data-ssh-test-mode="inventory" hidden>'
+   +sshTargetPicker('server_id','',false)
+   +'<div class="tool-row"><button type="button" class="btn tiny" data-action="ssh-goto-inventory">Gérer les serveurs / groupes</button></div></div>'
+   +(publicData.host?'<div class="ssh-test-mode" data-ssh-test-mode="legacy" hidden><p class="hint">Ancien serveur du coffre : '+e(publicData.host)+'. Aucun enregistrement modifié.</p></div>':'')
    +testOptionCheck('check_sftp','Tester également le sous-système SFTP','Lit uniquement les métadonnées du répertoire courant.')
-   +testOptionCheck('check_whoami','Exécuter la commande de diagnostic whoami','Commande fixe, en lecture seule. Aucune autre commande n’est autorisée par ce test.');
+   +testOptionCheck('check_whoami','Exécuter la commande de diagnostic whoami','Commande fixe, en lecture seule ; aucune autre commande autorisée.');
  }
  if(kind==='ftp'){
   return '<p>Vérification du port FTP/FTPS, de TLS et des identifiants. Aucun fichier ne sera transféré.</p>'
@@ -675,6 +683,16 @@ function updateCredentialTestVisibility(){
  if(recipient)recipient.required=!!form.elements.namedItem('send_email')?.checked;
  const room=form.elements.namedItem('room_id');
  if(room)room.required=!!(form.elements.namedItem('check_room')?.checked||form.elements.namedItem('send_message')?.checked);
+ if(form.dataset.id){
+  const mode=form.elements.namedItem('ssh_target_mode')?.value;
+  form.querySelectorAll('[data-ssh-test-mode]').forEach(el=>el.hidden=el.dataset.sshTestMode!==mode);
+  const host=form.elements.namedItem('manual_host');
+  const port=form.elements.namedItem('manual_port');
+  const inventory=form.elements.namedItem('server_id');
+  if(host)host.required=mode==='manual';
+  if(port)port.required=mode==='manual';
+  if(inventory)inventory.required=mode==='inventory';
+ }
  const send=!!(form.elements.namedItem('send_email')?.checked||form.elements.namedItem('send_message')?.checked);
  const submit=form.querySelector('button[type="submit"]');
  if(submit)submit.textContent=send?'Envoyer le message de test':'Lancer le diagnostic sans envoi';
@@ -701,7 +719,16 @@ function collectCredentialTestOptions(form,kind){
                  api:['method','path','expected_status']};
  (boolKeys[kind]||[]).forEach(k=>options[k]=data.has(k));
  (textKeys[kind]||[]).forEach(k=>{const value=String(data.get(k)||'').trim();if(value)options[k]=value});
- if(kind==='ssh'&&data.get('server_id'))options.server_id=Number(data.get('server_id'));
+ if(kind==='ssh'){
+  const mode=String(data.get('ssh_target_mode')||'manual');
+  if(mode==='manual'){
+   options.manual_host=String(data.get('manual_host')||'').trim();
+   options.manual_port=Number(data.get('manual_port')||22);
+  }else if(mode==='inventory'){
+   if(!data.get('server_id'))throw Error('Sélectionner un serveur dans l’inventaire SSH');
+   options.server_id=Number(data.get('server_id'));
+  }else if(mode!=='legacy')throw Error('Mode SSH inconnu');
+ }
  if(options.send_email||options.send_message)options.confirm_send=true;
  return options;
 }
