@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.3-rc1 — 2026-11-16
+
+- Added a **per-protocol credential diagnostic wizard** accessible from the vault and workflow editor.
+- **SMTP:** optional real test email with recipient, subject/body, Message-ID, clear SMTP-accepted vs inbox-delivered distinction, send rate limiting.
+- **SSH/SFTP:** optional metadata read and fixed `whoami` probe; **FTPS:** optional read-only PWD.
+- **LDAP:** optional user/group lookup; **Matrix:** room membership and explicit test message; **Proxmox:** node listing/status; **API:** GET/HEAD and expected status.
+- Explicit opt-in for sends, audited administrator-only actions, injection/secret protections and extended regression coverage.
+
+
 ## 0.3.2-rc2 — 2026-11-16
 
 - Added **Test** action for all vault connection types, with a detailed read-only result dialog and per-check status.
