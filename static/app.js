@@ -167,7 +167,7 @@ function sshGroupForm(groupId=null){
  const body='<form id="sshGroupForm" data-id="'+(group?.id||'')+'">'
   +'<div class="form-grid">'+field('Nom du groupe','name',group?.name||'')
   +field('Description','description',group?.description||'')+'</div>'
-  +'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="au-server01.infra.example.org&#10;sd-server01.infra.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>'
+  +'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="serveur-a.example.org&#10;serveur-b.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>'
   +'<small class="hint">Ajouter ou retirer des lignes modifie l’appartenance au groupe. Les serveurs retirés restent dans l’inventaire. Port 22 par défaut, préciser :2222 si nécessaire. Max. 250 serveurs.</small></div>'
   +'<div class="tool-row"><button class="btn primary" type="submit">'+(group?'Enregistrer le groupe':'Créer le groupe')+'</button>'
   +'<button class="btn" data-action="layer-close" data-layer="sshInventoryLayer" type="button">Annuler</button></div></form>';
@@ -630,7 +630,7 @@ function credentialTestFields(entry){
   return '<p>Cette identité SSH est réutilisable : choisis un serveur seulement pour ce diagnostic. Le FQDN saisi manuellement ne sera pas enregistré.</p>'
    +'<div class="field"><span>Mode de sélection de la cible SSH</span><select name="ssh_target_mode">'+option(modes,'manual')+'</select></div>'
    +'<div class="ssh-test-mode" data-ssh-test-mode="manual"><div class="form-grid">'
-   +testOptionInput('manual_host','FQDN du serveur à tester','vl-exploittools-01.infra.aday.fr')
+   +testOptionInput('manual_host','FQDN du serveur à tester','serveur.fr')
    +'<div class="field"><span>Port SSH</span><input name="manual_port" type="number" min="1" max="65535" value="22"></div></div>'
    +'<p class="hint">Connexion ponctuelle ; aucune création de serveur dans l’inventaire. L’empreinte SSH doit être approuvée dans known_hosts.</p></div>'
    +'<div class="ssh-test-mode" data-ssh-test-mode="inventory" hidden>'
