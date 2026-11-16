@@ -56,6 +56,10 @@ def test_vault_ssh_identity_can_be_tested_against_manual_fqdn(monkeypatch):
         assert called[0][0]['port']==2222
         assert called[0][0]['username']=='deploy'
         assert called[0][1]=={'check_sftp':True}
+        default_port=client.post(path,headers=headers,json={
+            'options':{'manual_host':'ci-test.infra.example.org'}})
+        assert default_port.status_code==200,default_port.text
+        assert called[1][0]['port']==22
         nohost=client.post(path,headers=headers,json={
             'options':{'manual_host':'','manual_port':22}})
         assert nohost.status_code==422
@@ -68,7 +72,7 @@ def test_vault_ssh_identity_can_be_tested_against_manual_fqdn(monkeypatch):
         conflict=client.post(path,headers=headers,json={
             'options':{'server_id':1,'manual_host':'ci-test.infra.example.org','manual_port':22}})
         assert conflict.status_code==422
-        assert len(called)==1
+        assert len(called)==2
 
         # A manual target must not be persisted to vault or SSH inventory.
         credential=next(x for x in client.get('/api/credentials').json()['items']
