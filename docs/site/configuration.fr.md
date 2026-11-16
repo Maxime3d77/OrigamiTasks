@@ -37,6 +37,21 @@ Le menu **Administration → LDAP / Active Directory** permet de configurer l’
 
 Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
 
+### Identités SSH et inventaire des serveurs
+
+Les connexions **SSH** du coffre sont des **identités réutilisables**, sans serveur associé : nom de profil, login, mot de passe **ou** clé privée OpenSSH, et phrase secrète facultative pour cette clé. Le mot de passe et la clé restent chiffrés dans le coffre et ne sont jamais réaffichés. Il est préférable d'utiliser une clé individuelle de service avec droits minimaux.
+
+Le menu **Administration → Serveurs & groupes SSH** permet de :
+
+- Créer un **groupe de serveurs** et saisir une liste de FQDN, un par ligne (par exemple `au-app01.infra.example.org` ou `sd-app01.infra.example.org:2222` si le port SSH diffère de 22).
+- Enregistrer des serveurs individuels avec leur FQDN, port et libellé ; rattacher une machine à **plusieurs groupes**.
+- Filtrer et retrouver les serveurs par groupe ou recherche de FQDN. Supprimer un groupe **ne supprime pas** les serveurs associés.
+- Depuis **Coffre-fort → Identité SSH → Tester**, choisir **un serveur de l'inventaire**, puis tester le compte et la clé privée sur cet hôte précis. Les vérifications optionnelles SFTP et `whoami` restent disponibles.
+
+Les tâches **SSH**, **SFTP** et le runner **Ansible** proposent un sélecteur de **serveur cible enregistré** : elles utilisent le compte SSH du coffre, mais le FQDN et le port du serveur sélectionné. Un groupe sert à **organiser et filtrer les cibles**, pas à exécuter implicitement une tâche sur tous les serveurs. Les anciennes connexions SSH contenant encore `host`/`port` continuent de fonctionner ; la sélection d'un serveur de l'inventaire les remplace pour cette tâche ou ce test.
+
+La vérification de la **clé d'hôte SSH** reste stricte (`known_hosts`) afin de prévenir les connexions à un serveur inconnu ou usurpé. Vérifier l'empreinte par un canal fiable avant de l'ajouter au fichier `SSH_KNOWN_HOSTS`. Aucune commande SSH n'est lancée lors du simple test d'authentification.
+
 ### Assistant de diagnostic des connexions
 
 Dans **Coffre-fort → Tester** ou directement depuis le sélecteur d'un workflow, chaque profil ouvre un assistant propre à son protocole :
