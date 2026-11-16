@@ -100,35 +100,52 @@ def public(values):
     return {k: v for k,v in values.items() if k in PUBLIC_KEYS}
 
 
+def open_smtp(values, timeout=8):
+    """Connect and negotiate SMTP TLS/authentication; caller must close the session."""
+    host=safe_host(values.get('host'))
+    port=int(values.get('port') or 587)
+    if not 1 <= port <= 65535:
+        raise ConnectionError('Port SMTP invalide')
+    mode=values.get('tls_mode') or 'starttls'
+    if mode not in ('ssl', 'starttls', 'none'):
+        raise ConnectionError('Mode TLS SMTP invalide')
+    auth=bool(values.get('auth',bool(values.get('username'))))
+    if auth and mode=='none':
+        raise ConnectionError('Authentification SMTP interdite sans TLS')
+    context=ssl.create_default_context()
+    conn=None
+    try:
+        if mode=='ssl':
+            conn=smtplib.SMTP_SSL(host,port,timeout=timeout,context=context)
+        else:
+            conn=smtplib.SMTP(host,port,timeout=timeout)
+        conn.ehlo()
+        if mode=='starttls':
+            conn.starttls(context=context)
+            conn.ehlo()
+        if auth:
+            if not values.get('username') or not values.get('password'):
+                raise ConnectionError('Identifiants SMTP obligatoires avec authentification')
+            conn.login(values['username'],values['password'])
+        return conn
+    except Exception:
+        if conn is not None:
+            conn.close()
+        raise
+
+
 def test_smtp(values):
     """No email is sent. TLS certificate verification is never disabled."""
-    host = safe_host(values.get('host'))
-    port = int(values.get('port') or 587)
-    mode = values.get('tls_mode') or 'starttls'
-    auth = bool(values.get('auth', bool(values.get('username'))))
-    if auth and mode == 'none':
-        raise ConnectionError('Authentification refusée sans TLS')
-    context = ssl.create_default_context()
     try:
-        if mode == 'ssl':
-            conn = smtplib.SMTP_SSL(host, port, timeout=8, context=context)
-        else:
-            conn = smtplib.SMTP(host, port, timeout=8)
+        conn=open_smtp(values,timeout=8)
         try:
-            conn.ehlo()
-            if mode == 'starttls':
-                conn.starttls(context=context)
-                conn.ehlo()
-            if auth:
-                conn.login(values['username'], values['password'])
-            return {'ok': True, 'message': 'Connexion SMTP, négociation TLS et authentification vérifiées (aucun e-mail envoyé).'
-                    if auth else 'Connexion SMTP et configuration TLS vérifiées (aucun e-mail envoyé).',
-                    'tls_mode': mode, 'authenticated': auth}
+            return {'ok':True,'message':'Connexion SMTP, sécurité et authentification vérifiées. Aucun e-mail envoyé.',
+                    'tls_mode':values.get('tls_mode','starttls'),
+                    'authenticated':bool(values.get('auth',bool(values.get('username'))))}
         finally:
             try:
                 conn.quit()
-            except (OSError, smtplib.SMTPException):
+            except (OSError,smtplib.SMTPException):
                 conn.close()
-    except (OSError, ssl.SSLError, smtplib.SMTPException, KeyError, ValueError) as exc:
-        # Do not return exception strings that could include credentials.
-        raise ConnectionError('Test SMTP échoué : ' + type(exc).__name__) from None
+    except Exception as exc:
+        raise ConnectionError('Test SMTP échoué : '+type(exc).__name__) from None
