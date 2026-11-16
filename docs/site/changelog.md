@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3-rc2 — 2026-11-16
+
+- Fixed protocol diagnostic checkboxes inheriting the global 100% text input width.
+- Constrained checkboxes to 18 px, preserved readable labels, and prevented horizontal dialog overflow.
+- Improved mobile layout and added a UI regression test.
+- Bumped CSS and JavaScript asset versions to refresh stale browser caches.
+
 ## 0.3.3-rc1 — 2026-11-16
 
 - Added a **per-protocol credential diagnostic wizard** accessible from the vault and workflow editor.
