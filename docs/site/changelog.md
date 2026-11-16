@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1-rc2 — 2026-11-16
+
+- Fixed login form unintentionally sending credentials via GET when the main JavaScript handler was unavailable.
+- Added independent POST/JSON login script, versioned assets and early submit-handler registration.
+- Added regression checks and guidance for handling passwords exposed in access logs and browser history.
+
 ## 0.3.1-rc1 — 2026-11-16
 
 - Fixed ignored sidebar clicks (`data-page` buttons now reach delegated navigation).
