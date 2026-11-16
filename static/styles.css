@@ -21,3 +21,63 @@
 .theme-cyber .brand b,.theme-cyber .nav-item.active{color:#dcff41}
 .theme-cyber .nav-item.active{background:linear-gradient(90deg,#c483ff27,transparent)}
 .theme-cyber .nav-item.active:before{background:#dcff41}
+
+
+/* 0.3.1 workflow studio: consistent icons, nested folders, accessible resource pickers */
+.nav-glyph{width:24px;height:24px;flex:0 0 24px;align-items:center}
+.nav-glyph svg{display:block;transition:stroke .18s,transform .18s}
+.nav-item:hover .nav-glyph svg{transform:translateX(2px)}
+.nav-item:focus-visible,.folder-node:focus-visible,.group-choice:focus-visible,
+.credential-entry button:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+.nav-item{transition:background .18s,color .18s}
+.jobs-layout{display:grid;grid-template-columns:224px minmax(0,1fr);gap:20px;align-items:start}
+.jobs-main{min-width:0}
+.folder-panel{border:1px solid var(--stroke);border-radius:14px;padding:14px 10px;background:var(--panel);position:sticky;top:95px}
+.folder-title{display:flex;align-items:center;justify-content:space-between;margin:3px 8px 13px;font-size:13px}
+.folder-node{display:flex;align-items:center;gap:9px;width:100%;min-height:36px;border:0;border-radius:8px;background:transparent;color:var(--muted);padding:8px 12px;font-size:12px;text-align:left}
+.folder-node:hover{background:var(--panel2);color:var(--text)}
+.folder-node.active{background:var(--glow);color:var(--yellow);font-weight:750}
+.folder-node small{margin-left:auto;color:var(--muted);font-size:11px}
+.folder-icon{font-size:17px;color:var(--purple);flex:0 0 16px}
+.folder-picker-list{max-height:450px;overflow:auto;border:1px solid var(--stroke);border-radius:11px;padding:7px;background:var(--panel2)}
+.manager-overlay{z-index:125;background:#090b11dd}
+.manager-dialog{width:min(890px,96vw);max-height:93vh}
+.manager-grid{display:grid;grid-template-columns:minmax(180px,.85fr) minmax(290px,1.15fr);gap:22px}
+.manager-grid h3{font-size:13px;margin:0 0 10px}
+.manager-grid .divider{margin:17px 0}
+.inline-picker{display:flex;align-items:stretch;gap:7px;min-width:0}
+.inline-picker>select,.inline-picker>input:not([type=hidden]){flex:1;min-width:85px}
+.inline-picker>.btn{flex:0 0 auto;white-space:nowrap}
+.selected-items{flex:1;display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-width:90px;min-height:40px;padding:5px 10px;border:1px solid var(--stroke);background:var(--field);border-radius:9px}
+.selected-items .chip{margin:1px}
+.selected-items .chip:is(button){cursor:pointer;background:var(--glow)}
+.group-results{max-height:340px;overflow:auto;border:1px solid var(--stroke);border-radius:11px;margin:14px 0}
+.group-choice{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;gap:3px 12px;width:100%;padding:12px;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--stroke);color:var(--text)}
+.group-choice:hover{background:var(--panel2)}
+.group-choice b{grid-column:1;font-size:12px}
+.group-choice small{grid-column:1;color:var(--muted);font-size:10px;overflow-wrap:anywhere}
+.group-choice>span{grid-column:2;grid-row:1/3;align-self:center;color:var(--yellow);font-size:19px}
+.credential-list{display:flex;flex-direction:column;gap:9px;max-height:500px;overflow:auto;padding:3px 1px}
+.credential-entry{display:flex;align-items:center;justify-content:space-between;gap:14px;border:1px solid var(--stroke);background:var(--panel2);border-radius:11px;padding:12px 14px}
+.credential-entry b{font-size:13px}
+.credential-entry p{margin:5px 0 0;max-width:380px;overflow-wrap:anywhere}
+.credential-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.modal.xl{width:min(1480px,97vw);max-height:96vh}
+.editor-side{max-height:min(68vh,820px)}
+.editor-meta{gap:14px}
+[data-schedule-mode][hidden]{display:none!important}
+@media(max-width:1100px){
+ .jobs-layout{grid-template-columns:190px minmax(0,1fr)}
+ .editor-meta{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .editor-columns{grid-template-columns:1fr}
+ .editor-side{max-height:none}
+}
+@media(max-width:720px){
+ .jobs-layout,.manager-grid{grid-template-columns:1fr}
+ .folder-panel{position:static}
+ .folder-picker-list{max-height:220px}
+ .inline-picker{flex-wrap:wrap}
+ .credential-entry{align-items:flex-start;flex-direction:column}
+ .credential-actions{justify-content:flex-start}
+ .editor-meta{grid-template-columns:1fr}
+}
