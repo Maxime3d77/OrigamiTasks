@@ -37,6 +37,14 @@ Le menu **Administration → LDAP / Active Directory** permet de configurer l’
 
 Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
 
+### Test SSH ponctuel sans inventaire
+
+Dans **Coffre-fort → Identité SSH → Tester**, choisir **Saisie manuelle**, indiquer le FQDN du serveur (par exemple `vl-exploittools-01.infra.aday.fr`) et son port SSH, 22 par défaut. La clé ou le mot de passe du coffre sont testés sur ce serveur, sans inscrire le FQDN dans l’inventaire ni l’enregistrer dans l’identité. Les modes **Inventaire SSH** et **Ancien hôte** restent disponibles. Les clés d’hôte SSH doivent toujours être vérifiées dans `SSH_KNOWN_HOSTS` pour empêcher les attaques de type usurpation de serveur.
+
+### Import de certificats LDAP CRT, DER ou PEM
+
+Dans **Administration → LDAP**, le bouton d’import accepte une CA publique `.crt`, `.cer`, `.der` ou `.pem`. Un fichier `.crt` peut contenir un certificat texte **PEM** ou binaire **DER** : les deux sont reconnus et convertis en fichier PEM de confiance. Les clés privées et les certificats serveur non-CA sont rejetés. **Enregistrer** la configuration LDAP après import, puis cliquer sur **Tester LDAP**. La vérification LDAPS/STARTTLS reste obligatoire ; il n’y a pas d’option globale « ignorer le certificat ».
+
 ### Identités SSH et inventaire des serveurs
 
 Les connexions **SSH** du coffre sont des **identités réutilisables**, sans serveur associé : nom de profil, login, mot de passe **ou** clé privée OpenSSH, et phrase secrète facultative pour cette clé. Le mot de passe et la clé restent chiffrés dans le coffre et ne sont jamais réaffichés. Il est préférable d'utiliser une clé individuelle de service avec droits minimaux.
