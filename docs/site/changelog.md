@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2-rc1 — 2026-11-16
+
+- Added **Administration → LDAP / Active Directory** with encrypted stored settings, URI/port, TLS, base DNs, user attribute, role groups and read-only connection diagnostics.
+- Added protocol-specific connection profiles for SMTP, SSH/SFTP, FTP/FTPS, LDAP, API, Matrix, Proxmox and generic secrets.
+- SMTP profiles configure server/port, implicit TLS or STARTTLS, optional authentication, default sender and no-send connection test.
+- SMTP tasks inherit vault connection settings while preserving optional step-level overrides.
+- Preserved legacy credential compatibility and added API/security tests.
+
+
 ## 0.3.1-rc2 — 2026-11-16
 
 - Fixed login form unintentionally sending credentials via GET when the main JavaScript handler was unavailable.
