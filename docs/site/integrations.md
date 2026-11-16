@@ -22,7 +22,9 @@ Example configuration:
 
 ## Email / SMTP
 
-Configure `host`, `port`, sender, recipient, subject, body and vault credentials. Use port 587 with STARTTLS or 465 with implicit TLS. SMTP supports an optional HTML alternative (`html_body`) and up to ten attachments (`attachments`) totalling 10 MB from `data/transfers`. Advanced templating, IMAP triggers and S/MIME are not yet available.
+In the **Vault**, create an **SMTP** connection with server/FQDN, port (typically 587 STARTTLS, 465 implicit SSL or 25 for an internal relay), transport security, optional SMTP authentication, login/password and default sender. Credentials are encrypted. **Test SMTP** performs the connection/TLS/authentication handshake **without sending email**. SMTP authentication without TLS is rejected.
+
+In an **Send email** workflow step, select that vault profile and enter recipients, subject and body. The step can leave host, port and sender empty to inherit the vault configuration; advanced task-level overrides remain available. SMTP supports an optional HTML alternative (`html_body`) and up to ten attachments (`attachments`) totalling 10 MB from `data/transfers`. Advanced templating, IMAP triggers and S/MIME are not yet available.
 
 ## HTTP and file transfer
 
