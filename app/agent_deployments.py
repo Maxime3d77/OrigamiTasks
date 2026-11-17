@@ -65,6 +65,14 @@ def queue(payload, actor):
         raise DeploymentError("FQDN en double dans le lot")
     cluster_id=payload.get("proxmox_datacenter_id")
     cluster_group=payload.get("proxmox_group_id")
+    enable_proxmox=payload.get("enable_proxmox",False)
+    enable_pra=payload.get("enable_pra",False)
+    if type(enable_proxmox) is not bool or type(enable_pra) is not bool:
+        raise DeploymentError("Options des modules agents invalides")
+    if enable_pra and not enable_proxmox:
+        raise DeploymentError("Le rôle PRA nécessite le rôle Proxmox")
+    if cluster_id is None and (enable_proxmox or enable_pra):
+        raise DeploymentError("Les rôles de site nécessitent un cluster Proxmox lié")
     if cluster_id is not None or cluster_group is not None:
         if (type(cluster_id) is not int or type(cluster_group) is not int or
                 platform != "linux" or any(sid is None for _host,_port,sid in targets)):
@@ -76,6 +84,14 @@ def queue(payload, actor):
             ).fetchone()
             if not mapping:
                 raise DeploymentError("Groupe SSH non lié à ce cluster Proxmox")
+            if enable_proxmox or enable_pra:
+                site=con.execute(
+                    "SELECT s.role FROM dr_site_datacenters l "
+                    "JOIN dr_sites s ON s.id=l.site_id WHERE l.datacenter_id=?",
+                    (cluster_id,)
+                ).fetchone()
+                if not site or (enable_pra and site["role"] not in ("primary","standby")):
+                    raise DeploymentError("Associer un site PRA valide avant d'activer ces modules")
             for host,ssh_port,sid in targets:
                 row=con.execute(
                     "SELECT 1 FROM proxmox_ssh_nodes n "
@@ -98,10 +114,10 @@ def queue(payload, actor):
     with db.session() as con:
         batch_id = con.execute(
             "INSERT INTO agent_deploy_batches(actor,platform,agent_group,total,status,created_at,"
-            "proxmox_datacenter_id,proxmox_group_id) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "proxmox_datacenter_id,proxmox_group_id,enable_proxmox,enable_pra) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (actor, platform, group_name, len(targets), 'queued', db.now(),
-             cluster_id,cluster_group)
+             cluster_id,cluster_group,int(enable_proxmox),int(enable_pra))
         ).lastrowid
         for host,port,sid in targets:
             con.execute(
@@ -134,7 +150,8 @@ def process_one():
         con.execute("BEGIN IMMEDIATE")
         item = con.execute(
             "SELECT t.id,t.batch_id,t.host,t.port,t.server_id,t.credential_id,"
-            "b.platform,b.agent_group,b.proxmox_datacenter_id,b.proxmox_group_id "
+            "b.platform,b.agent_group,b.proxmox_datacenter_id,b.proxmox_group_id,"
+            "b.enable_proxmox,b.enable_pra "
             "FROM agent_deploy_targets t "
             "JOIN agent_deploy_batches b ON b.id=t.batch_id "
             "WHERE t.status='queued' AND (? OR b.proxmox_datacenter_id IS NOT NULL) "
@@ -180,6 +197,17 @@ def process_one():
                 raise DeploymentError("Empreinte SSH non vérifiable depuis OrigamiTasks") from None
             if inspected['status']!='trusted':
                 raise DeploymentError("Clé hôte SSH inconnue ou modifiée : approbation nécessaire")
+            # A site deleted after approval blocks module-related rollout
+            # BEFORE the privileged SSH installation.
+            if target["enable_proxmox"] or target["enable_pra"]:
+                with db.session() as con:
+                    site=con.execute(
+                        "SELECT s.role FROM dr_site_datacenters l JOIN dr_sites s "
+                        "ON s.id=l.site_id WHERE l.datacenter_id=?",
+                        (target["proxmox_datacenter_id"],)
+                    ).fetchone()
+                if not site or (target["enable_pra"] and site["role"] not in ("primary","standby")):
+                    raise DeploymentError("Site PRA devenu invalide avant installation")
             cluster_authorized=True
         deployment={
             'name': target['host'],
@@ -204,6 +232,17 @@ def process_one():
                         "INSERT OR IGNORE INTO dr_site_agents(site_id,agent_id) VALUES(?,?)",
                         (site['site_id'],result['id'])
                     )
+                    if target["enable_proxmox"] or target["enable_pra"]:
+                        # The first authenticated poll (possibly after enrollment)
+                        # receives the desired safe roles automatically.
+                        roles={"standard":True,
+                               "proxmox":bool(target["enable_proxmox"]),
+                               "pra":bool(target["enable_pra"])}
+                        con.execute(
+                            "UPDATE agents SET modules_json=?,modules_revision=modules_revision+1 "
+                            "WHERE id=? AND modules_revision=1 AND revoked=0",
+                            (json.dumps(roles,separators=(',',':'),sort_keys=True),result['id'])
+                        )
     except Exception as exc:
         # Never return SSH failure messages (they may contain secrets).
         error = 'Installation échouée ('+type(exc).__name__+') ; vérifier SSH, sudo et journaux'
