@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.20-rc1 — 17 novembre 2026
+
+- **Déploiement agent Proxmox :** la clé SSH du coffre (authentification utilisateur, par exemple utilisée aussi par Rundeck) ne doit plus être confondue avec la **clé d'hôte du serveur SSH**. Le parcours **DC Proxmox → Agents du cluster** enregistre automatiquement au premier contact la clé publique d'hôte du nœud dans le `known_hosts` persistant d'OrigamiTasks (**TOFU / accept-new**), sans demander de valider manuellement chaque empreinte.
+- **Sécurité maintenue :** si une clé d'hôte déjà mémorisée change, le déploiement est bloqué. Le worker confirme encore l'appartenance du nœud au groupe/cluster avant SSH ; la connexion authentifiée compare ensuite la clé au `known_hosts` mémorisé. Le raccourci **Voir l'empreinte SSH (facultatif)** reste disponible pour une comparaison indépendante, notamment sur les hôtes critiques.
+- **Aucune modification du coffre :** la clé privée SSH et son utilisateur restent ceux sélectionnés par l'administrateur. La confiance initiale en la clé publique **du serveur** n'authentifie pas l'utilisateur et ne garantit pas l'accès à `sudo -n`, SFTP, Python 3 ou systemd.
+- **Limite TOFU :** une première connexion interceptée pourrait enregistrer une mauvaise clé ; le contrôle hors bande de l'empreinte reste recommandé sur les hyperviseurs sensibles. L'option automatique ne remplace jamais une clé déjà enregistrée.
+- **Historique :** les anciens lots en erreur restent historisés ; relancer explicitement un nouveau lot après mise à jour, d'abord sur un nœud non critique. Aucun agent n'est installé automatiquement par la simple mise à jour.
+
 ## 0.3.19-rc1 — 17 novembre 2026
 
 - **Isolation PRA PP/PROD** : création de **groupes PRA indépendants** entièrement nommables et modifiables depuis la page Proxmox (ex. Préproduction, Production, Recette). Chaque site source/secours est affecté à un groupe. Les clusters conservent une appartenance exclusive à un site. Les simulations entre groupes différents sont explicitement refusées par l'API et par l'interface ; aucune action sur l'infrastructure.
