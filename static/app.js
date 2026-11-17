@@ -634,6 +634,13 @@ async function openClusterAgentWizard(dcId, overrideSuffix=''){
   +selectField('Identité SSH avec clé privée (coffre)','credential_id',
      [['','— Choisir une identité SSH —'],...credentials.map(c=>[c.id,c.name])],'')
   +'<label class="field"><span>Plateforme installée</span><input value="Linux · agent unique Standard / Proxmox / PRA passif" readonly></label></div>'
+  +'<div class="fleet-modules"><strong>Modules à activer automatiquement après enrôlement</strong>'
+  +'<label class="test-wizard-option"><input type="checkbox" name="enable_proxmox" '+(site?'checked':'disabled')+'>'
+  +'<span><strong>Proxmox</strong><small>Associe les agents aux clusters du site. Les tokens PVE restent dans la console.</small></span></label>'
+  +'<label class="test-wizard-option"><input type="checkbox" name="enable_pra" '+(site&&['primary','standby'].includes(site.role)?'checked':'disabled')+'>'
+  +'<span><strong>PRA passif Linux</strong><small>Service local autonome de surveillance seulement, sans réplication, fencing ni bascule de VM.</small></span></label>'
+  +(!site?'<p class="hint">Rattacher d’abord le cluster à un site PRA pour activer ses modules automatiquement.</p>':'')
+  +'</div>'
   +'<label class="test-wizard-option"><input type="checkbox" name="approved" required><span>'
   +'<strong>Confirmer l’installation de l’agent sur tous les hôtes cochés</strong>'
   +'<small>Clé SSH approuvée par hôte obligatoire ; les nœuds non approuvés échoueront individuellement sans installation. '
@@ -1669,6 +1676,7 @@ async function handleSubmit(ev){
   if(!ids.length)return toast('Sélectionner les nœuds à équiper.',false);
   if(!f.get('credential_id'))return toast('Choisir une clé SSH du coffre.',false);
   if(!f.has('approved'))return toast('Confirmer explicitement le déploiement.',false);
+  if(f.has('enable_pra')&&!f.has('enable_proxmox'))return toast('Activer Proxmox avant le module PRA passif.',false);
   if(!confirm('Installer l’agent unique OrigamiTasks sur '+ids.length+' nœud(s) du cluster '+fleet.datacenter+' ?')){
    return
   }
@@ -1676,7 +1684,9 @@ async function handleSubmit(ev){
   try{
    const result=await api('/datacenters/'+dcId+'/agents/deploy','POST',{
     group_id:fleet.group_id,server_ids:ids,
-    credential_id:Number(f.get('credential_id')),approved:true
+    credential_id:Number(f.get('credential_id')),
+    enable_proxmox:f.has('enable_proxmox'),enable_pra:f.has('enable_pra'),
+    approved:true
    });
    closeModal();
    toast('Lot #'+result.batch_id+' lancé : '+result.total+' nœud(s).');
