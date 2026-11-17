@@ -6,7 +6,7 @@
 - **DR Sites → Deploy to nodes:** choose a cluster in the site, synchronize its nodes, then approve selected missing Linux agents for one batch using an SSH identity from the encrypted vault. Existing installations are detected; new agents are automatically attached to the DR site if the cluster has one.
 - **Authorization:** **no per-host `AGENT_DEPLOY_ALLOWED_HOSTS` list or global `.env` deployment toggle is required** for this distinct cluster-bound workflow. The worker rechecks cluster/group/node membership, trusted SSH host keys, FQDN and port **before each privileged install**. Ordinary arbitrary SSH deployment keeps its legacy global safety gate.
 - **SSH key verification:** host key inspection within the wizard; new keys must be compared against the host console and explicitly confirmed by fingerprint. Unapproved/mismatched keys fail individually, never TOFU.
-- **Scope:** Linux SSH/SFTP and sudo/root, up to 100 nodes per batch; no automatic reinstallation of existing agents. Proxmox and passive DR module roles can be configured after enrollment. **No VM replication/failover is enabled.**
+- **Scope:** Linux SSH/SFTP and sudo/root, up to 100 nodes per batch; no automatic reinstallation of existing agents. Proxmox and passive DR roles can be chosen in the wizard and automatically applied after enrollment, or changed later. Passive DR never replicates or promotes VMs. **No VM replication/failover is enabled.**
 
 ## 0.3.16-rc1 — 2026-11-17
 
