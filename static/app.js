@@ -788,11 +788,19 @@ function openDRSimulationForm(){
 }
 function showDRSimulationResult(result){
  const lines=(result.checks||[]).map(c=>
-  '<tr><td>'+e(c.name)+'</td><td>'+e(c.pass?'Validé':'Bloquant')+'</td><td>'+e(c.detail)+'</td></tr>').join('');
+  '<tr><td>'+e(c.name)+'</td><td>'+labelStatus(c.pass?'success':'failed')+'</td><td>'+e(c.detail)+'</td></tr>').join('');
+ const vms=result.protected_vms||[];
+ const rows=vms.map(vm=>'<tr><td>'+e(vm.source_vmid)+' · '+e(vm.source_name)+'</td>'
+  +'<td>'+e(vm.replica_name)+' (#'+e(vm.target_vmid)+')</td>'
+  +'<td>'+e(vm.target_node)+' · '+e(vm.target_storage)+'</td>'
+  +'<td>'+labelStatus('BLOCKED')+'</td></tr>').join('');
  modal('Simulation #'+e(result.simulation_id)+' · '+e(result.decision),
   '<div class="notice error"><b>Aucune bascule effectuée.</b> '+e(result.conclusion)+'</div>'
   +'<p>'+e(result.source.name)+' → '+e(result.target.name)+'</p>'
-  +'<table><thead><tr><th>Contrôle</th><th>Résultat</th><th>Explication</th></tr></thead><tbody>'+lines+'</tbody></table>'
+  +'<div class="table-wrap"><table><thead><tr><th>Contrôle</th><th>Résultat</th><th>Explication</th></tr></thead><tbody>'+lines+'</tbody></table></div>'
+  +'<h3>VM déclarées dans ce parcours PRA ('+vms.length+')</h3>'
+  +'<div class="table-wrap"><table><thead><tr><th>VM source</th><th>Réplique prévue</th><th>Nœud / stockage</th><th>Reprise</th></tr></thead>'
+  +'<tbody>'+(rows||'<tr><td colspan="4">Aucune VM sélectionnée : créer une fiche dans VM protégées PRA.</td></tr>')+'</tbody></table></div>'
   +'<p class="hint">'+e(result.next_step)+'</p>',
   '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
 }
