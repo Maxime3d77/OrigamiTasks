@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.21-rc1 — 2026-11-17
+
+- **Protected DR VMs**: dedicated admin page and shortcut from every DR group. Manually choose a discovered source QEMU VM, unoccupied target VMID, target cluster/node/image storage, desired frequency and planned transfer engine (planning, cold offline copy, PBS, array replication). Saving only creates a **protection plan record** with proposed `REP_<vm-name>`—**no target VM or disk is created**. Enforce one source VM / one target VMID per cluster and prohibit cross-environment PP/production mappings.
+- **Per-VM simulations**: read-only replication preflight, failover simulation, network partition and controller failure. Live Proxmox GET requests check source VM/status, target VMID collision, destination node and storage; an auditable report records missing safety prerequisites and stays **BLOCKED** without a verified replica, witness, fencing and automatic source restart prevention.
+- **Real replication is NOT yet implemented**: an explicit server endpoint rejects copy requests; no remote migration, vzdump, qmrestore, storage snapshot or LUN writes occur. Stored copy intervals are goals only, not scheduled jobs. Never invent a successful synchronization timestamp.
+- **Visual status and refresh**: green for online/success, amber for queued/running, red for failure/blocked/offline, grey for unknown/disabled. Agent/global refresh retrieves the latest *already received* heartbeat but cannot force an offline agent to reply.
+- **DR group rename**: backend returns committed group identity/name; frontend reloads group and sites independently with cache bypass for fresh titles.
+- **Protection integrity**: prevent deleting or reassigning sites with protected VMs; deleting a protection removes metadata only, not virtual machines/disks.
+
 ## 0.3.20-rc1 — 2026-11-17
 
 - **Proxmox cluster agent rollout:** distinguish the **user-authentication private SSH key** in the vault (e.g. also used by Rundeck) from the **server's SSH host key**. Under **Proxmox DC → Cluster agents**, first contact now automatically records the server public host key in persistent OrigamiTasks `known_hosts` (**TOFU / accept-new**), without requiring manual approval for every new node.
