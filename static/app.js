@@ -302,6 +302,7 @@ function agentsPage(){
    :'<button class="btn tiny primary" data-action="agent-modules" data-id="'+agent.id+'">Configurer modules</button>'
     +'<button class="btn tiny danger" data-action="agent-uninstall" data-id="'+agent.id+'">Désinstaller via SSH</button>'
      +(agent.revoked?'':'<button class="btn tiny" data-action="agent-revoke" data-id="'+agent.id+'">Révoquer le jeton</button>');
+  const refreshButton='<button class="btn tiny" data-action="agent-status-refresh" data-id="'+agent.id+'">↻ État reçu</button>';
   return '<tr><td class="name-cell">'+e(agent.name)+'<div class="muted tinytext">'+e(agent.hostname||'Non enrôlé')+'</div></td>'
     +'<td>'+e(agent.platform)+' · '+e(agent.version||'Version inconnue')+'</td>'
     +'<td>'+e(agent.group_name)+'</td><td>'+labelStatus(agent.status)+'</td>'
@@ -313,7 +314,7 @@ function agentsPage(){
     +'<td>'+(Number.isFinite(agent.cpu_percent)?e(agent.cpu_percent.toFixed(1))+' %':'—')+'</td>'
     +'<td>'+(Number.isFinite(agent.memory_mb)?e(agent.memory_mb.toFixed(1))+' Mio':'—')+'</td>'
     +'<td>'+dt(agent.last_seen)+'</td>'
-    +'<td class="agent-action-buttons">'+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
+    +'<td class="agent-action-buttons">'+refreshButton+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
  }).join('');
  return title('Agents Linux et Windows','Agent Linux modulaire ; agent Windows dédié aux actions des workflows.',
   '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button>'
@@ -1821,6 +1822,52 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='fleet-ssh-key'){await inspectClusterSSHKey(b);return}
  if(a==='dr-site-fleet'){await openPRAClusterSelector(id);return}
+ if(a==='agents-status-refresh'||a==='agent-status-refresh'){
+  state.agents=(await api('/agents')).items;
+  state.drSites=(await api('/dr/sites')).items;
+  render();
+  toast('Derniers états enregistrés rechargés ; le prochain heartbeat de chaque agent arrivera automatiquement.');
+  return;
+ }
+ if(a==='dr-plans-refresh'){
+  state.drPlans=(await api('/dr/plans')).items;
+  state.drSites=(await api('/dr/sites')).items;
+  render();toast('Groupes et sites PRA actualisés depuis la base');return;
+ }
+ if(a==='dr-plan-protected'){
+  state.drVMPlanFilter=String(id);
+  showPage('protected-vms');return;
+ }
+ if(a==='dr-vm-new'){openProtectedVMWizard();return}
+ if(a==='protect-vm-resource'){
+  closeModal();openProtectedVMWizard(null,id,Number(b.dataset.vmid));return
+ }
+ if(a==='dr-vm-edit'){openProtectedVMWizard(id);return}
+ if(a==='dr-vm-preflight'||a==='dr-vm-failover'){
+  const scenario=a==='dr-vm-preflight'?'replication_preflight':'failover_simulation';
+  toast('Tests Proxmox en lecture seule en cours…');
+  const result=await api('/dr/vms/'+id+'/simulate','POST',{scenario});
+  state.drProtectedVMs=(await api('/dr/vms')).items;
+  showProtectedVMTest(result);return;
+ }
+ if(a==='dr-vm-history'){await openProtectedVMHistory(id);return}
+ if(a==='dr-vm-refresh'){
+  state.drProtectedVMs=(await api('/dr/vms')).items;
+  render();toast('États et derniers tests rechargés depuis la base');return;
+ }
+ if(a==='dr-vm-pause'){
+  const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
+  if(!vm)return;
+  const action=vm.state==='paused'?'planned':'paused';
+  await api('/dr/vms/'+id+'/state','POST',{state:action});
+  state.drProtectedVMs=(await api('/dr/vms')).items;
+  render();toast('Préparation VM '+(action==='paused'?'en pause':'reprise')+' ; aucune réplication réelle déclenchée');return;
+ }
+ if(a==='dr-vm-delete'){
+  if(!confirm('Retirer ce plan de protection VM ? Aucune VM ou disque Proxmox ne sera supprimé.'))return;
+  await api('/dr/vms/'+id,'DELETE');state.drProtectedVMs=(await api('/dr/vms')).items;
+  render();toast('Plan VM retiré ; aucune action Proxmox');return;
+ }
  if(a==='dr-plan-new'){openDRPlanForm();return}
  if(a==='dr-plan-edit'){openDRPlanForm(id);return}
  if(a==='dr-plan-delete'){
@@ -1879,6 +1926,42 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   hydrateAdmins();return
  }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='drVMSourceForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target);
+  const button=ev.target.querySelector('[type=submit]');
+  if(button)button.disabled=true;
+  try{
+   await openProtectedVMConfig(Number(f.get('dr_vm_plan')),
+    Number(f.get('dr_vm_source_dc')),Number(f.get('dr_vm_target_dc')));
+  }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
+  return;
+ }
+ if(ev.target.id==='drVMConfigForm'){
+  ev.preventDefault();
+  const r=state.drVMOptions,f=new FormData(ev.target);
+  if(!r)return toast('Découverte de VM expirée, recommencer.',false);
+  const currentId=Number(ev.target.dataset.id)||0;
+  const body={
+   plan_id:r.plan_id,source_dc_id:r.source_dc_id,target_dc_id:r.target_dc_id,
+   source_vmid:Number(f.get('source_vmid')),target_vmid:Number(f.get('target_vmid')),
+   target_node:String(f.get('target_node')||''),target_storage:String(f.get('target_storage')||''),
+   interval_minutes:Number(f.get('interval_minutes')),engine:String(f.get('engine'))
+  };
+  const button=ev.target.querySelector('[type=submit]');
+  if(button)button.disabled=true;
+  try{
+   const result=await api(currentId?'/dr/vms/'+currentId:'/dr/vms',
+     currentId?'PUT':'POST',body);
+   closeModal();state.drProtectedVMs=(await api('/dr/vms')).items;
+   state.drVMPlanFilter=String(body.plan_id);
+   showPage('protected-vms');
+   toast('VM #'+body.source_vmid+' enregistrée : cible '+result.replica_name+
+         ' (plan seulement, aucun disque copié)');
+  }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
+  return;
+ }
+
  if(ev.target.id==='drPlanForm'){
   ev.preventDefault();
   const f=new FormData(ev.target),id=Number(ev.target.dataset.id)||0;
@@ -2163,6 +2246,17 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  if(ev.target.id==='proxmoxResourceSearch'&&state.proxmoxDiscovery){state.proxmoxDiscovery.query=ev.target.value;state.proxmoxDiscovery.page=0;renderProxmoxDiscoveryResults();}
  if(ev.target.id==='proxmoxDcSearch'){const q=ev.target.value.toLowerCase().trim();$$('[data-dc-search]').forEach(card=>card.hidden=!card.dataset.dcSearch.includes(q));}
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',async ev=>{
+ if(ev.target.id==='drVMPlanFilter'){
+  state.drVMPlanFilter=String(ev.target.value||'all');render();return;
+ }
+ if(ev.target.name==='dr_vm_plan'&&ev.target.closest('#drVMSourceForm')){
+  const form=ev.target.closest('form'),planId=Number(ev.target.value);
+  const src=drVMClusters(planId,'primary'),dst=drVMClusters(planId,'standby');
+  form.elements.namedItem('dr_vm_source_dc').innerHTML=option(src.map(x=>[x.id,x.name]),src[0]?.id);
+  form.elements.namedItem('dr_vm_target_dc').innerHTML=option(dst.map(x=>[x.id,x.name]),dst[0]?.id);
+  return;
+ }
+
  if(ev.target.name==='dr_sim_plan'&&ev.target.closest('#drSimulationForm')){
   const planId=Number(ev.target.value);
   const sites=(state.drSites||[]).filter(site=>site.plan_id===planId);
