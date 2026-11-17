@@ -151,7 +151,8 @@ CREATE TABLE IF NOT EXISTS agents (
  group_name TEXT NOT NULL DEFAULT 'default', hostname TEXT NOT NULL DEFAULT '',
  version TEXT NOT NULL DEFAULT '', enroll_hash TEXT, enroll_expires TEXT,
  token_hash TEXT, enrolled INTEGER NOT NULL DEFAULT 0,
- revoked INTEGER NOT NULL DEFAULT 0, last_seen TEXT, created_at TEXT NOT NULL
+ revoked INTEGER NOT NULL DEFAULT 0, last_seen TEXT,
+ cpu_percent REAL, memory_mb REAL, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agent_deploy_batches (
  id INTEGER PRIMARY KEY, actor TEXT NOT NULL, platform TEXT NOT NULL,
@@ -195,6 +196,8 @@ def initialize():
             ("datacenters", "kind", "TEXT NOT NULL DEFAULT 'cluster'"),
             ("datacenters", "ca_cert", "TEXT NOT NULL DEFAULT ''"),
             ("datacenters", "skip_tls_verification", "INTEGER NOT NULL DEFAULT 0"),
+            ("agents", "cpu_percent", "REAL"),
+            ("agents", "memory_mb", "REAL"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:
