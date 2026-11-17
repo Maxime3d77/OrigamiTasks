@@ -67,6 +67,7 @@ def cleanup(client,headers,dc_id,cred_id,group_id,agent_ids=()):
 def test_cluster_group_preview_and_agent_batch_fail_closed(monkeypatch):
     monkeypatch.setattr(config,'ALLOW_AGENT_REMOTE_DEPLOY',False)
     monkeypatch.setattr(config,'AGENT_DEPLOY_ALLOWED_HOSTS','')
+    monkeypatch.setattr(config,'AGENT_SERVER_URL','https://origami.example.org')
     monkeypatch.setattr(agent_deployments,'start',lambda:None)
     monkeypatch.setattr(proxmox_fleet,'_discover',
                         lambda dc:['sd-cardano','sd-rubis'])
