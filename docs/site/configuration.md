@@ -1,5 +1,15 @@
 # Configuration reference
 
+### Add a Proxmox server or cluster entirely in the browser (0.3.11)
+
+1. Open **Administration → Proxmox servers and clusters**, then **Add a server / cluster**.
+2. Choose **Proxmox cluster** (discover member nodes) or **Standalone Proxmox node**, enter a descriptive name and an HTTPS API URL (for example `https://pve.example.org:8006`).
+3. Either select an existing vault token, or enter **user@pve!tokenname** and its secret directly in the wizard. OrigamiTasks creates the encrypted vault profile automatically.
+4. For an internal CA, **upload the public CA file** (PEM/CRT/CER/DER), or select a previously uploaded CA. Its SHA-256 identifier is linked to this target; **no `.env` change or Docker restart** is needed.
+5. Use **Test API**, **Discover nodes/VMs**, or **Edit** to change the target's settings.
+
+Public CA bundles are stored in `data/proxmox-cas`, separately from LDAP. TLS certificate and hostname verification remain mandatory. Legacy `PROXMOX_CA_CERT` is only a fallback when no CA is selected in the web interface. Destructive VM actions retain separate authorization controls; registering a cluster does not enable those actions by itself.
+
 The `.env.example` file is the normative list of settings. Restart the container after changing environment variables. **Never commit `.env`.**
 
 | Variable | Meaning | Recommended |
