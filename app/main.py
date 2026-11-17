@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites
 
 
 @asynccontextmanager
@@ -479,6 +479,63 @@ def test_datacenter(dc_id:int,request:Request):
     except (connection_tests.ConnectionTestError,integrations.IntegrationError,
             proxmox_cas.ProxmoxCAError) as exc:
         raise HTTPException(422,str(exc)) from None
+
+
+@app.get('/api/dr/sites')
+def get_dr_sites(request:Request):
+    security.require(request,role='admin')
+    return {'items':dr_sites.list_sites()}
+
+
+@app.post('/api/dr/sites')
+def post_dr_site(request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        site_id=dr_sites.save_site(payload)
+    except dr_sites.DRSiteError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.site.create',site_id,'Enregistrement du site / lecture seule')
+    return {'id':site_id}
+
+
+@app.put('/api/dr/sites/{site_id}')
+def put_dr_site(site_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        dr_sites.save_site(payload,site_id)
+    except dr_sites.DRSiteError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.site.update',site_id,'Mise à jour des associations')
+    return {'ok':True}
+
+
+@app.delete('/api/dr/sites/{site_id}')
+def delete_dr_site(site_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        name=dr_sites.delete_site(site_id)
+    except dr_sites.DRSiteError as exc:
+        raise HTTPException(404,str(exc)) from None
+    db.audit(user['username'],'dr.site.delete',site_id,name)
+    return {'ok':True}
+
+
+@app.post('/api/dr/simulate')
+def simulate_dr_failure(request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=dr_sites.simulate(payload,user['username'])
+    except dr_sites.DRSiteError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.simulation',result['simulation_id'],
+             result['scenario']+' : '+result['decision']+' (AUCUNE ACTION SUR INFRASTRUCTURE)')
+    return result
+
+
+@app.get('/api/dr/simulations')
+def list_dr_simulations(request:Request):
+    security.require(request,role='admin')
+    return {'items':dr_sites.history()}
 
 
 @app.get('/api/datacenters/{dc_id}/discover')
