@@ -135,7 +135,7 @@ def test_protected_vm_create_dry_run_failover_no_vm_actions(monkeypatch):
                                                       vmid=211,target_vmid=300)).status_code==422
             # All operations remain within the DR plan and are audit logged.
             for mode in ('replication_preflight','failover_simulation',
-                         'network_partition','console_down'):
+                         'failback_simulation','network_partition','console_down'):
                 test=client.post('/api/dr/vms/'+str(vid)+'/simulate',
                                  headers=h,json={'scenario':mode})
                 assert test.status_code==200,test.text
@@ -151,7 +151,7 @@ def test_protected_vm_create_dry_run_failover_no_vm_actions(monkeypatch):
                 assert any(c['name']=='Fencing source' and not c['pass']
                            for c in result['checks'])
             history=client.get('/api/dr/vms/'+str(vid)+'/tests').json()['items']
-            assert len(history)==4
+            assert len(history)==5
             whole_site=client.post('/api/dr/simulate',headers=h,json={
                 'source_site_id':srcsite,'target_site_id':dstsite,
                 'scenario':'cluster_down'
