@@ -10,6 +10,8 @@ storage, source fencing, witness ownership and rollback semantics.
 """
 import json
 import re
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 from . import db, dr_sites, integrations
 
@@ -310,6 +312,40 @@ def _probe(dc_id):
         return None,"API Proxmox injoignable ou certificat TLS non vérifiable"
 
 
+def _agent_health(site_id):
+    """Last received heartbeat only; never contact agents or execute commands."""
+    cutoff=(datetime.now(timezone.utc)-timedelta(seconds=90)).isoformat(timespec="seconds")
+    with db.session() as con:
+        rows=con.execute(
+            "SELECT a.id,a.enrolled,a.revoked,a.uninstalled_at,a.last_seen "
+            "FROM agents a JOIN dr_site_agents l ON l.agent_id=a.id "
+            "WHERE l.site_id=? AND a.platform='linux'",
+            (site_id,)
+        ).fetchall()
+    return {"total":len(rows),"online":sum(bool(r["enrolled"] and
+           not r["revoked"] and not r["uninstalled_at"] and
+           r["last_seen"] and r["last_seen"]>=cutoff) for r in rows)}
+
+
+def _node_storage(dc, credential, node, storage):
+    """PVE node-level runtime storage status, not just cluster configuration."""
+    if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,100}",node):
+        return None
+    rows=integrations.proxmox_request(
+        dc["url"],credential,
+        "/api2/json/nodes/"+quote(node,safe="")+"/storage",timeout=18
+    )
+    if not isinstance(rows,list):
+        return None
+    candidates=[r for r in rows if isinstance(r,dict) and r.get("storage")==storage]
+    if len(candidates)!=1:
+        return None
+    r=candidates[0]
+    return {"active":r.get("active") in (1,True),
+            "available_bytes":r.get("avail") if type(r.get("avail")) is int else None,
+            "total_bytes":r.get("total") if type(r.get("total")) is int else None}
+
+
 def run_readonly_test(vm_id, scenario, actor):
     if scenario not in SCENARIOS:
         raise ProtectedVMError("Type de test PRA inconnu")
@@ -321,6 +357,14 @@ def run_readonly_test(vm_id, scenario, actor):
     check("Périmètre PRA",True,"Deux clusters configurés sur des sites distincts du groupe")
     check("Protection active dans l'inventaire",vm["state"]=="planned",
           "Protection en préparation" if vm["state"]=="planned" else "Protection mise en pause")
+    source_agents=_agent_health(vm["source_site_id"])
+    target_agents=_agent_health(vm["target_site_id"])
+    check("Agent Linux source en ligne",source_agents["online"]>0,
+          str(source_agents["online"])+" / "+str(source_agents["total"])+
+          " agent(s) Linux avec heartbeat récent sur le site principal")
+    check("Agent Linux secours en ligne",target_agents["online"]>0,
+          str(target_agents["online"])+" / "+str(target_agents["total"])+
+          " agent(s) Linux avec heartbeat récent sur le site secours")
     source,source_error=_probe(vm["source_dc_id"])
     target,target_error=_probe(vm["target_dc_id"])
     source_vm=None
@@ -369,9 +413,28 @@ def run_readonly_test(vm_id, scenario, actor):
     check("Stockage cible déclaré",available_storage,
           "Stockage VM "+vm["target_storage"]+
           (" défini dans Proxmox" if available_storage else " non vérifié ou indisponible"))
-    # No per-VM source disk consistency or target replication engine exists.
+    node_store=None
+    if target and available_storage:
+        try:
+            node_store=_node_storage(target[0],target[1],
+                                     vm["target_node"],vm["target_storage"])
+        except Exception:
+            node_store=None
+    check("Stockage accessible depuis le nœud cible",
+          bool(node_store and node_store["active"]),
+          ("Actif sur le nœud cible, espace indicatif libre : "+
+           (str(node_store["available_bytes"])+" octets" if
+            node_store["available_bytes"] is not None else "inconnu")) if
+          node_store and node_store["active"] else
+          "Statut runtime du stockage cible indisponible ou inactif")
+    # Node free space may be insufficient for one or more guest disks.
+    # This observation alone must never authorize disk writes.
     check("Capacité cible et mapping volumes validés",False,
-          "Volume iSCSI/LVM potentiellement partagé ; espace, LUN, chemins et mapping à vérifier")
+          "Capacité, LUN, groupes de cohérence et tous les disques VM à vérifier ; "
+          "les VGs iSCSI/LVM peuvent être partagés entre plusieurs VM")
+    check("Superviseurs PRA autonomes et arbitrage en service",False,
+          "Heartbeat d'agent standard ≠ supervision PRA autonome, et aucun "
+          "témoin/fencing indépendant n'est opérationnel")
     check("Moteur de copie effectif",False,
           "Aucune copie froide, sauvegarde PBS ou synchronisation Pure n'est exécutée "
           "par OrigamiTasks. Choix actuel : "+STRATEGIES[vm["engine"]])
