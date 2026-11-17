@@ -21,7 +21,7 @@ class LDAPSettingsError(Exception):
     pass
 
 
-def import_ca(pem_text=None, der_base64=None):
+def import_ca(pem_text=None, der_base64=None, *, store='ldap-cas'):
     """Accept CA certificates from .pem or .crt/.cer files in PEM or binary DER.
 
     The container always stores a validated public PEM CA file. Neither
@@ -112,7 +112,9 @@ def import_ca(pem_text=None, der_base64=None):
     # Keep public CA certificates only, even when a server leaf is bundled.
     normal='\n'.join(accepted)+'\n'
     digest=hashlib.sha256(normal.encode()).hexdigest()
-    root=config.DATA/'ldap-cas'
+    if store not in ('ldap-cas','proxmox-cas'):
+        raise LDAPSettingsError('Répertoire CA inconnu')
+    root=config.DATA/store
     root.mkdir(parents=True,exist_ok=True,mode=0o700)
     path=root/(digest+'.pem')
     if not path.exists():
