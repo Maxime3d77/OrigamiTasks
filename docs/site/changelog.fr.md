@@ -1,5 +1,10 @@
 # Historique des modifications
 
+## 0.3.13-rc1 — 17 novembre 2026
+
+- **Découverte Proxmox :** recherche instantanée sur nom, VMID, nœud, ID, statut et stockage ; filtres VM (QEMU), LXC, nœuds et stockages ; tri nom/type/VMID/nœud/état croissant ou décroissant ; pagination de 100 résultats et actualisation via API. L'évaluation PRA existante reste accessible pour les VM.
+- **PRA SD → AU :** dossier de conception bilingue des agents intersites, copies REP_ éteintes, synchronisation adaptée au stockage, témoin indépendant, fencing et anti-double-démarrage, bascule/retour arrière. **Aucune réplication ni bascule automatique n'est implémentée par cette version** ; tout démarrage automatique nécessite une validation du témoin/fencing et des exercices de panne.
+
 ## 0.3.12-rc1 — 17 novembre 2026
 
 - **Proxmox :** option administrateur **« Ignorer la vérification du certificat TLS (certificat autosigné) »** sur chaque fiche serveur/cluster et dans les connexions Proxmox du coffre. Désactivée par défaut, stockée en base, réversible à tout moment ; les autres serveurs restent vérifiés. HTTPS conserve son chiffrement, mais l’identité du serveur n'est pas vérifiée si l'option est activée.
