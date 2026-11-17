@@ -37,7 +37,9 @@ def _target(raw):
 
 
 def queue(payload, actor):
-    if not config.ALLOW_AGENT_REMOTE_DEPLOY:
+    # Managed cluster batches are a separate scoped, admin-approved pathway.
+    # The legacy global toggle still governs all other arbitrary SSH deployments.
+    if not config.ALLOW_AGENT_REMOTE_DEPLOY and payload.get('proxmox_datacenter_id') is None:
         raise DeploymentError("Déploiement distant désactivé (ALLOW_AGENT_REMOTE_DEPLOY)")
     if payload.get('approved') is not True:
         raise DeploymentError("Confirmation explicite du déploiement obligatoire")
