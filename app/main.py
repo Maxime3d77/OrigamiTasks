@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings
 
 
 @asynccontextmanager
@@ -109,11 +109,26 @@ def logout(request: Request, response: Response):
 
 
 # Administration endpoints require session + CSRF; agent endpoints are bearer-only.
+@app.get('/api/admin/agent-settings')
+def read_agent_settings(request:Request):
+    security.require(request,role='admin')
+    return agent_settings.current()
+
+
+@app.put('/api/admin/agent-settings')
+def save_agent_settings(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    value=agent_settings.update(payload)
+    db.audit(user['username'],'agents.controller-url.update','agents',
+             'URL HTTPS de contact des agents modifiée')
+    return value
+
+
 @app.get('/api/agents')
 def list_agents(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
-        rows=con.execute('SELECT id,name,platform,group_name,hostname,version,enrolled,revoked,last_seen,cpu_percent,memory_mb,uninstalled_at,modules_json,modules_revision,modules_applied_revision,modules_reported_json,created_at FROM agents ORDER BY id DESC').fetchall()
+        rows=con.execute('SELECT id,name,platform,group_name,hostname,version,enrolled,revoked,last_seen,cpu_percent,memory_mb,uninstalled_at,installed_controller_url,modules_json,modules_revision,modules_applied_revision,modules_reported_json,created_at FROM agents ORDER BY id DESC').fetchall()
     cutoff=agents.utc_plus(-90)
     return {'items':[agent_modules.describe(dict(r,status=('uninstalled' if r['uninstalled_at'] else 'revoked' if r['revoked'] else 'pending' if not r['enrolled'] else
         'online' if r['last_seen'] and r['last_seen']>=cutoff else 'offline'))) for r in rows]}
