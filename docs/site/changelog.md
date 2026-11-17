@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.12-rc1 — 2026-11-17
+
+- **Proxmox:** per-node/per-cluster administrator checkbox **Skip TLS certificate verification (self-signed certificate)**, also available in vault Proxmox credentials. Disabled by default, stored persistently, reversible and scoped to the selected endpoint. HTTPS remains encrypted, but server identity is not authenticated in bypass mode.
+- **Diagnostics:** distinguish certificate validation, TLS handshake, DNS/port/firewall, token and permission errors. Explicit warning when a diagnostic skipped certificate validation.
+- **UI:** responsive Proxmox cards with two-column actions, unobstructed add-server button below heading, and fixed FQDN search.
+- **Compatibility:** nondestructive SQLite migration; existing inventory/workflows remain, no `.env` editing.
+
 ## 0.3.11-rc1 — 2026-11-17
 
 - **Fully web-managed Proxmox registration:** add or edit a cluster or standalone node, issue a vault-backed encrypted API token profile, upload a trusted CA from the browser and assign it per target, without editing `.env` or restarting Docker.
