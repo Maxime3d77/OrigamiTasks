@@ -12,7 +12,7 @@
 
 ### Agents inter-sites et stratégie de reprise SD → AU
 
-Le futur module de réplication doit gérer **SD actif → AU copie REP_ arrêtée**, des agents appairés en mTLS, un **témoin indépendant**, du **fencing vérifié** pour éviter tout double démarrage, et un **failback demandé explicitement** après synchronisation AU→SD. Une panne d'agent, un ping absent ou une API source injoignable **ne suffisent jamais** à démarrer la copie AU. **Architecture de référence** : [RFC PRA intersites](../ARCHITECTURE-PRA-INTERSITES.fr.md). Cette architecture reste au stade de la conception.
+Le futur module de réplication doit gérer **SD actif → AU copie REP_ arrêtée**, des agents appairés en mTLS, un **témoin indépendant**, du **fencing vérifié** pour éviter tout double démarrage, et un **failback demandé explicitement** après synchronisation AU→SD. Une panne d'agent, un ping absent ou une API source injoignable **ne suffisent jamais** à démarrer la copie AU. **Architecture de référence** : fichier docs/ARCHITECTURE-PRA-INTERSITES.fr.md. Cette architecture reste au stade de la conception.
 
 ## Quel moteur de réplication ?
 
