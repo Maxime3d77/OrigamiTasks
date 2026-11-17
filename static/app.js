@@ -563,6 +563,7 @@ function protectedVMsPage(){
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
+   +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
    +'<button class="btn tiny" data-action="dr-vm-edit" data-id="'+vm.id+'">Modifier</button>'
    +'<button class="btn tiny" data-action="dr-vm-pause" data-id="'+vm.id+'">'+(vm.state==='paused'?'Reprendre la préparation':'Mettre en pause')+'</button>'
@@ -1851,8 +1852,9 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   closeModal();openProtectedVMWizard(null,id,Number(b.dataset.vmid));return
  }
  if(a==='dr-vm-edit'){openProtectedVMWizard(id);return}
- if(a==='dr-vm-preflight'||a==='dr-vm-failover'){
-  const scenario=a==='dr-vm-preflight'?'replication_preflight':'failover_simulation';
+ if(a==='dr-vm-preflight'||a==='dr-vm-failover'||a==='dr-vm-failback'){
+  const scenario=a==='dr-vm-preflight'?'replication_preflight':
+                 a==='dr-vm-failback'?'failback_simulation':'failover_simulation';
   toast('Tests Proxmox en lecture seule en cours…');
   const result=await api('/dr/vms/'+id+'/simulate','POST',{scenario});
   state.drProtectedVMs=(await api('/dr/vms')).items;
