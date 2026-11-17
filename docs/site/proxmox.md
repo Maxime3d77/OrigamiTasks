@@ -1,5 +1,17 @@
 # Proxmox VE: discovery and disaster recovery
 
+### Deploy the unified agent to all PVE cluster nodes directly from Proxmox (0.3.17-rc1)
+
+On a Proxmox cluster card choose **Cluster agents**, or under a named DR site choose **Deploy to nodes**, then select the cluster if the site contains several.
+
+1. OrigamiTasks queries the actual PVE cluster API for nodes, derives their SSH FQDN from the Proxmox API DNS suffix (for example `sd-cardano.infra.aday.fr`) and lets the administrator correct that suffix before proceeding.
+2. Review and select the desired node list, then **Create / Synchronize SSH group**. This creates managed SSH inventory servers and a persistent `PVE-<id>-<name>` group **linked to the datacenter**, without installing agents. Explicit resynchronization replaces managed group membership; servers can also be members of other inventory groups.
+3. Per node use **SSH host fingerprint** and compare the presented SHA256 to a reliable console-side fingerprint. Explicitly type the matching fingerprint to approve; unknown or changed keys are never silently trusted.
+4. Choose a **vault SSH identity** with root/noninteractive sudo rights, select nodes without existing agents, approve the batch and click **Deploy selected agents**. A bounded background worker installs one node at a time, using the **same unified Linux agent package** with the passive DR worker.
+5. Monitor results under **Agents → Bulk deployments**. Agents are auto-linked to the site if the cluster has one. Enable their Proxmox/passive DR roles separately under **Agents → Configure modules**. **No VM replication or failover is triggered.**
+
+**Security:** this cluster-bound workflow requires no per-host `.env` allowlist; the cluster API discovery, managed group and administrator confirmation define its scope. The worker validates node membership and already pinned SSH host keys before every installation. Generic/unbound SSH deployment keeps its legacy allowlist protections. Start with a test node before deploying across production PVE hypervisors.
+
 ### Named DR sites, managed agents and safe simulations (0.3.14)
 
 Under **Proxmox servers & clusters → DR sites and agents**, choose **Create site**, name it (e.g. SD or AU), assign its primary/standby role, associate **one or more previously registered Proxmox clusters** and declare the storage profile. The **iSCSI + LVM** choice is currently an **operator-supplied profile**, not confirmed storage discovery. A shared LVM VG can hold disks for many VMs on the same LUN, so replicating one Pure volume does not yield independent per-VM standbys.
