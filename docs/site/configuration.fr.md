@@ -1,5 +1,15 @@
 # Référence de configuration
 
+### Ajouter un serveur ou cluster Proxmox entièrement depuis le navigateur (0.3.11)
+
+1. Ouvrir **Administration → Serveurs & clusters Proxmox**, puis **Ajouter un serveur / cluster**.
+2. Choisir le type **Cluster Proxmox** (détection des nœuds membres) ou **Serveur Proxmox autonome**, un nom et l'URL de l'API HTTPS (exemple `https://pve.example.org:8006`).
+3. Soit sélectionner un token existant du coffre, soit saisir **user@pve!tokenname** et le **secret du token** directement dans l'assistant : le coffre est créé automatiquement, secret chiffré.
+4. Si une CA interne est utilisée, **importer la CA publique** au format PEM/CRT/CER/DER ou en choisir une déjà importée. Un identifiant SHA-256 lie ce certificat au datacenter et à sa connexion. **Aucun changement du `.env` ni redémarrage Docker** n'est nécessaire.
+5. Cliquer **Tester l'API** puis **Découvrir les nœuds/VM**. Le bouton **Modifier** permet de changer une CA, un nom, le type et la connexion API.
+
+Les CA sont stockées sous `data/proxmox-cas`, distinctement du LDAP. Seules des CA publiques sont acceptées ; la validation du certificat serveur et du FQDN reste obligatoire. Les anciens paramètres `PROXMOX_CA_CERT` restent une compatibilité facultative quand aucune CA n'est sélectionnée dans l'interface. Les opérations VM modifiant l'état d'une machine conservent un contrôle d'autorisation supplémentaire et ne sont pas activées par le simple ajout d'un cluster.
+
 Le fichier `.env.example` constitue la liste de référence des paramètres. Redémarrer le conteneur après changement. **Ne jamais committer `.env`.**
 
 | Variable | Rôle | Recommandation |
