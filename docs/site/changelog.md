@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.19-rc1 — 2026-11-17
+
+- **Independent DR groups**: create custom, editable DR protection scopes (e.g. Staging, Production, Test) directly in the PVE interface. Sites and clusters are assigned to one scope; **cross-scope simulated failovers are rejected** by backend and frontend, and no infrastructure changes occur.
+- **Non-destructive upgrade**: legacy DR sites are shown as **Unassigned sites** until an administrator explicitly assigns them to a group. A populated group cannot be deleted. Cluster-managed SSH inventory groups retain their individual cluster associations.
+- **Actionable safe agent diagnostics**: individual failed installs distinguish untrusted SSH host keys, denied authentication, network/DNS/connectivity, missing sudo/systemd/Python prerequisites, and invalid installation arguments. Remote stderr, tokens and private keys are not exposed.
+- **Generic public project**: never prefill a developer's organization URL. Each installation sets its own HTTPS agent controller origin and can name its own DR protection scopes.
+- **Release notes**: the previous failed batch cannot retroactively reveal details it did not save. Re-test one non-critical PVE host after verifying its SSH host key. This version does not provide active VM replication or failover.
+
 ## 0.3.18-rc1 — 2026-11-17
 
 - **Fixed remote rollout:** no longer requires `AGENT_SERVER_URL` in `.env`. Admin-managed **Agents → Connection settings** stores the HTTPS controller origin for agents behind Nginx, with optional legacy env fallback.
