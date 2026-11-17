@@ -1315,7 +1315,8 @@ async function handleSubmit(ev){
     const ca=await registerProxmoxCA(file);
     payload.ca_cert=ca.id;
    }
-   if(payload.skip_tls_verification&&!id&&!confirm('La vérification du certificat TLS sera désactivée pour ce serveur Proxmox. Continuer ?')){if(submit)submit.disabled=false;return;}
+   const currentDc=id?(state.datacenters||[]).find(x=>x.id===id):null;
+   if(payload.skip_tls_verification&&!currentDc?.skip_tls_verification&&!confirm('La vérification du certificat TLS sera désactivée pour ce serveur ou cluster Proxmox. L’identité du serveur ne pourra plus être authentifiée. Continuer ?')){if(submit)submit.disabled=false;return;}
    if(f.get('dc_auth_mode')==='new'){
     payload.token_username=String(f.get('dc_token_username')||'').trim();
     payload.token_secret=String(f.get('dc_token_secret')||'');
