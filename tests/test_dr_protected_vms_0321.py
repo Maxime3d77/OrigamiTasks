@@ -152,6 +152,16 @@ def test_protected_vm_create_dry_run_failover_no_vm_actions(monkeypatch):
                            for c in result['checks'])
             history=client.get('/api/dr/vms/'+str(vid)+'/tests').json()['items']
             assert len(history)==4
+            whole_site=client.post('/api/dr/simulate',headers=h,json={
+                'source_site_id':srcsite,'target_site_id':dstsite,
+                'scenario':'cluster_down'
+            })
+            assert whole_site.status_code==200,whole_site.text
+            site_result=whole_site.json()
+            assert site_result['decision']=='BLOCKED'
+            assert site_result['protected_vms'][0]['id']==vid
+            assert site_result['protected_vms'][0]['replica_name']=='REP_vm-ci-database'
+            assert site_result['protected_vms'][0]['last_successful_sync'] is None
             assert client.post('/api/dr/vms/'+str(vid)+'/replicate',
                                headers=h).status_code==409
             assert client.post('/api/dr/vms/'+str(vid)+'/state',
