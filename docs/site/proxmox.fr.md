@@ -1,5 +1,13 @@
 # Proxmox VE : découverte et reprise d'activité
 
+### Sites PRA nommés, agents et simulation sans risque (0.3.14)
+
+Sous **Serveurs & clusters Proxmox → Sites PRA et agents**, cliquer **Déclarer un site**. Donner son nom (ex. SD, AU), son rôle, sélectionner **un ou plusieurs clusters Proxmox déjà enregistrés** et indiquer le profil de stockage. La valeur **iSCSI + LVM** est pour l'instant une **déclaration à vérifier**, pas une découverte confirmée du stockage. Le groupe de volumes LVM partagé peut héberger plusieurs disques de VM sur une même LUN : la réplication du volume Pure ne produit pas automatiquement une copie indépendante par VM.
+
+Associer éventuellement des agents Linux existants. Le bouton **Déployer agent SSH** réutilise le déploiement standard OrigamiTasks et sa clé SSH du coffre ; ce mécanisme nécessite encore ses prérequis actuels, et l'agent installé **ne devient pas un arbitre autonome**. Les véritables agents PRA devront être gérés par cluster/site (plusieurs nœuds possibles), disposer de leur propre configuration locale sécurisée, continuer quand la console SD disparaît, et être mis à jour en rolling update avec vérification et rollback. Une liaison mTLS, un témoin indépendant et un fencing source sont obligatoires avant toute promotion automatique.
+
+La commande **Simuler une panne (sans action)** propose cluster principal inaccessible, coupure du lien entre les sites, ou VM de la console OrigamiTasks indisponible. Elle montre les prérequis manquants et trace la simulation ; **aucun nœud ni VM ne sont arrêtés**, et **aucune copie REP_ n'est démarrée**. Cela ne remplace pas une véritable campagne de tests d'interruption/fencing en laboratoire.
+
 **Actuellement :** enregistrement de plusieurs API Proxmox indépendantes, découverte des nœuds/VM QEMU/LXC/stockages et, si explicitement autorisé, `start/shutdown/reboot` encadrés. Une **évaluation PRA en lecture seule** identifie les types de stockage de chaque disque VM et propose les voies de reprise à étudier. **Pas encore de moteur de réplication, de bascule automatique ni de migration inter-clusters dans la v0.3.13-rc1.**
 
 ## Ajouter un serveur ou cluster et découvrir les VM
