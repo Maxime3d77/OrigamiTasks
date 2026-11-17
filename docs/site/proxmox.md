@@ -12,7 +12,7 @@
 
 ### Planned SD → AU agent-managed DR
 
-Future recovery design uses **SD active → AU powered-off REP_ standby**, mTLS-paired site agents, an **independent witness**, **verified fencing** against concurrent VM starts and **explicit AU→SD failback**. Lost pings, failed API calls or agents disappearing are never sufficient to promote the standby. See the [inter-site disaster recovery architecture RFC](../ARCHITECTURE-PRA-INTERSITES.md). This is not a deployed auto-failover engine.
+Future recovery design uses **SD active → AU powered-off REP_ standby**, mTLS-paired site agents, an **independent witness**, **verified fencing** against concurrent VM starts and **explicit AU→SD failback**. Lost pings, failed API calls or agents disappearing are never sufficient to promote the standby. See the design file docs/ARCHITECTURE-PRA-INTERSITES.md. This is not a deployed auto-failover engine.
 
 ## Which replication engine can work?
 
