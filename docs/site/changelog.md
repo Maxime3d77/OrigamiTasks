@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.11-rc1 — 2026-11-17
+
+- **Fully web-managed Proxmox registration:** add or edit a cluster or standalone node, issue a vault-backed encrypted API token profile, upload a trusted CA from the browser and assign it per target, without editing `.env` or restarting Docker.
+- **Certificates:** PEM/CRT/CER/DER imports, private persistent store, select different CA chains per datacenter or vault profile. Reject arbitrary filesystem paths or private keys; HTTPS remains verified.
+- **Fleet navigation:** searchable nodes and clusters, direct API diagnostics and discovery of cluster nodes, VMs, containers and storage.
+- **Compatibility and safety:** migrate existing SQLite entries, preserve encrypted tokens, enforce matching vault and DC URLs, retain explicit gates for VM actions.
+
 ## 0.3.10-rc1 — 2026-11-16
 
 - **Proxmox:** register and manage datacenters and API tokens in the web UI without `PROXMOX_ALLOWED_HOSTS` in `.env`; searchable datacenter list, ensure vault token and DC URL match, actionable HTTP 401/403/TLS/network diagnostics.
