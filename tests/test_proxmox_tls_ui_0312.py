@@ -44,7 +44,7 @@ def test_per_datacenter_insecure_tls_toggle_persists_and_is_reversible(monkeypat
             assert enabled.status_code==200,enabled.text
             from_db=integrations.configured_datacenter(dc_id)
             assert from_db['skip_tls_verification']==1
-            assert client.get('/api/datacenters').json()['items'][-1] or True
+            assert any(x['id']==dc_id and x['skip_tls_verification']==1 for x in client.get('/api/datacenters').json()['items'])
             disabled=client.put('/api/datacenters/'+str(dc_id),headers=headers,json={
                 'name':item['name'],'kind':'cluster','url':url,
                 'credential_id':item['credential_id'],
