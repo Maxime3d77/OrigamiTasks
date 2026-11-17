@@ -59,6 +59,10 @@ def set_modules(agent_id, payload):
         if not agent["enrolled"]:
             raise HTTPException(422,"Attendre l'enrôlement avant d'activer les modules")
         site=_site(con,agent_id)
+        if agent["platform"] == "windows" and (payload["proxmox"] or payload["pra"]):
+            raise HTTPException(422,
+                "L'agent Windows exécute uniquement le module Standard : "
+                "Proxmox/PRA sont réservés aux agents Linux des sites")
         if payload["proxmox"] or payload["pra"]:
             if site is None or not site["clusters"]:
                 raise HTTPException(422,
