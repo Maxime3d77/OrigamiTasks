@@ -1,5 +1,11 @@
 # Proxmox VE: discovery and disaster recovery
 
+### Agent-facing HTTPS controller URL for PVE rollouts (0.3.18)
+
+Proxmox node rollout requires every agent to contact the controller via its reachable HTTPS DNS name, **not** the internal Nginx/Docker binding `127.0.0.1:8091`. Set **Agents → Connection settings** once, e.g. `https://origamitasks.example.org`; the wizard displays it and links to settings if missing. The legacy `AGENT_SERVER_URL` in `.env` is not required for managed cluster rollouts after saving this value in the UI.
+
+Passive DR is optional and **unchecked by default**: this does not replicate VMs, prove fencing, or start recovery guests. Trusted SSH host keys, vault credentials and agent-side HTTPS CA trust remain necessary.
+
 ### Deploy the unified agent to all PVE cluster nodes directly from Proxmox (0.3.17-rc1)
 
 On a Proxmox cluster card choose **Cluster agents**, or under a named DR site choose **Deploy to nodes**, then select the cluster if the site contains several.
