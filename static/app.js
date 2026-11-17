@@ -667,7 +667,7 @@ async function openClusterAgentWizard(dcId, overrideSuffix=''){
    '<label class="fleet-node-row"><input type="checkbox" name="fleet_node" value="'+e(node.node)+'" checked>'
    +'<span class="fleet-node-main"><strong>'+e(node.node)+'</strong><small>'+e(node.fqdn)+':22</small></span>'
    +'<span class="chip '+(node.already_registered?'tag':'')+'">'+(node.already_registered?'Agent #'+e(node.agent_id):'Sans agent')+'</span>'
-   +'<button class="btn tiny" data-action="fleet-ssh-key" data-host="'+e(node.fqdn)+'" data-port="22" type="button">Empreinte SSH</button></label>'
+   +'<button class="btn tiny" data-action="fleet-ssh-key" data-host="'+e(node.fqdn)+'" data-port="22" type="button">Voir l’empreinte SSH (facultatif)</button></label>'
  ).join('');
  const deployRows=available.map(node=>
   '<label class="fleet-deploy-row"><input type="checkbox" name="fleet_server" value="'+node.server_id+'" checked>'
@@ -686,6 +686,9 @@ async function openClusterAgentWizard(dcId, overrideSuffix=''){
  const urlConfigured=!!state.agentSettings?.configured;
  const deploy='<form id="proxmoxFleetDeployForm" data-id="'+dc.id+'">'
   +'<h3>Déployer l’agent unique Linux sur le groupe</h3>'
+  +'<p class="hint">Connexion SSH simplifiée : le premier contact enregistre automatiquement la clé publique du nœud (TOFU). '
+  +'Aucune empreinte à confirmer pour le déploiement. Les changements ultérieurs sont refusés. '
+  +'La première connexion TOFU ne protège pas contre une interception initiale : contrôle facultatif de l’empreinte recommandé en environnement sensible.</p>'
   +(urlConfigured
      ?'<div class="notice">URL HTTPS de la console pour les agents : <strong>'+e(agentURL)+'</strong></div>'
      :'<div class="notice error"><b>URL HTTPS des agents manquante.</b> '
@@ -707,8 +710,8 @@ async function openClusterAgentWizard(dcId, overrideSuffix=''){
   +'</div>'
   +'<label class="test-wizard-option"><input type="checkbox" name="approved" required><span>'
   +'<strong>Confirmer l’installation de l’agent sur tous les hôtes cochés</strong>'
-  +'<small>Clé SSH approuvée par hôte obligatoire ; les nœuds non approuvés échoueront individuellement sans installation. '
-  +'Le module PRA est passif et aucune VM ne sera répliquée ou démarrée.</small></span></label>'
+  +'<small>Première clé d’hôte SSH mémorisée automatiquement (TOFU) ; une clé d’hôte déjà connue mais modifiée bloque le nœud. '
+  +'La clé privée du coffre sert à authentifier le déploiement. Le module PRA est passif : aucune VM démarrée ou répliquée.</small></span></label>'
   +'<div class="tool-row"><button class="btn primary" type="submit" '+(!data.group_id||!available.length||!urlConfigured?'disabled':'')+'>Déployer les agents sélectionnés</button>'
   +'<button class="btn" data-action="modal-close" type="button">Fermer</button></div></form>';
  modal('Nœuds & agents · '+e(dc.name),
