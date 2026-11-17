@@ -164,10 +164,8 @@ def test_invalid_cluster_mapping_does_not_authorize_legacy_host(monkeypatch):
             'targets':[{'host':'unrelated.example.org'}],'approved':True
         },'ci')
     from app import integrations
-    assert 'agent-nodes' in [r.path for r in app.routes
-                             if 'agent-nodes' in getattr(r,'path','')]
-    assert 'ssh-group' in [r.path for r in app.routes
-                           if 'ssh-group' in getattr(r,'path','')]
+    assert any('/agent-nodes' in r.path for r in app.routes)
+    assert any('/ssh-group' in r.path for r in app.routes)
 
 
 def test_cluster_node_fqdn_does_not_escape_approved_suffix():
