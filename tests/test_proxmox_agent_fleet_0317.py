@@ -75,7 +75,7 @@ def test_cluster_group_preview_and_agent_batch_fail_closed(monkeypatch):
     def fake_deploy(body, *, cluster_authorized=False):
         assert cluster_authorized is True
         assert body['host']=='sd-rubis.infra.aday.fr'
-        agent=agents.register('test-'+body['host'],'linux',body['group'])
+        agent=agents.register(body['name'],'linux',body['group'])
         deployed.append(agent['id'])
         return {'id':agent['id'],'name':body['name']}
     monkeypatch.setattr(agents,'deploy',fake_deploy)
@@ -136,7 +136,8 @@ def test_cluster_group_preview_and_agent_batch_fail_closed(monkeypatch):
                                 lambda host,port:{'status':'trusted'})
             queued=client.post('/api/datacenters/'+str(dc_id)+'/agents/deploy',headers=headers,
                                json={'group_id':group_id,'server_ids':[d],
-                                     'credential_id':cred,'approved':True})
+                                     'credential_id':cred,'enable_proxmox':True,
+                                     'enable_pra':True,'approved':True})
             assert queued.status_code==200,queued.text
             assert agent_deployments.process_one()
             assert len(deployed)==1
@@ -149,6 +150,12 @@ def test_cluster_group_preview_and_agent_batch_fail_closed(monkeypatch):
                     'SELECT status FROM agent_deploy_targets WHERE batch_id=?',
                     (queued.json()['batch_id'],)
                 ).fetchone()['status']=='success'
+                from app import agent_modules
+                agent_row=dict(con.execute('SELECT * FROM agents WHERE id=?',
+                                           (deployed[0],)).fetchone())
+                assert agent_modules.describe(agent_row)['modules']=={
+                    'standard':True,'proxmox':True,'pra':True
+                }
             assert client.post('/api/datacenters/'+str(dc_id)+'/agents/deploy',headers=headers,
                 json={'group_id':group_id,'server_ids':[d],'credential_id':cred,
                       'approved':True}).status_code==422  # duplicate agent
