@@ -650,8 +650,9 @@ def update_dr_plan(plan_id:int,request:Request,payload:dict[str,Any]):
         dr_plans.save(payload,plan_id)
     except dr_plans.DRPlanError as exc:
         raise HTTPException(422,str(exc)) from None
-    db.audit(user['username'],'dr.plan.update',plan_id,'Groupe PRA modifié')
-    return {'ok':True}
+    db.audit(user['username'],'dr.plan.update',plan_id,'Groupe PRA modifié : '+str(payload.get('name',''))[:80])
+    plan=next((x for x in dr_plans.list_plans() if x['id']==plan_id),None)
+    return {'ok':True,'plan':plan}
 
 
 @app.delete('/api/dr/plans/{plan_id}')
