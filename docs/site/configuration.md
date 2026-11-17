@@ -1,5 +1,11 @@
 # Configuration reference
 
+### Proxmox discovery: search and sort resources
+
+Under **Proxmox servers and clusters → Discover nodes/VMs**, use free-text search (name, VMID, node, status, resource ID, storage), filter **All / Nodes / VMs / LXC / Storage**, sort by **Name / Type / VMID / Node / Status** in ascending or descending order, and browse **100 results per page**. Counts and an **API refresh** are provided; the existing QEMU **Assess DR** action remains available. This feature is **read-only**.
+
+The proposed SD→AU managed DR agents, powered-off **REP_** standbys, independent witness, fencing and explicit failback are specified in **docs/ARCHITECTURE-PRA-INTERSITES.md**. This is a design document, not an active automatic failover engine. Lost pings or unavailable agents cannot independently authorize a standby start.
+
 ### Self-signed Proxmox HTTPS: per-server TLS verification exception (0.3.12)
 
 Open **Administration → Proxmox servers and clusters**, click **Edit** for the target. If uploading the trusted internal CA is not possible, select **Skip TLS certificate verification (self-signed certificate)**, **Save**, then **Test API**. This administrator-only exception applies to that node/cluster only, is reversible and requires **no `.env` edits or Docker restart**.
