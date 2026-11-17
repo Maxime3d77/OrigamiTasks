@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet
 
 
 @asynccontextmanager
@@ -574,6 +574,41 @@ def discover_datacenter(dc_id:int,request:Request):
     except Exception as exc:
         raise HTTPException(502,'Proxmox API indisponible : '+type(exc).__name__)
     return {'datacenter':dc['name'],'resources':result}
+
+
+@app.get('/api/datacenters/{dc_id}/agent-nodes')
+def preview_cluster_agent_nodes(dc_id:int,request:Request,domain_suffix:str=''):
+    security.require(request,role='admin')
+    try:
+        return proxmox_fleet.preview(dc_id,domain_suffix)
+    except (proxmox_fleet.FleetError,integrations.IntegrationError) as exc:
+        raise HTTPException(422,str(exc)) from None
+
+
+@app.post('/api/datacenters/{dc_id}/ssh-group')
+def sync_proxmox_ssh_group(dc_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=proxmox_fleet.sync_group(dc_id,payload)
+    except (proxmox_fleet.FleetError,integrations.IntegrationError,
+            db.sqlite3.IntegrityError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'proxmox.ssh-group.sync',dc_id,
+             'groupe='+str(result['group_id'])+' noeuds='+str(result['count']))
+    return result
+
+
+@app.post('/api/datacenters/{dc_id}/agents/deploy')
+def deploy_proxmox_cluster_agents(dc_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=proxmox_fleet.deploy(dc_id,payload,user['username'])
+    except (proxmox_fleet.FleetError,integrations.IntegrationError,
+            ssh_inventory.InventoryError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'proxmox.agent-batch.queued',dc_id,
+             'lot='+str(result['batch_id'])+' noeuds='+str(result['total']))
+    return result
 
 
 @app.get('/api/datacenters/{dc_id}/vms/{vmid}/dr-assessment')
