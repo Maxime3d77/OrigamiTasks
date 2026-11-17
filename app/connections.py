@@ -13,12 +13,12 @@ KIND_FIELDS = {
     'api': {'base_url', 'test_path', 'username', 'password', 'token'},
     'ldap': {'uri', 'starttls', 'base_dn', 'group_base_dn', 'username', 'password'},
     'matrix': {'homeserver', 'username', 'token'},
-    'proxmox': {'url', 'username', 'token', 'ca_cert'},
+    'proxmox': {'url', 'username', 'token', 'ca_cert', 'skip_tls_verification'},
     'generic': COMMON,
 }
 PUBLIC_KEYS = {'host', 'port', 'tls_mode', 'auth', 'from_address', 'username',
                'base_url', 'uri', 'starttls', 'base_dn', 'group_base_dn',
-               'homeserver', 'url', 'test_path', 'ca_cert'}
+               'homeserver', 'url', 'test_path', 'ca_cert', 'skip_tls_verification'}
 
 
 class ConnectionError(Exception):
@@ -41,8 +41,10 @@ def normalize(kind, updates, previous=None, *, is_new=False):
         raise ConnectionError('Champ non autorisé pour cette connexion')
     values = dict(previous or {})
     for key, value in updates.items():
-        if key in ('auth', 'starttls'):
-            values[key] = value is True
+        if key in ('auth', 'starttls', 'skip_tls_verification'):
+            if type(value) is not bool:
+                raise ConnectionError('Option booléenne de connexion invalide : '+key)
+            values[key] = value
         elif key == 'port':
             try:
                 port = int(value)
