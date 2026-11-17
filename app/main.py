@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall
 
 
 @asynccontextmanager
@@ -113,9 +113,9 @@ def logout(request: Request, response: Response):
 def list_agents(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
-        rows=con.execute('SELECT id,name,platform,group_name,hostname,version,enrolled,revoked,last_seen,created_at FROM agents ORDER BY id DESC').fetchall()
+        rows=con.execute('SELECT id,name,platform,group_name,hostname,version,enrolled,revoked,last_seen,cpu_percent,memory_mb,uninstalled_at,created_at FROM agents ORDER BY id DESC').fetchall()
     cutoff=agents.utc_plus(-90)
-    return {'items':[dict(r,status=('revoked' if r['revoked'] else 'pending' if not r['enrolled'] else
+    return {'items':[dict(r,status=('uninstalled' if r['uninstalled_at'] else 'revoked' if r['revoked'] else 'pending' if not r['enrolled'] else
         'online' if r['last_seen'] and r['last_seen']>=cutoff else 'offline')) for r in rows]}
 
 
@@ -173,6 +173,20 @@ def revoke_agent(agent_id:int,request:Request):
     agents.revoke(agent_id)
     db.audit(user['username'],'agent.revoke',agent_id)
     return {'ok':True}
+
+
+@app.post('/api/agents/{agent_id}/uninstall')
+def uninstall_agent(agent_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    # Preserve an audit trail even when SSH or the host identity check fails.
+    db.audit(user['username'],'agent.uninstall.attempt',agent_id,'SSH host removal requested')
+    try:
+        result=agent_uninstall.uninstall(agent_id,payload)
+    except agent_uninstall.AgentUninstallError as exc:
+        db.audit(user['username'],'agent.uninstall.failed',agent_id,type(exc).__name__)
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'agent.uninstall.success',agent_id,'Retiré par SSH et jeton révoqué')
+    return result
 
 
 @app.post('/api/agent/enroll')
