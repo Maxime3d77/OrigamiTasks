@@ -1,7 +1,7 @@
 """Cluster discovery → SSH group → secure, approved multi-node agent deployment.
 
-No real SSH or PVE access in tests. The worker must re-check pinned host
-identities before privileged installation, even with a linked cluster group.
+No real SSH or PVE access in tests. The worker pins the first host key
+automatically (TOFU), but rejects changed keys before privileged installation.
 """
 from fastapi.testclient import TestClient
 import pytest
@@ -116,9 +116,10 @@ def test_cluster_group_preview_and_agent_batch_fail_closed(monkeypatch):
             ids={x['fqdn']:x['id'] for x in found['servers']}
             c=ids['sd-cardano.infra.aday.fr']
             d=ids['sd-rubis.infra.aday.fr']
-            # An untrusted SSH host is blocked at worker time.
-            monkeypatch.setattr(host_keys,'inspect',
-                                lambda host,port:{'status':'unknown'})
+            # A previously pinned key that changes must block installation.
+            def changed_host_key(host,port):
+                raise host_keys.HostKeyError("Clé d'hôte SSH modifiée : connexion bloquée")
+            monkeypatch.setattr(host_keys,'trust_first_use',changed_host_key)
             queued=client.post('/api/datacenters/'+str(dc_id)+'/agents/deploy',headers=headers,
                                json={'group_id':group_id,'server_ids':[c],
                                      'credential_id':cred,'approved':True})
@@ -131,9 +132,13 @@ def test_cluster_group_preview_and_agent_batch_fail_closed(monkeypatch):
                 ).fetchone()
                 assert entry['status']=='failed'
             assert deployed==[]
-            # A pinned and verified host key allows just the selected node.
-            monkeypatch.setattr(host_keys,'inspect',
-                                lambda host,port:{'status':'trusted'})
+            # A newly encountered host key is accepted automatically on
+            # first deployment, then the configured SSH identity is used.
+            first_seen=[]
+            def trust_new_host(host,port):
+                first_seen.append((host,port))
+                return {'status':'added','added':True,'fingerprint':'SHA256:synthetic-test'}
+            monkeypatch.setattr(host_keys,'trust_first_use',trust_new_host)
             queued=client.post('/api/datacenters/'+str(dc_id)+'/agents/deploy',headers=headers,
                                json={'group_id':group_id,'server_ids':[d],
                                      'credential_id':cred,'enable_proxmox':True,
@@ -141,6 +146,7 @@ def test_cluster_group_preview_and_agent_batch_fail_closed(monkeypatch):
             assert queued.status_code==200,queued.text
             assert agent_deployments.process_one()
             assert len(deployed)==1
+            assert first_seen==[('sd-rubis.infra.aday.fr',22)]
             with db.session() as con:
                 assert con.execute(
                     'SELECT COUNT(*) FROM dr_site_agents WHERE site_id=? AND agent_id=?',
