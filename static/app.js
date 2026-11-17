@@ -314,10 +314,11 @@ function agentsPage(){
     +'<td>'+dt(agent.last_seen)+'</td>'
     +'<td class="agent-action-buttons">'+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
  }).join('');
- return agentConnectionSettingsPanel()+title('Agents Linux et Windows','Agent Linux modulaire ; agent Windows dédié aux actions des workflows.',
+ return title('Agents Linux et Windows','Agent Linux modulaire ; agent Windows dédié aux actions des workflows.',
   '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button>'
   +'<button class="btn primary" data-action="agent-deploy-form">⇣ Déployer sur un serveur</button>'
   +'<button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')
+  +agentConnectionSettingsPanel()
   +'<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2>'
   +'<span class="hint">'+state.agents.length+' agent(s)</span></div>'
   +'<div class="table-wrap"><table><thead><tr><th>Nom / hôte</th><th>OS / version</th><th>Groupe</th>'
@@ -648,8 +649,15 @@ async function openClusterAgentWizard(dcId, overrideSuffix=''){
   +'<div class="fleet-node-list">'+nodeRows+'</div>'
   +'<div class="tool-row"><button class="btn primary" type="submit">'+(data.group_id?'Synchroniser le groupe SSH':'Créer le groupe SSH lié au cluster')+'</button>'
   +'<small class="hint">L’inventaire SSH sera mis à jour, aucune installation à cette étape.</small></div></form>';
+ const agentURL=state.agentSettings?.controller_url||'';
+ const urlConfigured=!!state.agentSettings?.configured;
  const deploy='<form id="proxmoxFleetDeployForm" data-id="'+dc.id+'">'
   +'<h3>Déployer l’agent unique Linux sur le groupe</h3>'
+  +(urlConfigured
+     ?'<div class="notice">URL HTTPS de la console pour les agents : <strong>'+e(agentURL)+'</strong></div>'
+     :'<div class="notice error"><b>URL HTTPS des agents manquante.</b> '
+       +'Configurer le FQDN public de la console (derrière Nginx) avant le déploiement. '
+       +'<button type="button" class="btn tiny" data-action="agent-settings-open">Configurer l’URL des agents</button></div>')
   +(data.group_id?'<p class="hint">Groupe géré #'+e(data.group_id)+' · '+available.length+' nœud(s) sans agent déjà enregistré.</p>':
     '<p class="notice">Créer ou synchroniser le groupe SSH avant de lancer le déploiement.</p>')
   +'<div class="fleet-node-list">'+(deployRows||'<p class="hint">Aucun nœud éligible : les agents sont déjà enregistrés ou le groupe est vide.</p>')+'</div>'
@@ -660,15 +668,15 @@ async function openClusterAgentWizard(dcId, overrideSuffix=''){
   +'<div class="fleet-modules"><strong>Modules à activer automatiquement après enrôlement</strong>'
   +'<label class="test-wizard-option"><input type="checkbox" name="enable_proxmox" '+(site?'checked':'disabled')+'>'
   +'<span><strong>Proxmox</strong><small>Associe les agents aux clusters du site. Les tokens PVE restent dans la console.</small></span></label>'
-  +'<label class="test-wizard-option"><input type="checkbox" name="enable_pra" '+(site&&['primary','standby'].includes(site.role)?'checked':'disabled')+'>'
-  +'<span><strong>PRA passif Linux</strong><small>Service local autonome de surveillance seulement, sans réplication, fencing ni bascule de VM.</small></span></label>'
+  +'<label class="test-wizard-option"><input type="checkbox" name="enable_pra" '+(site&&['primary','standby'].includes(site.role)?'':'disabled')+'>'
+  +'<span><strong>PRA préparatoire (facultatif)</strong><small>Heartbeat local uniquement : ne réplique aucune VM, ne réalise aucun PRA opérationnel.</small></span></label>'
   +(!site?'<p class="hint">Rattacher d’abord le cluster à un site PRA pour activer ses modules automatiquement.</p>':'')
   +'</div>'
   +'<label class="test-wizard-option"><input type="checkbox" name="approved" required><span>'
   +'<strong>Confirmer l’installation de l’agent sur tous les hôtes cochés</strong>'
   +'<small>Clé SSH approuvée par hôte obligatoire ; les nœuds non approuvés échoueront individuellement sans installation. '
   +'Le module PRA est passif et aucune VM ne sera répliquée ou démarrée.</small></span></label>'
-  +'<div class="tool-row"><button class="btn primary" type="submit" '+(!data.group_id||!available.length?'disabled':'')+'>Déployer les agents sélectionnés</button>'
+  +'<div class="tool-row"><button class="btn primary" type="submit" '+(!data.group_id||!available.length||!urlConfigured?'disabled':'')+'>Déployer les agents sélectionnés</button>'
   +'<button class="btn" data-action="modal-close" type="button">Fermer</button></div></form>';
  modal('Nœuds & agents · '+e(dc.name),
     '<div class="notice">Assistant cluster Proxmox → groupe SSH → déploiement via le coffre. '
@@ -1618,7 +1626,8 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   toast(targets.length+' serveur(s) ajoutés');return
  }if(a==='agent-modules'){openAgentModulesForm(id);return}
  if(a==='agent-uninstall'){openAgentUninstallForm(id);return}
- if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='fleet-open'){await openClusterAgentWizard(id);return}
+ if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='agent-settings-open'){closeModal();showPage('agents');document.querySelector('#agentConnectionSettingsForm input[name="controller_url"]')?.focus();return}
+ if(a==='fleet-open'){await openClusterAgentWizard(id);return}
  if(a==='fleet-preview-refresh'){
    const form=document.getElementById('proxmoxFleetGroupForm');
    await openClusterAgentWizard(id,String(form?.elements.namedItem('domain_suffix')?.value||'').trim());return
@@ -1714,6 +1723,7 @@ async function handleSubmit(ev){
   const ids=f.getAll('fleet_server').map(Number);
   if(!ids.length)return toast('Sélectionner les nœuds à équiper.',false);
   if(!f.get('credential_id'))return toast('Choisir une clé SSH du coffre.',false);
+  if(!state.agentSettings?.configured)return toast('Configurer d’abord l’URL HTTPS des agents depuis Agents → Paramètres.',false);
   if(!f.has('approved'))return toast('Confirmer explicitement le déploiement.',false);
   if(f.has('enable_pra')&&!f.has('enable_proxmox'))return toast('Activer Proxmox avant le module PRA passif.',false);
   if(!confirm('Installer l’agent unique OrigamiTasks sur '+ids.length+' nœud(s) du cluster '+fleet.datacenter+' ?')){
