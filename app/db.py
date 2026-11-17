@@ -95,7 +95,9 @@ CREATE TABLE IF NOT EXISTS ssh_server_group_members (
 CREATE INDEX IF NOT EXISTS idx_ssh_server_members ON ssh_server_group_members(server_id);
 CREATE TABLE IF NOT EXISTS datacenters (
  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, url TEXT NOT NULL,
- credential_id INTEGER NOT NULL REFERENCES credentials(id), created_at TEXT NOT NULL
+ credential_id INTEGER NOT NULL REFERENCES credentials(id),
+ kind TEXT NOT NULL DEFAULT 'cluster', ca_cert TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runs (
  id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
@@ -166,6 +168,8 @@ def initialize():
             ("runs", "notification_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("runs", "notification_status", "TEXT NOT NULL DEFAULT ''"),
             ("runs", "notification_error", "TEXT NOT NULL DEFAULT ''"),
+            ("datacenters", "kind", "TEXT NOT NULL DEFAULT 'cluster'"),
+            ("datacenters", "ca_cert", "TEXT NOT NULL DEFAULT ''"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:
