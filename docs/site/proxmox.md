@@ -1,14 +1,18 @@
 # Proxmox VE: discovery and disaster recovery
 
-**Current functionality:** register several independent Proxmox API endpoints, read node/QEMU/LXC/storage inventory, and optionally start/shutdown/reboot a VM through tightly gated API calls. A **read-only DR assessment** can inspect each VM disk storage type and list viable recovery technologies requiring further validation. **There is no cross-cluster live replication, failover or migration engine in v0.2.**
+**Current functionality:** register several independent Proxmox API endpoints, read node/QEMU/LXC/storage inventory, and optionally start/shutdown/reboot a VM through tightly gated API calls. A **read-only DR assessment** can inspect each VM disk storage type and list viable recovery technologies requiring further validation. **No cross-cluster replication, automated failover or migration engine is implemented in v0.3.13-rc1.**
 
-## Connect a datacenter
+## Register a node or cluster and discover VMs
 
-1. Create a Proxmox API token with read-only permissions for discovery (`user@realm!tokenid`, token secret).
-2. Provide a validated HTTPS API endpoint such as `https://pve01.example.org:8006`; set `PROXMOX_ALLOWED_HOSTS=pve01.example.org:8006`.
-3. Trust its signing CA. Never disable certificate verification. If necessary, mount a PEM CA and configure `PROXMOX_CA_CERT`.
-4. Open **Datacenters → Add**, link the token, then **Discover**. Click **Assess DR** next to a QEMU VM to inspect disk configuration and `/storage` without modifying VM resources.
-5. Only if explicitly approved for operations, set `ALLOW_PROXMOX_ACTIONS=true`; action steps must additionally set `approved=true` and use a scoped API token.
+1. In **Administration → Proxmox servers & clusters**, choose **Add a server / cluster**; provide the type, HTTPS URL, name and new API token (or select an existing vault connection).
+2. Upload an internal CA in PEM/CRT/CER/DER. For a self-signed certificate without an available CA, administrators may **skip certificate validation for this endpoint only**, accepting endpoint impersonation risks. **No .env file edits** are needed for Proxmox site registration.
+3. Click **Discover nodes/VMs**, search by name/VMID/node/status, and filter **QEMU VMs / LXC / Nodes / Storage**. Sorting and 100-item paging are supported.
+4. Use **Assess DR** on a QEMU VM for a read-only assessment of disks and storage types; this does not create a replica or start a VM.
+5. Workflow operations currently cover inventory, start, shutdown and reboot only; mutations retain explicit server and workflow permission gates. Dynamic VM/node workflow pickers are planned but **not yet available**.
+
+### Planned SD → AU agent-managed DR
+
+Future recovery design uses **SD active → AU powered-off REP_ standby**, mTLS-paired site agents, an **independent witness**, **verified fencing** against concurrent VM starts and **explicit AU→SD failback**. Lost pings, failed API calls or agents disappearing are never sufficient to promote the standby. See the [inter-site disaster recovery architecture RFC](../ARCHITECTURE-PRA-INTERSITES.md). This is not a deployed auto-failover engine.
 
 ## Which replication engine can work?
 
