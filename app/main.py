@@ -393,7 +393,7 @@ def _datacenter_fields(payload, con, *, existing=None):
                 422,'Token Proxmox : renseigner user@realm!tokenname et son secret (8 à 1024 caractères)'
             )
         payload_credentials=connections.normalize('proxmox',{
-            'url':origin,'username':username,'token':token
+            'url':origin,'username':username,'token':token,'ca_cert':ca_id
         },is_new=True)
         # The credentials remain in the encrypted vault; never return the secret.
         vault_name='Proxmox - '+name[:80]+' - '+secrets.token_hex(4)
