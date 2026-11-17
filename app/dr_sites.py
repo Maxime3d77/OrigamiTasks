@@ -78,9 +78,22 @@ def save_site(payload, existing_id=None):
         if plan_id is not None and not con.execute("SELECT 1 FROM dr_plans WHERE id=?",(plan_id,)).fetchone():
             raise DRSiteError("Groupe PRA sélectionné introuvable")
         if existing_id is not None:
-            old=con.execute("SELECT id FROM dr_sites WHERE id=?",(existing_id,)).fetchone()
+            old=con.execute("SELECT id,plan_id,role FROM dr_sites WHERE id=?",(existing_id,)).fetchone()
             if not old:
                 raise DRSiteError("Site PRA introuvable")
+            active=con.execute(
+                "SELECT source_dc_id,target_dc_id FROM dr_protected_vms "
+                "WHERE source_site_id=? OR target_site_id=?",
+                (existing_id,existing_id)
+            ).fetchall()
+            if active:
+                needed={r["source_dc_id"] if old["role"]=="primary" else
+                        r["target_dc_id"] for r in active}
+                if old["plan_id"]!=plan_id or old["role"]!=role or not needed.issubset(set(dcids)):
+                    raise DRSiteError(
+                        "Site utilisé par des VM protégées : conserver le groupe, "
+                        "le rôle et les clusters concernés, ou retirer d'abord les protections."
+                    )
         marks=",".join("?" for _ in dcids)
         existing_dc=con.execute(
             "SELECT id FROM datacenters WHERE id IN ("+marks+")",dcids
@@ -134,6 +147,12 @@ def delete_site(site_id):
         row=con.execute("SELECT name FROM dr_sites WHERE id=?",(site_id,)).fetchone()
         if not row:
             raise DRSiteError("Site PRA introuvable")
+        if con.execute(
+            "SELECT 1 FROM dr_protected_vms "
+            "WHERE source_site_id=? OR target_site_id=? LIMIT 1",
+            (site_id,site_id)
+        ).fetchone():
+            raise DRSiteError("Site utilisé par des VM protégées : retirer les protections avant la suppression")
         con.execute("DELETE FROM dr_sites WHERE id=?",(site_id,))
     return row["name"]
 
