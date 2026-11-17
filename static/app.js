@@ -533,73 +533,102 @@ function datacenters(){
 }
 
 function renderDRSitesPanel(){
- const sites=state.drSites||[];
- const cards=sites.map(site=>{
+ const plans=state.drPlans||[],sites=state.drSites||[];
+ const card=site=>{
   const clusters=(site.datacenters||[]).map(dc=>e(dc.name)).join(' · ')||'—';
   const ags=(site.agents||[]).map(agent=>e(agent.name)+' ('+e(agent.status)+')').join(' · ')||'Aucun';
   const role=site.role==='primary'?'Principal':site.role==='standby'?'Secours':'Autre';
   const storage={auto:'À détecter',iscsi_lvm:'iSCSI + LVM',zfs:'ZFS',ceph:'Ceph',pbs:'PBS',other:'Autre'}[site.storage_profile]||site.storage_profile;
   return '<div class="job-card dr-site-card"><div class="job-card-head"><span class="chip tag">'+e(role)+'</span><span class="chip">'+e(storage)+'</span></div>'
-    +'<h3>'+e(site.name)+'</h3><p>Clusters : '+clusters+'</p><p class="hint">Agents standards associés : '+ags+'</p>'
-    +'<p class="hint"><b>Mode PRA :</b> agent unique modulaire et superviseur passif ; réplication / bascule non disponibles.</p>'
+    +'<h3>'+e(site.name)+'</h3><p>Clusters : '+clusters+'</p><p class="hint">Agents associés : '+ags+'</p>'
+    +'<p class="hint">PRA : préparation uniquement, aucune réplication / bascule opérationnelle</p>'
     +'<div class="actions"><button class="btn tiny" data-action="dr-site-edit" data-id="'+site.id+'">Modifier</button>'
     +'<button class="btn tiny" data-action="dr-site-fleet" data-id="'+site.id+'">Déployer sur les nœuds</button>'
     +'<button class="btn tiny danger" data-action="dr-site-delete" data-id="'+site.id+'">Supprimer</button></div></div>';
- }).join('');
+ };
+ const group=(plan,items)=>
+  '<div class="dr-plan-section"><div class="panel-title"><div><h3>'+e(plan.name)+'</h3>'
+  +'<p class="hint">'+e(plan.description||'Périmètre de protection indépendant')+' · '+items.length+' site(s)</p></div>'
+  +'<div class="tool-row"><button class="btn tiny" data-action="dr-site-new" data-plan-id="'+plan.id+'">＋ Site</button>'
+  +'<button class="btn tiny" data-action="dr-plan-edit" data-id="'+plan.id+'">Modifier le groupe</button>'
+  +'<button class="btn tiny danger" data-action="dr-plan-delete" data-id="'+plan.id+'">Supprimer</button></div></div>'
+  +'<div class="workflow-grid dr-sites-grid">'+(items.map(card).join('')||'<p class="hint">Aucun site associé. Ajouter les clusters principal et secours de ce périmètre.</p>')+'</div></div>';
+ const legacy=sites.filter(x=>x.plan_id==null);
  const history=(state.drSimulations||[]).slice(0,5).map(item=>
   '<div class="dr-sim-history"><span class="chip">#'+e(item.id)+' · '+e(item.scenario)+'</span>'
   +'<span>'+e(item.result.source.name)+' → '+e(item.result.target.name)+'</span>'
   +'<span class="status failed">'+e(item.outcome)+'</span>'
   +'<small class="muted">'+e(dt(item.created_at))+'</small></div>').join('');
- return '<section class="panel dr-sites-panel"><div class="panel-title"><div><h2>Sites PRA et agents</h2>'
-  +'<p class="hint">Associer plusieurs clusters par site, affecter les agents existants et configurer le stockage. '
-  +'Le service PRA autonome et les mises à jour d’agents restent à développer.</p></div>'
-  +'<div class="tool-row"><button class="btn primary" data-action="dr-site-new">＋ Déclarer un site</button>'
+ return '<section class="panel dr-sites-panel"><div class="panel-title"><div><h2>Groupes PRA indépendants</h2>'
+  +'<p class="hint">Créer autant de périmètres PP, Production, Recette ou autres que nécessaire. '
+  +'Chaque groupe contient ses propres sites et clusters. Aucune association ou simulation inter-groupes.</p></div>'
+  +'<div class="tool-row"><button class="btn primary" data-action="dr-plan-new">＋ Nouveau groupe PRA</button>'
   +'<button class="btn" data-action="dr-simulation-form">Simuler une panne (sans action)</button></div></div>'
-  +'<div class="workflow-grid dr-sites-grid">'+(cards||'<p class="hint">Aucun site PRA configuré.</p>')+'</div>'
+  +(plans.map(p=>group(p,sites.filter(s=>s.plan_id===p.id))).join('')||'<div class="notice">Créer un premier groupe PRA pour séparer les environnements.</div>')
+  +(legacy.length?'<div class="dr-plan-section"><h3>Sites existants à classer</h3><div class="notice">'
+   +'Ces sites ont été créés avant les groupes PRA. Ouvrir « Modifier » pour leur attribuer un groupe '
+   +'sans perdre leur configuration. Ne pas les mélanger avec de nouveaux groupes.</div>'
+   +'<div class="workflow-grid dr-sites-grid">'+legacy.map(card).join('')+'</div></div>':'')
   +'<h3>Dernières simulations</h3>'+(history||'<p class="hint">Aucune simulation effectuée.</p>')+'</section>';
 }
-function openDRSiteForm(siteId=null){
+function openDRPlanForm(id=null){
+ const plan=(state.drPlans||[]).find(x=>x.id===Number(id));
+ const form='<form id="drPlanForm" data-id="'+(plan?.id||'')+'">'
+ +field('Nom du groupe PRA','dr_plan_name',plan?.name||'','text')
+ +field('Description (facultatif)','dr_plan_description',plan?.description||'','text')
+ +'<p class="hint">Exemples génériques : Préproduction, Production, Recette. Un groupe est un périmètre isolé, pas un cluster physique.</p>'
+ +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer le groupe</button>'
+ +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal(plan?'Modifier le groupe PRA':'Créer un groupe PRA indépendant',form,'',true);
+}
+function openDRSiteForm(siteId=null,presetPlanId=null){
  const site=(state.drSites||[]).find(x=>x.id===Number(siteId)),selectedDCs=new Set((site?.datacenters||[]).map(x=>x.id)),
  selectedAgents=new Set((site?.agents||[]).map(x=>x.id));
+ const plans=state.drPlans||[];
+ if(!plans.length){toast('Créer un groupe PRA avant de déclarer les sites',false);return}
  const checkboxes=(list,field,selected,valueLabel)=>
   list.map(item=>'<label class="dr-site-choice"><input type="checkbox" name="'+field+'" value="'+item.id+'" '
    +(selected.has(item.id)?'checked':'')+'><span>'+e(valueLabel(item))+'</span></label>').join('');
  const dcs=checkboxes(state.datacenters,'dr_dc',selectedDCs,x=>x.name+' · '+x.url);
  const allAgents=(state.agents||[]).filter(x=>x.platform==='linux'&&!x.revoked);
- const agentsHTML=checkboxes(allAgents,'dr_agent',selectedAgents,x=>x.name+' · '+(x.hostname||'non enrôlé')+' · '+(x.version||'version inconnue'));
+ const agentsHTML=checkboxes(allAgents,'dr_agent',selectedAgents,x=>x.name+' · '+(x.hostname||'non enrôlé'));
+ const chosen=site?.plan_id||presetPlanId||plans[0].id;
  const form='<form id="drSiteForm" data-id="'+(site?.id||'')+'"><div class="form-grid">'
+  +selectField('Groupe PRA (isolation PP / Production)','dr_plan',plans.map(p=>[p.id,p.name]),chosen)
   +field('Nom du site','dr_site_name',site?.name||'')
   +selectField('Rôle du site','dr_role',[['primary','Principal / actif'],['standby','Secours / standby'],['other','Autre']],site?.role||'other')
-  +selectField('Profil de stockage (déclaratif, à vérifier)','dr_storage',[
-   ['auto','Détection à réaliser'],['iscsi_lvm','iSCSI sur LVM partagé'],['zfs','ZFS'],['ceph','Ceph'],['pbs','Proxmox Backup Server'],['other','Autre']
+  +selectField('Profil de stockage (déclaratif)','dr_storage',[
+   ['auto','À détecter'],['iscsi_lvm','iSCSI + LVM'],['zfs','ZFS'],['ceph','Ceph'],['pbs','PBS'],['other','Autre']
    ],site?.storage_profile||'auto')+'</div>'
-  +'<label class="field"><span>Clusters ou serveurs Proxmox déjà déclarés</span><div class="dr-site-choices">'
-  +(dcs||'<span class="hint">Déclarer un DC Proxmox avant le site.</span>')+'</div></label>'
-  +'<label class="field"><span>Agents Linux standards à rattacher (facultatif)</span><div class="dr-site-choices">'
-  +(agentsHTML||'<span class="hint">Aucun agent Linux. Utiliser Agents → Déployer via SSH.</span>')+'</div></label>'
-  +'<div class="notice">Cette association ne rend pas les agents autonomes : ils continuent à contacter la console OrigamiTasks pour leurs tâches. '
-  +'La simulation ne coupe aucun nœud, aucune VM, aucun réseau et aucun stockage.</div>'
+  +'<label class="field"><span>Clusters Proxmox de ce site</span><div class="dr-site-choices">'
+  +(dcs||'<span class="hint">Déclarer d’abord un cluster Proxmox.</span>')+'</div></label>'
+  +'<label class="field"><span>Agents Linux du site (facultatif)</span><div class="dr-site-choices">'
+  +(agentsHTML||'<span class="hint">Les agents pourront être installés ensuite depuis le cluster.</span>')+'</div></label>'
+  +'<div class="notice">Chaque cluster ne peut appartenir qu’à un seul site, donc un seul groupe PRA. '
+  +'Les simulations entre groupes différents sont interdites. Aucune copie de VM n’est créée.</div>'
   +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer le site</button>'
   +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
- modal(site?'Modifier le site PRA · '+e(site.name):'Déclarer un site PRA',form,'',true);
+ modal(site?'Modifier le site · '+e(site.name):'Déclarer un site PRA',form,'',true);
 }
 function openDRSimulationForm(){
- const sites=state.drSites||[];
- if(sites.length<2){toast('Déclarer au moins deux sites avant de simuler une panne',false);return;}
+ const plans=(state.drPlans||[]).filter(p=>(state.drSites||[]).filter(s=>s.plan_id===p.id).length>=2);
+ if(!plans.length){toast('Créer un groupe PRA avec au moins deux sites avant de simuler',false);return}
+ const plan=plans[0];
+ const sites=(state.drSites||[]).filter(s=>s.plan_id===plan.id);
  const source=sites.find(x=>x.role==='primary')?.id||sites[0].id;
  const target=sites.find(x=>x.role==='standby')?.id||sites[1].id;
- const body='<form id="drSimulationForm"><div class="notice">'
-  +'<b>Simulation totalement virtuelle.</b> Aucun arrêt de nœud, commande Proxmox ou mise en route de copie. '
-  +'On affiche les prérequis manquants et la décision de sécurité en cas de panne.</div>'
+ const body='<form id="drSimulationForm"><div class="notice">Simulation virtuelle uniquement : aucune action sur les VM ou hyperviseurs.</div>'
   +'<div class="form-grid">'
-  +selectField('Site supposé en panne','dr_source',sites.map(x=>[x.id,x.name+' ('+x.role+')']),source)
+  +selectField('Groupe PRA à simuler','dr_sim_plan',plans.map(p=>[p.id,p.name]),plan.id)
+  +selectField('Site source supposé en panne','dr_source',sites.map(x=>[x.id,x.name+' ('+x.role+')']),source)
   +selectField('Site de secours','dr_target',sites.map(x=>[x.id,x.name+' ('+x.role+')']),target)
   +selectField('Scénario','dr_scenario',[
-   ['cluster_down','Cluster principal indisponible'],['network_partition','Coupure réseau entre sites'],
-   ['console_down','VM OrigamiTasks indisponible']
-  ],'cluster_down')+'</div><button class="btn primary" type="submit">Lancer la simulation sans risque</button></form>';
- modal('Simulation de perte de site / cluster',body);
+   ['cluster_down','Cluster indisponible'],['network_partition','Partition réseau'],
+   ['console_down','Console OrigamiTasks indisponible']
+  ],'cluster_down')+'</div>'
+  +'<p class="hint">Changer de groupe actualise les deux listes de sites. Aucune simulation inter-groupes n’est autorisée.</p>'
+  +'<button class="btn primary" type="submit">Simuler sans action</button></form>';
+ modal('Simulation PRA isolée',body);
 }
 function showDRSimulationResult(result){
  const lines=(result.checks||[]).map(c=>
@@ -1634,7 +1663,16 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='fleet-ssh-key'){await inspectClusterSSHKey(b);return}
  if(a==='dr-site-fleet'){await openPRAClusterSelector(id);return}
- if(a==='dr-site-new'){openDRSiteForm();return}
+ if(a==='dr-plan-new'){openDRPlanForm();return}
+ if(a==='dr-plan-edit'){openDRPlanForm(id);return}
+ if(a==='dr-plan-delete'){
+  const plan=(state.drPlans||[]).find(p=>p.id===id);
+  if(!plan)return;
+  if(!confirm('Supprimer le groupe PRA '+plan.name+' ? Il doit être vide.'))return;
+  await api('/dr/plans/'+id,'DELETE');
+  toast('Groupe PRA supprimé');await refresh();return
+ }
+ if(a==='dr-site-new'){openDRSiteForm(null,Number(b.dataset.planId)||null);return}
  if(a==='dr-site-edit'){openDRSiteForm(id);return}
  if(a==='dr-site-delete'){
   if(!confirm('Supprimer cette association PRA ? Les clusters, les agents et les VM ne seront pas modifiés.'))return;
@@ -1683,6 +1721,19 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   hydrateAdmins();return
  }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='drPlanForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id)||0;
+  try{
+   await api(id?'/dr/plans/'+id:'/dr/plans',id?'PUT':'POST',{
+    name:String(f.get('dr_plan_name')||'').trim(),
+    description:String(f.get('dr_plan_description')||'').trim()
+   });
+   closeModal();toast('Groupe PRA enregistré');await refresh();showPage('datacenters');
+  }catch(ex){toast(ex.message,false)}
+  return
+ }
+
  if(ev.target.id==='agentConnectionSettingsForm'){
   ev.preventDefault();
   const f=new FormData(ev.target);
@@ -1785,7 +1836,7 @@ async function handleSubmit(ev){
  if(ev.target.id==='drSiteForm'){
   ev.preventDefault();
   const f=new FormData(ev.target),id=Number(ev.target.dataset.id)||0;
-  const body={name:String(f.get('dr_site_name')||'').trim(),
+  const body={plan_id:Number(f.get('dr_plan'))||null,name:String(f.get('dr_site_name')||'').trim(),
               role:String(f.get('dr_role')||'other'),
               storage_profile:String(f.get('dr_storage')||'auto'),
               datacenter_ids:f.getAll('dr_dc').map(Number),
