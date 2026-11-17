@@ -1,5 +1,12 @@
 # Historique des modifications
 
+## 0.3.15-rc1 — 17 novembre 2026
+
+- **Vue d'ensemble :** trois onglets *Tâches & exécutions*, *Agents actifs* et *DC Proxmox / PRA*. Totaux et historiques existants ; états des agents (en ligne, hors ligne, révoqué, désinstallé), CPU/RAM du processus quand l'agent les remonte ; clusters et sites PRA associés. Les retards de synchronisation PRA restent « non disponibles » tant qu'aucun moteur réel n'est implémenté.
+- **Désinstallation via SSH :** disponible pour les agents Linux et Windows déjà enrôlés. Choix d'une identité SSH du coffre, saisie du FQDN, confirmation du nom exact ; vérification de la clé d'hôte SSH déjà approuvée, du hostname de l'agent et de son identité locale (agent_id + URL de la console) avant suppression. Le service/tâche et le répertoire agent sont retirés, puis le token est révoqué. Si la suppression distante échoue, aucune révocation automatique ; possibilité de révoquer séparément.
+- **Consommation agents :** les nouvelles installations Linux imposent `MemoryMax=192M`, `CPUQuota=20%`, `TasksMax=48` via systemd. Les nouvelles versions des scripts agents pollent toutes les 10 secondes par défaut (intervalle paramétrable de 5 à 60 secondes) et remontent CPU/RAM du processus agent uniquement ; scripts fils/VM exclus des mesures, quota systemd applicable au service Linux. Les installations antérieures ne sont pas mises à jour automatiquement.
+- **Sécurité :** le modèle actuel reste une **préversion** : HTTPS et tokens individuels, restrictions Linux mais pas encore de mTLS, signature de packages ni véritable service PRA autonome. Sous Windows, la tâche agent actuelle s'exécute sous SYSTEM : à durcir avant déploiement étendu.
+
 ## 0.3.14-rc1 — 17 novembre 2026
 
 - **Sites PRA :** nouveau gestionnaire directement dans « Serveurs & clusters Proxmox », création de sites aux noms libres avec rôle **principal / secours / autre**, rattachement de plusieurs clusters Proxmox, des agents Linux existants et annotation du profil de stockage (auto, iSCSI+LVM, ZFS, Ceph, PBS ou autre).
