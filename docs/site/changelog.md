@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.16-rc1 — 2026-11-17
+
+- **Single modular agent installation:** per-agent roles **Standard** (always on), **Proxmox** (linked inventory, API still managed centrally), **passive DR** (Linux only). Administrators configure modules under **Agents → Configure modules** with site/cluster validation, desired revision and actual agent acknowledgement.
+- **Linux:** one SSH deployment bundle installs standard `agent.py` and isolated `pra_worker.py` as two bounded systemd services. The passive DR worker caches its locally assigned policy and continues its own heartbeat if the controller disappears, but **never replicates, fences, promotes or starts any VM**. Separate worker limits: 64 MiB / 10% of one CPU.
+- **Windows:** standard and Proxmox role metadata are supported in the same agent; autonomous DR module is not enabled. Linux and Windows 0.3.2 script agents acknowledge policy revisions, while older agents keep working without secretly enabling modules.
+- **Safety:** authoritative per-agent desired/applied policy tracking with audit, role and site scoping, no PVE API secrets sent to agents. All DR policy capability flags stay false: witness, fencing, replication and promotion are not implemented.
+- **Lifecycle:** the verified remote uninstall removes both Linux units and module cache; legacy installations must be explicitly replaced/upgraded. Signed rolling updates and truly autonomous DR remain planned.
+
 ## 0.3.15-rc1 — 2026-11-17
 
 - **Overview:** *Tasks & runs*, *Active agents* and *Proxmox DC / DR* tabs. Existing task metrics, agent online/offline/revoked/uninstalled states and process CPU/RAM telemetry when reported, linked Proxmox clusters and sites. Real DR replication lag remains explicitly unavailable until an actual engine is deployed.
