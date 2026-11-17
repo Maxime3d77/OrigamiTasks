@@ -24,6 +24,7 @@ STRATEGIES = {
 SCENARIOS = {
     "replication_preflight": "Prévol de réplication (lecture seule)",
     "failover_simulation": "Bascule simulée (sans démarrer de VM)",
+    "failback_simulation": "Retour vers le site principal (simulation)",
     "network_partition": "Coupure réseau intersites (simulation)",
     "console_down": "Console indisponible (simulation)",
 }
@@ -451,6 +452,9 @@ def run_readonly_test(vm_id, scenario, actor):
             "Test de faisabilité en lecture seule. Aucune donnée VM copiée.",
         "failover_simulation":
             "Bascule simulée : démarrage de REP_ interdit sans réplique cohérente, témoin et fencing.",
+        "failback_simulation":
+            "Retour simulé : impossible de rendre la propriété à la source sans "
+            "arrêt certifié de la cible, reprise des écritures et validation du témoin.",
         "network_partition":
             "Partition réseau simulée : la VM source peut continuer à écrire. Split-brain possible.",
         "console_down":
