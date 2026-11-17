@@ -278,15 +278,15 @@ function catalog(){const entries=state.catalog.available||[];const groups=[...ne
 
 function agentConnectionSettingsPanel(){
  const settings=state.agentSettings||{};
- const url=settings.controller_url||(location.protocol==='https:'?location.origin:'');
+ const url=settings.controller_url||'';
  const configured=!!settings.configured;
  return '<section class="panel agent-settings-panel"><div class="panel-title"><div><h2>Paramètres de connexion des agents</h2>'
   +'<p class="hint">URL HTTPS de la console accessible depuis les machines Linux et Windows, via le proxy inverse Nginx.</p></div>'
   +'<span class="chip '+(configured?'tag':'')+'">'+(configured?'Configurée · '+e(settings.source):'URL manquante')+'</span></div>'
   +'<form id="agentConnectionSettingsForm">'
   +'<label class="field"><span>Adresse HTTPS utilisée par les agents</span>'
-  +'<input name="controller_url" type="url" autocomplete="url" spellcheck="false" placeholder="https://origamitasks.example.org" value="'+e(url)+'" required></label>'
-  +'<p class="hint">La valeur proposée reprend l’adresse HTTPS du navigateur ; vérifier qu’elle est accessible depuis les hôtes distants. Saisir uniquement le FQDN HTTPS, sans /api, sans 127.0.0.1:8091, sans chemin. '
+  +'<input name="controller_url" type="url" autocomplete="off" spellcheck="false" placeholder="https://controller.example.org" value="'+e(url)+'" required></label>'
+  +'<p class="hint">Chaque installation OrigamiTasks configure son propre FQDN HTTPS accessible par ses agents. Saisir uniquement l’origine HTTPS, sans /api, identifiants, ni adresse localhost / 127.0.0.1. '
   +'L’URL interne d’écoute du conteneur ne doit jamais être écrite dans les agents distants. '
   +'Les certificats TLS doivent être reconnus par chaque hôte agent (installer la CA interne si nécessaire).</p>'
   +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer l’URL des agents</button>'
