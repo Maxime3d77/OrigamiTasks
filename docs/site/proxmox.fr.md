@@ -1,5 +1,17 @@
 # Proxmox VE : découverte et reprise d'activité
 
+### VM protégées et répétitions PRA sans risque (0.3.21)
+
+Sous **Administration → VM protégées PRA**, cliquer **Ajouter une VM**. Choisir le groupe PRA (ex. PP ou Production), un cluster principal et un cluster secours *du même groupe*. Cliquer **Découvrir les VM et stockages** pour récupérer par API la liste des VM QEMU, des nœuds et des stockages capables d'héberger des images VM.
+
+Choisir **manuellement** la VM et le VMID cible, le nœud de secours, le stockage Proxmox de destination, une fréquence souhaitée et un moteur **envisagé**. L'interface prépare le nom `REP_<nom-vm>`. **Attention : ce nom est réservé dans la base OrigamiTasks uniquement ; il n'existe aucune copie `REP_` réelle sur le cluster secours.** Les volumes source peuvent être sur un VG partagé iSCSI/LVM contenant plusieurs VM : cette version ne déduit pas le découpage des LUN ni leur cohérence. Le choix de fréquence n'active aucune planification.
+
+Sur la fiche, **Tester la réplication** exécute un prévol en lecture seule sur les deux API PVE et explique la faisabilité et les blocages ; **Simuler la bascule** applique des règles hypothétiques et refuse le démarrage tant qu'il manque une copie validée, un témoin indépendant, un fencing effectif et une interdiction opposable du redémarrage SD. Les simulations « partition réseau » et « console indisponible » sont également disponibles. Ces tests ne créent aucun snapshot, n'éteignent aucun serveur et ne démarrent aucune VM. Le résultat est tracé avec l'auteur et la date. Les valeurs « dernier point de restauration » et « réplique vérifiée » restent volontairement **non disponibles**.
+
+**Pour permettre une copie réelle ultérieurement**, il faudra choisir et tester un moteur supporté (sauvegarde PBS/sync/restore validée, ou baies/consistency groups avec mapping LUN par VM et fencing), établir l'espace libre, le RPO/RTO réel, un protocole de validation de l'intégrité, l'isolement de la cible, le témoin d'arbitrage hors sites et un mécanisme anti-double-démarrage de la VM source. La migration distante Proxmox **déplace** une VM et ne remplace pas une réplication de secours. `pvesr` repose sur le stockage local de son cluster, pas sur une réplication générique inter-clusters iSCSI+LVM. Ne pas essayer de copier un disque LVM actif avec rsync/dd en production.
+
+Les protections PP et Production restent séparées. Il n'est pas possible de modifier les sites ou clusters en supprimant silencieusement ceux qui possèdent déjà des protections. Mettre en pause ou retirer une fiche **n'a pas d'effet sur les hyperviseurs**. Les états des agents sont rafraîchis depuis les heartbeats reçus via **Agents → Actualiser les états reçus**, sans forcer d'exécution distante.
+
 ### Déploiement SSH simplifié : accept-new sur les nœuds Proxmox (0.3.20)
 
 L'**identité SSH du coffre** contient l'utilisateur et sa clé **privée** pour se connecter aux nœuds (elle peut être la même que celle utilisée par un système de déploiement existant). La **clé d'hôte SSH** est un élément public différent, propre à chaque nœud Proxmox. OrigamiTasks refusait auparavant le déploiement si cette deuxième clé n'avait pas été approuvée manuellement.
