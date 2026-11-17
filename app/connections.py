@@ -13,12 +13,12 @@ KIND_FIELDS = {
     'api': {'base_url', 'test_path', 'username', 'password', 'token'},
     'ldap': {'uri', 'starttls', 'base_dn', 'group_base_dn', 'username', 'password'},
     'matrix': {'homeserver', 'username', 'token'},
-    'proxmox': {'url', 'username', 'token'},
+    'proxmox': {'url', 'username', 'token', 'ca_cert'},
     'generic': COMMON,
 }
 PUBLIC_KEYS = {'host', 'port', 'tls_mode', 'auth', 'from_address', 'username',
                'base_url', 'uri', 'starttls', 'base_dn', 'group_base_dn',
-               'homeserver', 'url', 'test_path'}
+               'homeserver', 'url', 'test_path', 'ca_cert'}
 
 
 class ConnectionError(Exception):
@@ -89,6 +89,12 @@ def normalize(kind, updates, previous=None, *, is_new=False):
         starttls = bool(values.get('starttls'))
         if not ((uri.startswith('ldaps://') and not starttls) or (uri.startswith('ldap://') and starttls)):
             raise ConnectionError('LDAP exige LDAPS ou STARTTLS')
+    if kind == 'proxmox' and values.get('ca_cert'):
+        from . import proxmox_cas
+        try:
+            proxmox_cas.filename(values['ca_cert'])
+        except proxmox_cas.ProxmoxCAError as exc:
+            raise ConnectionError(str(exc)) from None
     if kind in ('api', 'matrix', 'proxmox'):
         for key in ('base_url', 'homeserver', 'url'):
             if values.get(key) and not str(values[key]).startswith('https://'):
