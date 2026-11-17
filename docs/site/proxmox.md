@@ -1,5 +1,13 @@
 # Proxmox VE: discovery and disaster recovery
 
+### Named DR sites, managed agents and safe simulations (0.3.14)
+
+Under **Proxmox servers & clusters → DR sites and agents**, choose **Create site**, name it (e.g. SD or AU), assign its primary/standby role, associate **one or more previously registered Proxmox clusters** and declare the storage profile. The **iSCSI + LVM** choice is currently an **operator-supplied profile**, not confirmed storage discovery. A shared LVM VG can hold disks for many VMs on the same LUN, so replicating one Pure volume does not yield independent per-VM standbys.
+
+Attach existing Linux agents if desired. The **Deploy SSH agent** button links to the existing standard agent installer and vaulted SSH key; existing deployment prerequisites still apply, and the agent **does not become an autonomous DR arbitrator**. Future independent site agents must handle all nodes of a cluster, maintain trusted local policies and checkpoints across controller downtime, use mutually authenticated connections, implement rolling signed updates with rollback, and require witness and effective source fencing before any failover.
+
+**Simulate an outage (no action)** models a lost source cluster API, SD/AU network partition, or a failed OrigamiTasks console. It produces an auditable precondition report without any actual VM, node, storage or agent mutation. It does **not** constitute a live fencing or disaster-recovery test.
+
 **Current functionality:** register several independent Proxmox API endpoints, read node/QEMU/LXC/storage inventory, and optionally start/shutdown/reboot a VM through tightly gated API calls. A **read-only DR assessment** can inspect each VM disk storage type and list viable recovery technologies requiring further validation. **No cross-cluster replication, automated failover or migration engine is implemented in v0.3.13-rc1.**
 
 ## Register a node or cluster and discover VMs
