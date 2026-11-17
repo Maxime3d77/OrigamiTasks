@@ -223,6 +223,8 @@ def initialize():
             ("agents", "modules_reported_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("agent_deploy_batches", "proxmox_datacenter_id", "INTEGER"),
             ("agent_deploy_batches", "proxmox_group_id", "INTEGER"),
+            ("agent_deploy_batches", "enable_proxmox", "INTEGER NOT NULL DEFAULT 0"),
+            ("agent_deploy_batches", "enable_pra", "INTEGER NOT NULL DEFAULT 0"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:
