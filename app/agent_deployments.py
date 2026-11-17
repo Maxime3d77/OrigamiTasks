@@ -181,7 +181,7 @@ def process_one():
             if inspected['status']!='trusted':
                 raise DeploymentError("Clé hôte SSH inconnue ou modifiée : approbation nécessaire")
             cluster_authorized=True
-        result = agents.deploy({
+        deployment={
             'name': target['host'],
             'host': target['host'],
             'port': target['port'],
@@ -189,7 +189,10 @@ def process_one():
             'group': target['agent_group'],
             'credential_id': target['credential_id'],
             'approved': True
-        }, cluster_authorized=cluster_authorized)
+        }
+        # Preserve the legacy installer call shape for existing bulk workflows.
+        result=(agents.deploy(deployment,cluster_authorized=True) if cluster_authorized
+                else agents.deploy(deployment))
         if cluster_authorized:
             with db.session() as con:
                 site=con.execute(
