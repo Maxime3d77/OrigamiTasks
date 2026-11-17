@@ -597,7 +597,7 @@ async function openClusterAgentWizard(dcId, overrideSuffix=''){
   data=await api('/datacenters/'+dc.id+'/agent-nodes?domain_suffix='+encodeURIComponent(overrideSuffix));
  }catch(ex){
   if(!overrideSuffix){
-   const userSuffix=prompt('Domaine SSH des nœuds du cluster '+dc.name+' (ex. infra.aday.fr). Le certificat Proxmox ou l’URL peut utiliser une IP.','');
+   const userSuffix=prompt('Domaine SSH des nœuds du cluster '+dc.name+' (ex. infra.example.org). Le certificat Proxmox ou l’URL peut utiliser une IP.','');
    if(userSuffix){return openClusterAgentWizard(dcId,userSuffix.trim())}
   }
   return toast(ex.message,false);
