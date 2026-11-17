@@ -264,21 +264,21 @@ function agentEnrollForm(){modal('Enrôlement manuel','<form id="agentEnrollForm
 function datacenters(){
  if(!roleAdmin())return title('Proxmox','Administration uniquement.');
  const list=state.datacenters||[];
- const cards=list.map(d=>'<div class="job-card" data-dc-search="'+e((d.name+' '+d.url).toLowerCase())+'">'
+ const cards=list.map(d=>'<div class="job-card proxmox-card" data-dc-search="'+e((d.name+' '+d.url).toLowerCase())+'">'
    +'<div class="job-card-head"><div class="job-icon">◈</div><span class="chip tag">'+(d.kind==='node'?'Serveur individuel':'Cluster Proxmox')+'</span></div>'
    +'<h3>'+e(d.name)+'</h3><p>'+e(d.url)+'</p>'
-   +'<div class="muted tinytext">Connexion coffre #'+e(d.credential_id)+(d.ca_cert?' · CA TLS importée':' · CAs système')+'</div>'
+   +'<div class="muted tinytext">Connexion coffre #'+e(d.credential_id)+(d.skip_tls_verification?' · ⚠ Certificat TLS non vérifié':d.ca_cert?' · CA TLS importée':' · CAs système')+'</div>'
    +'<div class="actions"><button class="btn tiny" data-action="test-datacenter" data-id="'+d.id+'">Tester l’API</button>'
    +'<button class="btn primary tiny" data-action="discover-datacenter" data-id="'+d.id+'">Découvrir les nœuds/VM</button>'
    +'<button class="btn tiny" data-action="edit-datacenter" data-id="'+d.id+'">Modifier</button>'
    +'<button class="btn tiny danger" data-action="delete-datacenter" data-id="'+d.id+'">Supprimer</button></div></div>').join('');
- return title('Serveurs & clusters Proxmox','Déclare chaque cluster ou serveur autonome dans OrigamiTasks, avec son token et sa CA, sans modifier le .env.',
-     '<button class="btn primary" data-action="new-datacenter">＋ Ajouter un serveur / cluster</button>')
+ return title('Serveurs & clusters Proxmox','Déclare chaque cluster ou serveur autonome dans OrigamiTasks, avec son token et sa CA, sans modifier le .env.')
+   +'<div class="proxmox-toolbar"><button class="btn primary" data-action="new-datacenter">＋ Ajouter un serveur / cluster</button></div>'
    +'<div class="form-grid"><label class="field"><span>Rechercher parmi '+list.length+' serveurs et clusters</span>'
    +'<input id="proxmoxDcSearch" placeholder="Nom, FQDN, URL…"></label></div>'
-   +'<div class="workflow-grid">'+(cards||empty('Aucun Proxmox enregistré','Ajoute un cluster ou un serveur depuis cette page.'))+'</div>'
+   +'<div class="workflow-grid proxmox-grid">'+(cards||empty('Aucun Proxmox enregistré','Ajoute un cluster ou un serveur depuis cette page.'))+'</div>'
    +'<div class="notice">Chaque cluster dévoile ses nœuds et VM via la découverte. Les tokens restent chiffrés dans le coffre. '
-   +'La validation TLS est obligatoire. Les actions sensibles restent soumises à des permissions et validations distinctes.</div>';
+   +'La vérification TLS est activée par défaut ; une exception est possible sur chaque fiche Proxmox pour les certificats autosignés. Les actions sensibles restent soumises à des permissions et validations distinctes.</div>';
 }
 function proxmoxCAChoices(selected=''){
  const choices=[['','Autorités du système (CA publique)'],
@@ -303,6 +303,8 @@ function openDatacenterForm(id=null){
    +'<select name="dc_ca_cert">'+option(proxmoxCAChoices(d?.ca_cert||''),d?.ca_cert||'')+'</select>'
    +'<small class="hint">Choisir une CA déjà importée ou fournir un certificat CA PEM/CRT/DER ci-dessous. Les certificats sont conservés dans les données persistantes.</small></div>'
    +'<label class="field"><span>Importer une nouvelle CA publique (facultatif)</span><input type="file" name="dc_ca_file" accept=".crt,.cer,.pem,.der"></label>'
+   +'<div class="proxmox-tls-option"><label class="field checkbox"><input type="checkbox" name="dc_skip_tls" '+(d?.skip_tls_verification?'checked':'')+'> Ignorer la vérification du certificat TLS (certificat autosigné)</label>'
+   +'<p class="hint">Exception pour ce serveur / cluster uniquement. La connexion reste chiffrée en HTTPS, mais l’identité du serveur n’est plus vérifiée : risque d’interception. Privilégier l’import de la CA.</p></div>'
    +'<p class="hint">Une même entrée peut représenter un cluster (découverte de tous ses nœuds) ou un serveur isolé. '
    +'La CA sélectionnée est utilisée immédiatement, sans redémarrage.</p>'
    +'<div class="tool-row"><button class="btn primary" type="submit">'+(existing?'Enregistrer les modifications':'Ajouter et enregistrer le token')+'</button>'
@@ -593,7 +595,8 @@ const connectionSchemas={
   ['url','URL API Proxmox','text','https://pve.example.org:8006'],
   ['username','Utilisateur / ID de token API','text','user@pve!origamitasks'],
   ['token','Secret du jeton API','password',''],
-  ['ca_cert','CA TLS importée dans OrigamiTasks','ca-select','']
+  ['ca_cert','CA TLS importée dans OrigamiTasks','ca-select',''],
+  ['skip_tls_verification','Ignorer la vérification TLS pour cette connexion (déconseillé)','checkbox',false]
  ],
  generic:[
   ['username','Utilisateur','text',''],['password','Mot de passe','password',''],
@@ -1305,12 +1308,14 @@ async function handleSubmit(ev){
    const payload={name:String(f.get('dc_name')||'').trim(),
                   kind:String(f.get('dc_kind')||'cluster'),
                   url:String(f.get('dc_url')||'').trim(),
-                  ca_cert:String(f.get('dc_ca_cert')||'')};
+                  ca_cert:String(f.get('dc_ca_cert')||''),
+                  skip_tls_verification:f.has('dc_skip_tls')};
    const file=f.get('dc_ca_file');
    if(file&&file.size){
     const ca=await registerProxmoxCA(file);
     payload.ca_cert=ca.id;
    }
+   if(payload.skip_tls_verification&&!id&&!confirm('La vérification du certificat TLS sera désactivée pour ce serveur Proxmox. Continuer ?')){if(submit)submit.disabled=false;return;}
    if(f.get('dc_auth_mode')==='new'){
     payload.token_username=String(f.get('dc_token_username')||'').trim();
     payload.token_secret=String(f.get('dc_token_secret')||'');
