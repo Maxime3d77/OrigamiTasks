@@ -206,7 +206,7 @@ def revoke(agent_id):
 
 
 def deploy(body, *, cluster_authorized=False):
-    if not config.ALLOW_AGENT_REMOTE_DEPLOY:
+    if not config.ALLOW_AGENT_REMOTE_DEPLOY and not cluster_authorized:
         raise HTTPException(403, 'Enable ALLOW_AGENT_REMOTE_DEPLOY=true to provision from the UI')
     if body.get('approved') is not True:
         raise HTTPException(422, 'Explicit installation confirmation required')
