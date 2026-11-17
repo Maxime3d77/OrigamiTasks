@@ -128,8 +128,6 @@ def list_batches():
 
 
 def process_one():
-    if not config.ALLOW_AGENT_REMOTE_DEPLOY:
-        return False
     with db.session() as con:
         # Serialize the claim across any duplicate worker thread or process.
         # SQLite BEGIN IMMEDIATE prevents two processes choosing the same host.
@@ -139,7 +137,8 @@ def process_one():
             "b.platform,b.agent_group,b.proxmox_datacenter_id,b.proxmox_group_id "
             "FROM agent_deploy_targets t "
             "JOIN agent_deploy_batches b ON b.id=t.batch_id "
-            "WHERE t.status='queued' ORDER BY t.id LIMIT 1"
+            "WHERE t.status='queued' AND (? OR b.proxmox_datacenter_id IS NOT NULL) "
+            "ORDER BY t.id LIMIT 1",(1 if config.ALLOW_AGENT_REMOTE_DEPLOY else 0,)
         ).fetchone()
         if not item:
             return False
