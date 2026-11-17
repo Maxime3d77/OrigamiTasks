@@ -4,7 +4,7 @@
 
 On a Proxmox cluster card choose **Cluster agents**, or under a named DR site choose **Deploy to nodes**, then select the cluster if the site contains several.
 
-1. OrigamiTasks queries the actual PVE cluster API for nodes, derives their SSH FQDN from the Proxmox API DNS suffix (for example `sd-cardano.infra.aday.fr`) and lets the administrator correct that suffix before proceeding.
+1. OrigamiTasks queries the actual PVE cluster API for nodes, derives their SSH FQDN from the Proxmox API DNS suffix (for example `pve01.infra.example.org`) and lets the administrator correct that suffix before proceeding.
 2. Review and select the desired node list, then **Create / Synchronize SSH group**. This creates managed SSH inventory servers and a persistent `PVE-<id>-<name>` group **linked to the datacenter**, without installing agents. Explicit resynchronization replaces managed group membership; servers can also be members of other inventory groups.
 3. Per node use **SSH host fingerprint** and compare the presented SHA256 to a reliable console-side fingerprint. Explicitly type the matching fingerprint to approve; unknown or changed keys are never silently trusted.
 4. Choose a **vault SSH identity** with root/noninteractive sudo rights, select nodes without existing agents, approve the batch and click **Deploy selected agents**. A bounded background worker installs one node at a time, using the **same unified Linux agent package** with the passive DR worker.
