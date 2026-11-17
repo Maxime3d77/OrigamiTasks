@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#15161b"><meta name="description" content="OrigamiTasks : orchestration intelligente de workflows Windows et Linux">
-<link rel="icon" type="image/png" href="/assets/logo.png"><link rel="stylesheet" href="/assets/styles.css?v=0.3.16-rc1">
+<link rel="icon" type="image/png" href="/assets/logo.png"><link rel="stylesheet" href="/assets/styles.css?v=0.3.17-rc1">
 <title>OrigamiTasks — Automation Studio</title>
 </head>
 <body class="theme-dark">
@@ -13,7 +13,7 @@
   <div class="auth-card"><div class="eyebrow">BON RETOUR</div><h1>Orchestrez l'impossible.</h1><p>Un espace pour piloter tous vos workflows, sans friction.</p>
     <form id="loginForm" method="post" action="/api/login" autocomplete="on"><label>Identifiant<input name="username" autocomplete="username" required placeholder="admin ou identifiant LDAP"></label><label>Mot de passe<input name="password" type="password" autocomplete="current-password" required placeholder="••••••••••••"></label><div id="authError" class="auth-error"></div><button class="btn primary wide" type="submit">Ouvrir mon espace <span>↗</span></button></form>
   </div>
-  <div class="auth-footer">ORIGAMITASKS · OPEN AUTOMATION · v0.3.16-rc1</div>
+  <div class="auth-footer">ORIGAMITASKS · OPEN AUTOMATION · v0.3.17-rc1</div>
 </div>
 <div id="application" class="app-shell" hidden>
   <aside class="sidebar"><div class="brand"><img src="/assets/logo.png" alt="OrigamiTasks"><span>origami<b>tasks</b><small>AUTOMATION STUDIO</small></span></div>
@@ -32,12 +32,12 @@
      <button class="nav-item" data-page="users"><span class="nav-glyph">♧</span> Utilisateurs & droits</button>
     <button class="nav-item" data-page="updates"><span class="nav-glyph">⇣</span> Mises à jour</button>
     <button class="nav-item" data-page="audit"><span class="nav-glyph">▤</span> Journal d'audit</button>
-   </nav><div class="sidebar-bottom"><div class="system-status"><span class="status-dot"></span> Moteur actif <span id="sidebarVersion">v0.3.16-rc1</span></div><div class="sidebar-tagline">Built for human automation.</div></div>
+   </nav><div class="sidebar-bottom"><div class="system-status"><span class="status-dot"></span> Moteur actif <span id="sidebarVersion">v0.3.17-rc1</span></div><div class="sidebar-tagline">Built for human automation.</div></div>
   </aside>
   <div class="main-area"><header class="topbar"><button class="mobile-menu" id="menuToggle" aria-label="Menu">☰</button><div class="breadcrumb"><span>Workspace</span><span class="chevron">/</span><strong id="breadcrumb">Vue d'ensemble</strong></div><div class="top-actions"><div class="search-wrap"><span>⌕</span><input id="globalSearch" aria-label="Rechercher" placeholder="Rechercher un workflow, tag, dossier..."/><kbd>⌘ K</kbd></div><button class="theme-button" id="themeToggle" title="Changer de thème">☾</button><button id="logoutBtn" class="icon-button" title="Déconnexion">⇥</button><div class="avatar" id="userAvatar">AD</div></div></header>
   <main id="content" class="content"></main></div>
 </div>
 <div id="modalRoot"></div><div id="toast" role="status" aria-live="polite"></div>
-<script src="/assets/login.js?v=0.3.16-rc1" defer></script>
-<script src="/assets/app.js?v=0.3.16-rc1" defer></script>
+<script src="/assets/login.js?v=0.3.17-rc1" defer></script>
+<script src="/assets/app.js?v=0.3.17-rc1" defer></script>
 </body></html>
