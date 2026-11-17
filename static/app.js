@@ -278,11 +278,61 @@ function catalog(){const entries=state.catalog.available||[];const groups=[...ne
 
 function agentsPage(){
  if(!roleAdmin())return title('Agents','Administration uniquement.');
- return title('Agents Linux et Windows','Gestion des agents en sortie HTTPS, déploiement SSH et révocation.',
- '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button><button class="btn primary" data-action="agent-deploy-form">⇣ Un serveur</button><button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')+
- '<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2><span class="hint">'+state.agents.length+' agent(s)</span></div><div class="table-wrap"><table><thead><tr><th>Nom</th><th>Plateforme</th><th>Groupe</th><th>État</th><th>Dernier contact</th><th></th></tr></thead><tbody>'+
- state.agents.map(a=>'<tr><td class="name-cell">'+e(a.name)+'<div class="muted tinytext">'+e(a.hostname||'Non enrôlé')+'</div></td><td>'+e(a.platform)+' · '+e(a.version||'—')+'</td><td>'+e(a.group_name)+'</td><td>'+labelStatus(a.status)+'</td><td>'+dt(a.last_seen)+'</td><td>'+(a.revoked?'—':'<button class="btn tiny danger" data-action="agent-revoke" data-id="'+a.id+'">Révoquer</button>')+'</td></tr>').join('')+
- '</tbody></table></div></div><div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2><button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button></div><div id="agentBatchList">'+agentBatchPanel()+'</div></div><div class="notice">Déploiement SSH : compte privilégié, clé d’hôte connue, AGENT_SERVER_URL HTTPS, ALLOW_AGENT_REMOTE_DEPLOY=true et liste AGENT_DEPLOY_ALLOWED_HOSTS. Les écritures sont désactivées par défaut. Linux utilise un compte non privilégié ; Windows utilise une tâche SYSTEM.</div>'}
+ const cards=(state.agents||[]).map(agent=>{
+  const action=agent.uninstalled_at?''
+   :'<button class="btn tiny danger" data-action="agent-uninstall" data-id="'+agent.id+'">Désinstaller via SSH</button>'
+     +(agent.revoked?'':'<button class="btn tiny" data-action="agent-revoke" data-id="'+agent.id+'">Révoquer le jeton</button>');
+  return '<tr><td class="name-cell">'+e(agent.name)+'<div class="muted tinytext">'+e(agent.hostname||'Non enrôlé')+'</div></td>'
+    +'<td>'+e(agent.platform)+' · '+e(agent.version||'Version inconnue')+'</td>'
+    +'<td>'+e(agent.group_name)+'</td><td>'+labelStatus(agent.status)+'</td>'
+    +'<td>'+(Number.isFinite(agent.cpu_percent)?e(agent.cpu_percent.toFixed(1))+' %':'—')+'</td>'
+    +'<td>'+(Number.isFinite(agent.memory_mb)?e(agent.memory_mb.toFixed(1))+' Mio':'—')+'</td>'
+    +'<td>'+dt(agent.last_seen)+'</td>'
+    +'<td class="agent-action-buttons">'+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
+ }).join('');
+ return title('Agents Linux et Windows','État, consommation et gestion du cycle de vie des agents standards.',
+  '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button>'
+  +'<button class="btn primary" data-action="agent-deploy-form">⇣ Déployer sur un serveur</button>'
+  +'<button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')
+  +'<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2>'
+  +'<span class="hint">'+state.agents.length+' agent(s)</span></div>'
+  +'<div class="table-wrap"><table><thead><tr><th>Nom / hôte</th><th>OS / version</th><th>Groupe</th>'
+  +'<th>État</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
+  +'<tbody>'+(cards||'<tr><td colspan="8">Aucun agent installé.</td></tr>')+'</tbody></table></div></div>'
+  +'<div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2>'
+  +'<button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button></div>'
+  +'<div id="agentBatchList">'+agentBatchPanel()+'</div></div>'
+  +'<div class="notice"><b>Révoquer ≠ Désinstaller.</b> La révocation invalide le token sans retirer le programme sur le serveur.'
+  +' La désinstallation vérifie la cible et le fichier d’identité de l’agent, supprime uniquement les éléments OrigamiTasks puis révoque son token.'
+  +' L’installation Linux applique des limites systemd (192 Mio / 20 % d’un CPU) aux nouveaux déploiements ;'
+  +' les métriques affichées concernent uniquement le processus agent. Les agents existants ne sont pas modifiés automatiquement.'
+  +' Les agents Windows actuels fonctionnent sous SYSTEM : leur durcissement doit être renforcé avant une généralisation sur les serveurs critiques.</div>';
+}
+function openAgentUninstallForm(id){
+ const a=(state.agents||[]).find(item=>item.id===Number(id));
+ if(!a)return toast('Agent introuvable',false);
+ const known=(state.sshInventory.servers||[]).filter(h=>
+  (h.fqdn||'').toLowerCase().split('.')[0]===(a.hostname||'').toLowerCase()||
+  (h.fqdn||'').toLowerCase()===(a.hostname||'').toLowerCase());
+ const ssh=state.credentials.filter(c=>c.kind==='ssh');
+ const contents='<form id="agentUninstallForm" data-id="'+a.id+'">'
+  +'<div class="notice error"><b>Retrait sur le serveur réel.</b> Le service Linux ou la tâche planifiée Windows sera supprimé sur la machine SSH vérifiée.'
+  +' Aucun autre service ne sera supprimé. En cas d’échec distant, le jeton reste utilisable : tu pourras réessayer ou le révoquer séparément.</div>'
+  +'<p><b>Agent :</b> '+e(a.name)+' · '+e(a.platform)+' · '+e(a.hostname||'hôte inconnu')+'</p>'
+  +'<div class="form-grid">'
+  +field('FQDN complet du serveur','uninstall_host',known[0]?.fqdn||(a.hostname?.includes('.')?a.hostname:''))
+  +field('Port SSH','uninstall_port',known[0]?.port||22,'number')
+  +selectField('Identité SSH du coffre','uninstall_credential',
+    [['','— Sélectionner une identité SSH —'],...ssh.map(v=>[v.id,v.name])],'')
+  +field('Confirmer en saisissant le nom exact de l’agent','uninstall_confirmation','','text')
+  +'</div><label class="field checkbox"><input type="checkbox" name="uninstall_approved" required>'
+  +'<span>Je confirme que cet agent doit être désinstallé de cette machine.</span></label>'
+  +'<p class="hint">La clé d’hôte SSH doit déjà être connue et approuvée. '
+  +'Le serveur distant doit présenter le même agent_id et la même URL de contrôle. Une clé inconnue ou modifiée bloque la suppression.</p>'
+  +'<div class="tool-row"><button class="btn danger" type="submit">Désinstaller cet agent</button>'
+  +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal('Désinstaller l’agent '+e(a.name),contents,'',true);
+}
 function agentDeployForm(){modal('Déployer un agent via SSH','<form id="agentDeployForm"><div class="form-grid">'+
  field('Nom de l’agent','name')+selectField('Système','platform',[['linux','Linux (Python 3 + systemd)'],['windows','Windows (PowerShell 5.1+)']],'linux')+
  field('Hôte / FQDN autorisé','host')+field('Port SSH','port',22,'number')+field('Groupe','group','default')+
@@ -1412,7 +1462,8 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   const lines=new Set([...area.value.split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean),...targets]);
   area.value=[...lines].join('\n');
   toast(targets.length+' serveur(s) ajoutés');return
- }if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='dr-site-new'){openDRSiteForm();return}
+ }if(a==='agent-uninstall'){openAgentUninstallForm(id);return}
+ if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='dr-site-new'){openDRSiteForm();return}
  if(a==='dr-site-edit'){openDRSiteForm(id);return}
  if(a==='dr-site-delete'){
   if(!confirm('Supprimer cette association PRA ? Les clusters, les agents et les VM ne seront pas modifiés.'))return;
@@ -1461,6 +1512,29 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   hydrateAdmins();return
  }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='agentUninstallForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),agentId=Number(ev.target.dataset.id);
+  const agent=(state.agents||[]).find(x=>x.id===agentId);
+  if(!agent||String(f.get('uninstall_confirmation')||'')!==agent.name)
+   return toast('Saisir le nom exact de l’agent pour confirmer',false);
+  if(!f.has('uninstall_approved'))return toast('Confirmer explicitement la désinstallation',false);
+  const host=String(f.get('uninstall_host')||'').trim();
+  if(!confirm('Désinstaller réellement '+agent.name+' de '+host+' ? Cette opération arrête son service et révoque son token.'))
+   return;
+  const button=ev.target.querySelector('[type="submit"]');
+  if(button)button.disabled=true;
+  try{
+   await api('/agents/'+agentId+'/uninstall','POST',{
+    host,port:Number(f.get('uninstall_port')||22),
+    credential_id:Number(f.get('uninstall_credential')||0),approved:true
+   });
+   closeModal();toast('Agent désinstallé sur la cible et token révoqué');
+   await refresh();
+  }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
+  return
+ }
+
  if(ev.target.id==='drSiteForm'){
   ev.preventDefault();
   const f=new FormData(ev.target),id=Number(ev.target.dataset.id)||0;
