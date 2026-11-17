@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +10,7 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
@@ -261,8 +261,79 @@ function agentEnrollForm(){modal('Enrôlement manuel','<form id="agentEnrollForm
  field('Nom','name')+selectField('Plateforme','platform',[['linux','Linux'],['windows','Windows']],'linux')+
  field('Groupe','group','default')+'</div><p class="hint">Jeton unique valable 15 minutes. Installer agents/linux/agent.py ou agents/windows/agent.ps1 avec config.json sur la machine.</p><button class="btn primary" type="submit">Créer un jeton</button></form>')}
 
-function datacenters(){if(!roleAdmin())return title('DC Proxmox','Administration uniquement.');return title('DC Proxmox','Gérer les clusters et leurs tokens directement depuis l’interface, sans liste d’hôtes dans .env.','<button class="btn primary" data-action="new-datacenter">＋ Déclarer un DC Proxmox</button>')+`<div class="form-grid"><label class="field"><span>Rechercher parmi les ${state.datacenters.length} datacenters</span><input id="proxmoxDcSearch" placeholder="Nom, FQDN, URL..."></label></div><div class="workflow-grid">${state.datacenters.map(d=>`<div class="job-card" data-dc-search="${e((d.name+' '+d.url).toLowerCase())}"><div class="job-card-head"><div class="job-icon">◈</div><span class="chip tag">Proxmox VE</span></div><h3>${e(d.name)}</h3><p>${e(d.url)}</p><div class="muted tinytext">Coffre #${d.credential_id}</div><div class="actions"><button class="btn primary tiny" data-action="discover-datacenter" data-id="${d.id}">⌕ Découvrir les ressources</button><button class="btn tiny danger" data-action="delete-datacenter" data-id="${d.id}">Supprimer</button></div></div>`).join('')||empty('Aucun DC Proxmox','Déclarez votre premier cluster avec un compte API dédié.')}</div><div class="notice">Les opérations sensibles sont désactivées par défaut. Les migrations et réplications entre clusters restent au stade du plan d’architecture.</div>`}
-function openDatacenterForm(){modal('Ajouter un DC Proxmox',`<form id="datacenterForm"><div class="form-grid">${field('Nom','dc_name')}${field('URL HTTPS, ex. https://pve.exemple:8006','dc_url')}${selectField('Token API Proxmox', 'dc_credential',[['','— Sélectionner —'],...state.credentials.filter(c=>c.kind==='proxmox').map(c=>[c.id,c.name])],'')}</div><p class="hint">L’URL HTTPS et le token définissent ce DC dans OrigamiTasks. Aucun ajout au .env nécessaire, même pour des centaines de DC. Le certificat TLS reste vérifié et les actions sensibles restent encadrées.</p><button class="btn primary" type="submit">Enregistrer</button></form>`)}
+function datacenters(){
+ if(!roleAdmin())return title('Proxmox','Administration uniquement.');
+ const list=state.datacenters||[];
+ const cards=list.map(d=>'<div class="job-card" data-dc-search="'+e((d.name+' '+d.url).toLowerCase())+'">'
+   +'<div class="job-card-head"><div class="job-icon">◈</div><span class="chip tag">'+(d.kind==='node'?'Serveur individuel':'Cluster Proxmox')+'</span></div>'
+   +'<h3>'+e(d.name)+'</h3><p>'+e(d.url)+'</p>'
+   +'<div class="muted tinytext">Connexion coffre #'+e(d.credential_id)+(d.ca_cert?' · CA TLS importée':' · CAs système')+'</div>'
+   +'<div class="actions"><button class="btn tiny" data-action="test-datacenter" data-id="'+d.id+'">Tester l’API</button>'
+   +'<button class="btn primary tiny" data-action="discover-datacenter" data-id="'+d.id+'">Découvrir les nœuds/VM</button>'
+   +'<button class="btn tiny" data-action="edit-datacenter" data-id="'+d.id+'">Modifier</button>'
+   +'<button class="btn tiny danger" data-action="delete-datacenter" data-id="'+d.id+'">Supprimer</button></div></div>').join('');
+ return title('Serveurs & clusters Proxmox','Déclare chaque cluster ou serveur autonome dans OrigamiTasks, avec son token et sa CA, sans modifier le .env.',
+     '<button class="btn primary" data-action="new-datacenter">＋ Ajouter un serveur / cluster</button>')
+   +'<div class="form-grid"><label class="field"><span>Rechercher parmi '+list.length+' serveurs et clusters</span>'
+   +'<input id="proxmoxDcSearch" placeholder="Nom, FQDN, URL…"></label></div>'
+   +'<div class="workflow-grid">'+(cards||empty('Aucun Proxmox enregistré','Ajoute un cluster ou un serveur depuis cette page.'))+'</div>'
+   +'<div class="notice">Chaque cluster dévoile ses nœuds et VM via la découverte. Les tokens restent chiffrés dans le coffre. '
+   +'La validation TLS est obligatoire. Les actions sensibles restent soumises à des permissions et validations distinctes.</div>';
+}
+function proxmoxCAChoices(selected=''){
+ const choices=[['','Autorités du système (CA publique)'],
+    ...(state.proxmoxCAs||[]).map(item=>[item.id,item.subject+' · '+item.id.slice(0,12)])];
+ if(selected&&!choices.some(x=>x[0]===selected))choices.push([selected,'CA précédemment importée : '+selected.slice(0,12)]);
+ return choices;
+}
+function openDatacenterForm(id=null){
+ const d=(state.datacenters||[]).find(x=>x.id===Number(id)),existing=!!d;
+ const credentialChoices=[['','— Choisir une connexion Proxmox existante —'],
+     ...state.credentials.filter(x=>x.kind==='proxmox'||x.kind==='api').map(x=>[x.id,x.name+' · '+(x.public?.url||x.public?.base_url||'')])];
+ const content='<form id="datacenterForm" data-id="'+(d?.id||'')+'"><div class="form-grid">'
+   +field('Nom du serveur / cluster','dc_name',d?.name||'')
+   +selectField('Type de cible','dc_kind',[['cluster','Cluster Proxmox VE'],['node','Serveur Proxmox autonome']],d?.kind||'cluster')
+   +field('URL HTTPS Proxmox (ex. https://pve.infra.example.org:8006)','dc_url',d?.url||'')
+   +selectField('Authentification','dc_auth_mode',[['new','Créer un nouveau token dans le coffre'],['existing','Choisir un token déjà enregistré']],existing?'existing':'new')
+   +'</div><div class="form-grid" data-proxmox-auth="new">'
+   +field('ID du token (user@pve!nom)','dc_token_username','','text')
+   +'<label class="field"><span>Secret du token API</span><input name="dc_token_secret" type="password" autocomplete="new-password" placeholder="Secret créé dans Proxmox"></label></div>'
+   +'<div data-proxmox-auth="existing">'+selectField('Connexion du coffre','dc_credential',credentialChoices,d?.credential_id||'')+'</div>'
+   +'<div class="field"><span>Autorité de certification TLS du serveur</span>'
+   +'<select name="dc_ca_cert">'+option(proxmoxCAChoices(d?.ca_cert||''),d?.ca_cert||'')+'</select>'
+   +'<small class="hint">Choisir une CA déjà importée ou fournir un certificat CA PEM/CRT/DER ci-dessous. Les certificats sont conservés dans les données persistantes.</small></div>'
+   +'<label class="field"><span>Importer une nouvelle CA publique (facultatif)</span><input type="file" name="dc_ca_file" accept=".crt,.cer,.pem,.der"></label>'
+   +'<p class="hint">Une même entrée peut représenter un cluster (découverte de tous ses nœuds) ou un serveur isolé. '
+   +'La CA sélectionnée est utilisée immédiatement, sans redémarrage.</p>'
+   +'<div class="tool-row"><button class="btn primary" type="submit">'+(existing?'Enregistrer les modifications':'Ajouter et enregistrer le token')+'</button>'
+   +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal(existing?'Modifier Proxmox · '+d.name:'Ajouter un serveur ou cluster Proxmox',content);
+ updateProxmoxAuthFields();
+}
+function updateProxmoxAuthFields(){
+ const form=document.getElementById('datacenterForm');
+ if(!form)return;
+ const mode=form.elements.namedItem('dc_auth_mode')?.value||'new';
+ form.querySelectorAll('[data-proxmox-auth]').forEach(el=>el.hidden=el.dataset.proxmoxAuth!==mode);
+}
+async function registerProxmoxCA(file){
+ if(!file||file.size===0)return null;
+ if(file.size>131072)throw Error('CA trop volumineuse : 128 Kio maximum');
+ const text=await file.text();
+ let payload;
+ if(text.includes('-----BEGIN CERTIFICATE-----')){
+  payload={pem_text:text};
+ }else{
+  const bytes=new Uint8Array(await file.arrayBuffer());
+  let binary='';
+  for(let i=0;i<bytes.length;i+=8192)
+   binary+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
+  payload={der_base64:btoa(binary)};
+ }
+ const result=await api('/proxmox/cas','POST',payload);
+ state.proxmoxCAs=(await api('/proxmox/cas')).items;
+ return result;
+}
 function updates(){
  return title('Versions & mises à jour',
    'Comparaison de la version installée avec la branche Git autorisée. Aucun déploiement automatique.')
