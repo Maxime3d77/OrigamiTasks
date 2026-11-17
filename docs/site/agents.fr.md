@@ -1,5 +1,15 @@
 # Agents Linux et Windows — préversion v0.3.0-rc1
 
+## Tableau de bord, consommation et désinstallation (v0.3.15)
+
+La **Vue d'ensemble** dispose maintenant de trois onglets : **Tâches**, **Agents** et **DC Proxmox / PRA**. L'onglet Agents indique l'état de chaque agent (dernier heartbeat, version), ainsi que le CPU et la RAM du **processus agent uniquement** lorsque l'agent version 0.3.1 ou supérieure remonte ces métriques. Cela ne mesure pas l'utilisation des scripts enfants, des VM ou des services gérés. Des valeurs vides signifient « non remontées », pas zéro.
+
+L'intervalle de polling des nouveaux agents est de **10 secondes** par défaut, configurable dans `config.json` avec `poll_interval_seconds` entre 5 et 60 secondes. En régime normal, un agent ne fait pas de travail intensif ; l'utilisation exacte dépend du serveur et des tâches déclenchées. Les nouveaux services Linux déployés avec cette version ont les directives `CPUQuota=20%`, `MemoryMax=192M` et `TasksMax=48` : ces **limites systemd concernent le groupe de processus du service** et peuvent interrompre ou ralentir des scripts lourds. Ce ne sont pas des mesures de consommation garanties. Les installations précédentes ne reçoivent pas ces limites tant qu'elles n'ont pas été remplacées/ajustées.
+
+L'écran **Agents Linux et Windows** distingue **Révoquer le jeton** (l'agent reste installé) et **Désinstaller via SSH** (retirer le service/tâche et le dossier agent sur le serveur, puis révoquer le token). La désinstallation demande une identité SSH du coffre, le FQDN, le port, la saisie du **nom exact de l'agent** et confirmation. L'empreinte SSH doit être **déjà approuvée** et inchangée ; le hostname doit correspondre à celui de l'agent, et le fichier `config.json` distant doit contenir le même agent ID et l'URL de la console. En cas de refus ou échec SSH, l'opération échoue **sans annoncer une suppression réussie** ; la révocation reste disponible séparément. La suppression de l'agent Windows nécessite des droits administrateur et celle de Linux nécessite root ou sudo non interactif.
+
+**Niveau de sécurité :** HTTPS sortant avec validation TLS, token d'enrôlement à usage unique puis token individuel révocable, coffre chiffré côté console ; Linux non privilégié avec restrictions systemd. En revanche, **pas encore de mTLS, mise à jour signée ni autonomie PRA** ; l'agent Windows actuel utilise une tâche SYSTEM et mérite un durcissement spécifique. Éviter l'autorisation de scripts arbitraires sur des hôtes critiques.
+
 ## Agents PRA autonomes : architecture cible, non encore disponible
 
 Les agents actuels (Python Linux/PowerShell Windows) sollicitent la console OrigamiTasks en HTTPS pour recevoir leurs tâches. Si la VM de la console est sur SD et tombe, **ils ne peuvent plus recevoir de nouvelles commandes**. Ils ne sont pas encore des agents de réplication ni des arbitres de bascule.
