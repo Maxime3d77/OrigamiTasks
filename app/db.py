@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS dr_site_datacenters (
 );
 CREATE TABLE IF NOT EXISTS dr_site_agents (
  site_id INTEGER NOT NULL REFERENCES dr_sites(id) ON DELETE CASCADE,
- agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+ agent_id INTEGER NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
  PRIMARY KEY(site_id,agent_id)
 );
 CREATE TABLE IF NOT EXISTS dr_simulations (
