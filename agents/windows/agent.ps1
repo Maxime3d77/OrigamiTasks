@@ -66,9 +66,8 @@ function Save-AgentModules($response, $agentId) {
     $revision=$response.modules_revision
     $policy=$response.pra_policy
     if ($null -eq $mods -or $null -eq $revision -or $null -eq $policy) { return }
-    if (-not $mods.standard -or $mods.pra) {
-        # Windows does not yet ship the independently isolated PRA worker.
-        # Reject a policy asking this platform to enable it.
+    if (-not $mods.standard -or $mods.pra -or $mods.proxmox) {
+        # Windows agents are workflow executors only: reject infra/PRA policies.
         return
     }
     foreach ($key in @('replication_enabled','promotion_enabled','fencing_ready','witness_ready')) {
@@ -77,7 +76,7 @@ function Save-AgentModules($response, $agentId) {
     $obj=@{
         agent_id=$agentId
         revision=[int]$revision
-        modules=@{standard=$true;proxmox=($mods.proxmox -eq $true);pra=$false}
+        modules=@{standard=$true;proxmox=$false;pra=$false}
         site=$response.site
         pra_policy=@{
             replication_enabled=$false
@@ -91,14 +90,14 @@ function Save-AgentModules($response, $agentId) {
     Move-Item -LiteralPath $tmp -Destination $ModulesFile -Force
 }
 function Get-AgentModuleReport($agentId) {
-    $status=@{standard='ready';proxmox='disabled';pra='unsupported'}
+    $status=@{standard='ready';proxmox='unsupported';pra='unsupported'}
     $revision=0
     try {
         if (Test-Path -LiteralPath $ModulesFile -PathType Leaf) {
             $policy=Get-Content -LiteralPath $ModulesFile -Raw -Encoding UTF8 | ConvertFrom-Json
             if ([int]$policy.agent_id -eq $agentId) {
                 $revision=[int]$policy.revision
-                if ($policy.modules.proxmox -eq $true) { $status.proxmox='configured' }
+                if ($policy.modules.proxmox -eq $true -or $policy.modules.pra -eq $true) { $revision=0 }
             }
         }
     } catch { $revision=0; $status.proxmox='error' }
