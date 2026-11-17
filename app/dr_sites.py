@@ -179,6 +179,11 @@ def simulate(payload, actor):
     if source_id not in site_map or target_id not in site_map:
         raise DRSiteError("Site source ou destination inconnu")
     source,target=site_map[source_id],site_map[target_id]
+    if source["plan_id"] is None or target["plan_id"] is None:
+        raise DRSiteError(
+            "Simulation refusée : classer les deux sites dans un groupe PRA "
+            "explicite avant tout test, pour éviter le mélange PP / PROD."
+        )
     if source["plan_id"]!=target["plan_id"]:
         raise DRSiteError(
             "Simulation refusée : sites appartenant à deux groupes PRA différents (PP / PROD)."
