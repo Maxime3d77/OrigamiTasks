@@ -114,7 +114,7 @@ def test_dr_dashboard_is_not_labelled_as_autonomous():
     assert 'function openDRSimulationForm()' in src
     assert 'function openDRSiteForm(' in src
     assert 'mode PRA' not in src or 'simulation uniquement' in src
-    assert 'réplication / bascule non disponibles' in src.lower()
+    assert 'aucune réplication / bascule opérationnelle' in src.lower()
     assert "api('/dr/simulate','POST'" in src
     assert 'Aucune bascule effectuée.' in src
     assert 'Les agents actuels' not in src or 'agents' in src
