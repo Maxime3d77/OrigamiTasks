@@ -1,8 +1,9 @@
 """SSH host-key inspection, manual approval and scoped automatic first-use pinning.
 
-Never auto-approve: require an exact SHA256 fingerprint verified out of band.
-Use existing pinned known_hosts entries and reject changed host keys.
-No SSH passwords or user private keys are sent during inspection.
+The manual approval endpoint still requires an independently verified SHA256
+fingerprint. Only the explicitly admin-approved Proxmox agent rollout uses
+automatic trust-on-first-use, pinning the first server key without prompting.
+Never replace a pinned key. Neither inspection nor TOFU sends user private keys.
 """
 import base64
 import fcntl
