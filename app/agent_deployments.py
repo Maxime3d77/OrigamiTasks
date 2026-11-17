@@ -180,7 +180,7 @@ def process_one():
         item = con.execute(
             "SELECT t.id,t.batch_id,t.host,t.port,t.server_id,t.credential_id,"
             "b.platform,b.agent_group,b.proxmox_datacenter_id,b.proxmox_group_id,"
-            "b.enable_proxmox,b.enable_pra "
+            "b.enable_proxmox,b.enable_pra,b.actor "
             "FROM agent_deploy_targets t "
             "JOIN agent_deploy_batches b ON b.id=t.batch_id "
             "WHERE t.status='queued' AND (? OR b.proxmox_datacenter_id IS NOT NULL) "
@@ -218,14 +218,18 @@ def process_one():
                 ).fetchone()
             if not found:
                 raise DeploymentError("Nœud Proxmox retiré du groupe depuis la validation")
-            # A group is never enough to grant host trust. Reject TOFU here,
-            # including when legacy policy elsewhere allows accept-new.
+            # The cluster-bound administrator approved the selected node
+            # and SSH identity. Pin its public host key automatically the first
+            # time (TOFU); never silently replace a changed/previously known key.
+            # The actual authenticated SSHClient connection verifies this pin
+            # again before offering the deployment identity.
             try:
-                inspected=host_keys.inspect(target['host'],target['port'])
-            except host_keys.HostKeyError:
-                raise DeploymentError("Empreinte SSH non vérifiable depuis OrigamiTasks") from None
-            if inspected['status']!='trusted':
-                raise DeploymentError("Clé hôte SSH inconnue ou modifiée : approbation nécessaire")
+                trusted=host_keys.trust_first_use(target['host'],target['port'])
+            except host_keys.HostKeyError as exc:
+                raise DeploymentError(str(exc)) from None
+            if trusted['added']:
+                db.audit(target['actor'],'ssh.host-key.first-use',target['host'],
+                         'TOFU : clé publique serveur enregistrée pour déploiement cluster')
             # A site deleted after approval blocks module-related rollout
             # BEFORE the privileged SSH installation.
             if target["enable_proxmox"] or target["enable_pra"]:
