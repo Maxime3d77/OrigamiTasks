@@ -154,7 +154,13 @@ def queue(payload, actor):
 def list_batches():
     with db.session() as con:
         groups = [dict(x) for x in con.execute(
-            "SELECT * FROM agent_deploy_batches ORDER BY id DESC LIMIT 25")]
+            "SELECT b.*, p.name AS dr_plan_name, s.name AS dr_site_name, "
+            "dc.name AS datacenter_name FROM agent_deploy_batches b "
+            "LEFT JOIN datacenters dc ON dc.id=b.proxmox_datacenter_id "
+            "LEFT JOIN dr_site_datacenters link ON link.datacenter_id=dc.id "
+            "LEFT JOIN dr_sites s ON s.id=link.site_id "
+            "LEFT JOIN dr_plans p ON p.id=s.plan_id "
+            "ORDER BY b.id DESC LIMIT 25")]
         targets = [dict(x) for x in con.execute(
             "SELECT id,batch_id,host,port,status,agent_id,error,started_at,finished_at "
             "FROM agent_deploy_targets ORDER BY id DESC LIMIT 2500")]
