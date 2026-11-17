@@ -1,5 +1,11 @@
 # Référence de configuration
 
+### Découverte Proxmox : rechercher et trier les ressources
+
+Dans **Serveurs & clusters Proxmox → Découvrir les nœuds/VM**, le tableau dispose d'une recherche instantanée (nom, VMID, nœud, état, ID et stockage), de filtres **Tous / Nœuds / VM / LXC / Stockages**, d'un tri **Nom / Type / VMID / Nœud / État** ascendant ou descendant, d'une pagination **100 éléments par page**, d'un récapitulatif des volumes et du bouton **Actualiser depuis Proxmox**. Le bouton **Évaluer PRA** reste disponible pour les VM QEMU. Cette fonctionnalité est **en lecture seule**.
+
+Le futur PRA automatique SD→AU avec agents autonomes mais administrés, VM de secours nommées **REP_**, témoin indépendant et **retour arrière explicite** est documenté dans le fichier **docs/ARCHITECTURE-PRA-INTERSITES.fr.md**. Il s'agit d'une conception, pas d'un moteur de bascule actuellement disponible. Une perte de ping ou d'agent ne suffit jamais à autoriser le démarrage du secours ; un véritable fencing et un propriétaire exclusif doivent être prouvés.
+
 ### Proxmox avec certificat autosigné : dérogation TLS par serveur (0.3.12)
 
 Sur **Administration → Serveurs & clusters Proxmox**, cliquer **Modifier** sur le serveur ou cluster. Si l'import de la CA interne n'est pas possible, cocher **Ignorer la vérification du certificat TLS (certificat autosigné)**, puis **Enregistrer les modifications** et **Tester l'API**. Cette dérogation ne concerne que ce serveur/cluster, reste modifiable à tout moment et ne nécessite **aucune modification du `.env` ni redémarrage de Docker**.
