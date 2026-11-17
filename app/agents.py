@@ -246,6 +246,11 @@ def deploy(body):
             source = Path(__file__).resolve().parent.parent / 'agents' / ('windows/agent.ps1' if is_windows else 'linux/agent.py')
             files = {marker+'_'+local_name: source.read_bytes(),
                      marker+'_config.json': json.dumps(config_data).encode()}
+            # One deployment bundle. Linux runs a second, isolated *passive*
+            # PRA process from the same installation directory (no VM actions).
+            if not is_windows:
+                worker=Path(__file__).resolve().parent.parent / 'agents/linux/pra_worker.py'
+                files[marker+'_pra_worker.py']=worker.read_bytes()
             for name_, data in files.items():
                 with sftp.file(base+'/'+name_, 'wb') as f:
                     f.write(data)
@@ -281,20 +286,29 @@ def deploy(body):
             command = 'powershell.exe -NoProfile -NonInteractive -EncodedCommand ' + base64.b64encode(ps.encode('utf-16le')).decode()
         else:
             stage_script = shlex.quote(base+'/'+marker+'_agent.py')
+            stage_worker = shlex.quote(base+'/'+marker+'_pra_worker.py')
             stage_config = shlex.quote(base+'/'+marker+'_config.json')
             install_script = (
                 'set -eu; command -v python3 >/dev/null; command -v systemctl >/dev/null; '
                 "id origamitasks-agent >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin origamitasks-agent; "
                 'install -d -m 700 -o origamitasks-agent -g origamitasks-agent /opt/origamitasks-agent; '
                 'install -m 500 -o origamitasks-agent -g origamitasks-agent '+stage_script+' /opt/origamitasks-agent/agent.py; '
+                'install -m 500 -o origamitasks-agent -g origamitasks-agent '+stage_worker+' /opt/origamitasks-agent/pra_worker.py; '
                 'install -m 600 -o origamitasks-agent -g origamitasks-agent '+stage_config+' /opt/origamitasks-agent/config.json; '
                 'printf "%s\\n" "[Unit]" "Description=OrigamiTasks outbound agent" "After=network-online.target" "Wants=network-online.target" '
                 '"[Service]" "Type=simple" "User=origamitasks-agent" "Group=origamitasks-agent" '
                 '"ExecStart=/usr/bin/env python3 /opt/origamitasks-agent/agent.py" "Restart=always" "RestartSec=10" '
                 '"NoNewPrivileges=true" "ProtectSystem=strict" "ProtectHome=true" "ReadWritePaths=/opt/origamitasks-agent" "MemoryMax=192M" "CPUQuota=20%" "TasksMax=48" '
                 '"[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/origamitasks-agent.service; '
+                'printf "%s\\n" "[Unit]" "Description=OrigamiTasks passive PRA module" "After=network-online.target" "Wants=network-online.target" '
+                '"[Service]" "Type=simple" "User=origamitasks-agent" "Group=origamitasks-agent" '
+                '"ExecStart=/usr/bin/env python3 /opt/origamitasks-agent/pra_worker.py" "Restart=always" "RestartSec=15" '
+                '"NoNewPrivileges=true" "ProtectSystem=strict" "ProtectHome=true" "ReadWritePaths=/opt/origamitasks-agent" '
+                '"MemoryMax=64M" "CPUQuota=10%" "TasksMax=24" '
+                '"[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/origamitasks-agent-pra.service; '
                 'systemctl daemon-reload; systemctl enable --now origamitasks-agent.service; '
-                'rm -f '+stage_script+' '+stage_config
+                'systemctl enable --now origamitasks-agent-pra.service; '
+                'rm -f '+stage_script+' '+stage_config+' '+stage_worker
             )
             command = 'sh -c '+shlex.quote("if [ \"$(id -u)\" -eq 0 ]; then exec sh -c "+shlex.quote(install_script)+"; else exec sudo -n sh -c "+shlex.quote(install_script)+"; fi")
         _, stdout, stderr = client.exec_command(command, timeout=120)
