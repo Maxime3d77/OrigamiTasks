@@ -1,5 +1,15 @@
 # Proxmox VE : découverte et reprise d'activité
 
+### Déploiement SSH simplifié : accept-new sur les nœuds Proxmox (0.3.20)
+
+L'**identité SSH du coffre** contient l'utilisateur et sa clé **privée** pour se connecter aux nœuds (elle peut être la même que celle utilisée par un système de déploiement existant). La **clé d'hôte SSH** est un élément public différent, propre à chaque nœud Proxmox. OrigamiTasks refusait auparavant le déploiement si cette deuxième clé n'avait pas été approuvée manuellement.
+
+Désormais, lors du déploiement explicite depuis **DC Proxmox → Agents du cluster**, le système enregistre **automatiquement la première clé publique d'hôte présentée** dans le `known_hosts` persistant (**TOFU**). Aucun passage obligatoire par **Empreinte SSH** n'est nécessaire pour des hôtes inconnus. La seconde connexion SSH, utilisée pour installer l'agent, vérifie la clé ainsi mémorisée avant d'offrir la clé privée d'authentification. Si l'empreinte change ultérieurement, **le déploiement est bloqué**, sans remplacement automatique. Le bouton **Voir l'empreinte SSH (facultatif)** reste disponible.
+
+**Attention :** accept-new n'authentifie pas une clé de serveur lors de sa toute première apparition ; un MITM sur cette première connexion reste possible. Sur un hyperviseur critique, comparer l'empreinte hors bande est préférable. Ce mécanisme est limité au parcours administrateur de déploiement sur les nœuds réellement liés au cluster. Les autres protections (coffre chiffré, sélection explicite, périmètre PP/Production et droits SSH) demeurent.
+
+Pour relancer un lot précédemment refusé, créer **un nouveau déploiement** après la mise à jour et sélectionner un seul nœud de test. Si une erreur apparaît alors pour authentification SSH, SFTP, `sudo -n`, Python 3 ou systemd, elle concerne les droits du compte de déploiement et non la clé d'hôte. Les lots antérieurs restent en échec dans l'historique.
+
 ### Isoler les environnements PP / Production via les groupes PRA (0.3.19)
 
 Sous **DC Proxmox → Groupes PRA indépendants**, créer des groupes aux noms entièrement personnalisables, par exemple **Préproduction** et **Production**. Dans chaque groupe, créer deux sites : le site principal et le site de secours. Un site peut contenir plusieurs clusters ; un cluster ne peut appartenir qu'à un seul site. Il est ainsi impossible d'affecter silencieusement le même cluster au groupe PP et au groupe PROD. Les simulations ne peuvent sélectionner que des sites appartenant **au même groupe PRA**, et l'API refuse un croisement même si une requête est construite manuellement.
