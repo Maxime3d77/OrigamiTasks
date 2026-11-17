@@ -218,10 +218,16 @@ def sync_group(dc_id, payload):
 
 def deploy(dc_id, payload, actor):
     """Queue only selected, previously discovered node mappings, with approval."""
-    if not isinstance(payload,dict) or set(payload)-{"group_id","server_ids","credential_id","approved"}:
+    if not isinstance(payload,dict) or set(payload)-{"group_id","server_ids","credential_id","approved","enable_proxmox","enable_pra"}:
         raise FleetError("Paramètres de déploiement groupé invalides")
     if payload.get("approved") is not True:
         raise FleetError("Confirmation explicite obligatoire avant déploiement SSH")
+    enable_proxmox=payload.get("enable_proxmox",False)
+    enable_pra=payload.get("enable_pra",False)
+    if type(enable_proxmox) is not bool or type(enable_pra) is not bool:
+        raise FleetError("Options de modules invalides")
+    if enable_pra and not enable_proxmox:
+        raise FleetError("Le module PRA passif nécessite le module Proxmox")
     try:
         group_id=payload["group_id"]
         credential_id=payload["credential_id"]
@@ -249,6 +255,14 @@ def deploy(dc_id, payload, actor):
         ).fetchall()
         if len(mapped)!=len(ids):
             raise FleetError("Un hôte a été retiré ou modifié dans le groupe : synchroniser")
+        site=con.execute(
+            "SELECT s.role FROM dr_site_datacenters l "
+            "JOIN dr_sites s ON s.id=l.site_id WHERE l.datacenter_id=?",(dc_id,)
+        ).fetchone()
+        if (enable_proxmox or enable_pra) and not site:
+            raise FleetError("Rattacher le cluster à un site PRA avant d'activer les modules")
+        if enable_pra and site["role"] not in ("primary","standby"):
+            raise FleetError("Le mode PRA passif exige un site principal ou secours")
     idx=_agent_index()
     if any(row["fqdn"] in idx or row["fqdn"].split(".")[0] in idx for row in mapped):
         raise FleetError("Un agent existe déjà sur un des nœuds choisis : le retirer de la sélection")
@@ -260,6 +274,8 @@ def deploy(dc_id, payload, actor):
             "targets":[{"server_id":i} for i in ids],
             "proxmox_datacenter_id":dc_id,
             "proxmox_group_id":group_id,
+            "enable_proxmox":enable_proxmox,
+            "enable_pra":enable_pra,
             "approved":True,
         },actor)
     except agent_deployments.DeploymentError as exc:
