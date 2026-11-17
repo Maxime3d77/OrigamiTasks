@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS datacenters (
  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, url TEXT NOT NULL,
  credential_id INTEGER NOT NULL REFERENCES credentials(id),
  kind TEXT NOT NULL DEFAULT 'cluster', ca_cert TEXT NOT NULL DEFAULT '',
+ skip_tls_verification INTEGER NOT NULL DEFAULT 0,
  created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS runs (
@@ -170,6 +171,7 @@ def initialize():
             ("runs", "notification_error", "TEXT NOT NULL DEFAULT ''"),
             ("datacenters", "kind", "TEXT NOT NULL DEFAULT 'cluster'"),
             ("datacenters", "ca_cert", "TEXT NOT NULL DEFAULT ''"),
+            ("datacenters", "skip_tls_verification", "INTEGER NOT NULL DEFAULT 0"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:
