@@ -1,5 +1,11 @@
 # Proxmox VE : découverte et reprise d'activité
 
+### URL HTTPS de contrôle pour le déploiement des agents (0.3.18)
+
+Le déploiement sur les nœuds Proxmox exige que chaque agent puisse joindre la console via son nom DNS HTTPS, et **non** via `127.0.0.1:8091` (adresse de liaison interne Nginx/Docker). Configurer une fois **Agents → Paramètres de connexion des agents**, par exemple `https://origamitasks.example.org`. L'assistant de déploiement du cluster affiche l'URL et propose de la configurer si elle manque. L'ancien `AGENT_SERVER_URL` dans `.env` n'est plus nécessaire pour le déploiement cluster si l'URL est enregistrée dans la console.
+
+Le module PRA préparatoire est facultatif et **décoché par défaut** : sa présence ne signifie pas que les VM sont répliquées, ni que le site de secours peut les démarrer. Les autres prérequis (SSH vérifié, clé du coffre, CA TLS reconnue sur les agents) restent obligatoires.
+
 ### Installer l'agent sur tous les nœuds du cluster depuis Proxmox (0.3.17-rc1)
 
 Sur la fiche du cluster, cliquer **Agents du cluster**, ou depuis un site PRA sur **Déployer sur les nœuds**, puis choisir le cluster si le site en comporte plusieurs.
