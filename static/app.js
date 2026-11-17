@@ -1849,7 +1849,11 @@ async function handleSubmit(ev){
  }
  if(ev.target.id==='drSimulationForm'){
   ev.preventDefault();
-  const f=new FormData(ev.target);
+  const f=new FormData(ev.target),selectedPlan=Number(f.get('dr_sim_plan'));
+  const src=(state.drSites||[]).find(s=>s.id===Number(f.get('dr_source')));
+  const dst=(state.drSites||[]).find(s=>s.id===Number(f.get('dr_target')));
+  if(!src||!dst||src.plan_id!==selectedPlan||dst.plan_id!==selectedPlan)
+   return toast('Simulation entre groupes PRA différents interdite',false);
   try{
    const result=await api('/dr/simulate','POST',{
     source_site_id:Number(f.get('dr_source')),target_site_id:Number(f.get('dr_target')),
@@ -2001,6 +2005,19 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  if(ev.target.id==='proxmoxResourceSearch'&&state.proxmoxDiscovery){state.proxmoxDiscovery.query=ev.target.value;state.proxmoxDiscovery.page=0;renderProxmoxDiscoveryResults();}
  if(ev.target.id==='proxmoxDcSearch'){const q=ev.target.value.toLowerCase().trim();$$('[data-dc-search]').forEach(card=>card.hidden=!card.dataset.dcSearch.includes(q));}
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',async ev=>{
+ if(ev.target.name==='dr_sim_plan'&&ev.target.closest('#drSimulationForm')){
+  const planId=Number(ev.target.value);
+  const sites=(state.drSites||[]).filter(site=>site.plan_id===planId);
+  const form=ev.target.closest('form');
+  const sources=form.elements.namedItem('dr_source'),targets=form.elements.namedItem('dr_target');
+  if(sources&&targets){
+   const options=sites.map(site=>[site.id,site.name+' ('+site.role+')']);
+   sources.innerHTML=option(options,sites.find(s=>s.role==='primary')?.id||sites[0]?.id);
+   targets.innerHTML=option(options,sites.find(s=>s.role==='standby')?.id||sites[1]?.id);
+   sources.value=String(sites.find(s=>s.role==='primary')?.id||sites[0]?.id||'');
+   targets.value=String(sites.find(s=>s.role==='standby')?.id||sites[1]?.id||'');
+  }
+ }
  if(ev.target.matches('[data-ssh-filter-group]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
  if(ev.target.id==='sshInventoryGroupFilter'){state.sshInventoryGroupFilter=ev.target.value;render();}
  if(ev.target.closest('#credentialTestForm')){
