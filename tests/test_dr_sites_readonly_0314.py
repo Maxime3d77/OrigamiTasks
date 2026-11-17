@@ -38,16 +38,23 @@ def test_dr_site_association_and_fail_closed_scenarios(monkeypatch):
         second=create_dc(client,headers,'CI_AU_DR_0314')
         third=create_dc(client,headers,'CI_SD_SECOND_0314')
         agent=agents.register('dr-site-agent-ci-0314','linux','drci')['id']
+        group=client.post('/api/dr/plans',headers=headers,json={
+            'name':'CI group 0314','description':'Isolated DR simulation'
+        })
+        assert group.status_code==200,group.text
+        plan_id=group.json()['id']
         site_ids=[]
         try:
             source=client.post('/api/dr/sites',headers=headers,json={
-                'name':'SD CI 0314','role':'primary','storage_profile':'iscsi_lvm',
+                'name':'SD CI 0314','plan_id':plan_id,
+                'role':'primary','storage_profile':'iscsi_lvm',
                 'datacenter_ids':[first,third],'agent_ids':[agent]
             })
             assert source.status_code==200,source.text
             sid=source.json()['id'];site_ids.append(sid)
             target=client.post('/api/dr/sites',headers=headers,json={
-                'name':'AU CI 0314','role':'standby','storage_profile':'iscsi_lvm',
+                'name':'AU CI 0314','plan_id':plan_id,
+                'role':'standby','storage_profile':'iscsi_lvm',
                 'datacenter_ids':[second],'agent_ids':[]
             })
             assert target.status_code==200,target.text
@@ -90,6 +97,8 @@ def test_dr_site_association_and_fail_closed_scenarios(monkeypatch):
                 assert client.delete('/api/credentials/'+str(dc['credential_id']),headers=headers).status_code==200
             with db.session() as con:
                 con.execute('DELETE FROM agents WHERE id=?',(agent,))
+            assert client.delete('/api/dr/plans/'+str(plan_id),
+                                 headers=headers).status_code==200
 
 
 def test_readonly_dr_simulation_requires_admin_and_valid_scenario():
