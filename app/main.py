@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans
 
 
 @asynccontextmanager
@@ -518,6 +518,45 @@ def test_datacenter(dc_id:int,request:Request):
     except (connection_tests.ConnectionTestError,integrations.IntegrationError,
             proxmox_cas.ProxmoxCAError) as exc:
         raise HTTPException(422,str(exc)) from None
+
+
+@app.get('/api/dr/plans')
+def get_dr_plans(request:Request):
+    security.require(request,role='admin')
+    return {'items':dr_plans.list_plans()}
+
+
+@app.post('/api/dr/plans')
+def create_dr_plan(request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        plan_id=dr_plans.save(payload)
+    except dr_plans.DRPlanError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.plan.create',plan_id,'Groupe PRA créé')
+    return {'id':plan_id}
+
+
+@app.put('/api/dr/plans/{plan_id}')
+def update_dr_plan(plan_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        dr_plans.save(payload,plan_id)
+    except dr_plans.DRPlanError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.plan.update',plan_id,'Groupe PRA modifié')
+    return {'ok':True}
+
+
+@app.delete('/api/dr/plans/{plan_id}')
+def delete_dr_plan(plan_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        name=dr_plans.delete(plan_id)
+    except dr_plans.DRPlanError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.plan.delete',plan_id,name)
+    return {'ok':True}
 
 
 @app.get('/api/dr/sites')
