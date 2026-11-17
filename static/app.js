@@ -1,22 +1,22 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drProtectedVMs:[],drVMOptions:null,drVMPlanFilter:'all',drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dt=v=>v?new Date(v).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'}):'—';
-const statusName={success:'Réussi',failed:'Échec',running:'En cours',queued:'En attente',interrupted:'Interrompu',skipped:'Ignoré',online:'En ligne',offline:'Hors ligne',pending:'En attente',revoked:'Révoqué',uninstalled:'Désinstallé'};
+const statusName={success:'Réussi',failed:'Échec',running:'En cours',queued:'En attente',interrupted:'Interrompu',skipped:'Ignoré',online:'En ligne',offline:'Hors ligne',pending:'En attente',revoked:'Révoqué',uninstalled:'Désinstallé',completed_with_errors:'Terminé avec erreurs',BLOCKED:'Bloqué',planned:'Préparation',paused:'En pause',not_configured:'Non configurée',unknown:'Inconnu'};
 const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>`;
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drProtectedVMs=(await api('/dr/vms')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
 const badgeTags=tags=>tags.map(t=>`<span class="chip tag">#${e(t)}</span>`).join('');
-function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'DC Proxmox',agents:'Agents Linux / Windows','ssh-inventory':'Serveurs & groupes SSH',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
-function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage,'ssh-inventory':sshInventoryPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
+function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'DC Proxmox','protected-vms':'VM protégées PRA',agents:'Agents Linux / Windows','ssh-inventory':'Serveurs & groupes SSH',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
+function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage,'ssh-inventory':sshInventoryPage,'protected-vms':protectedVMsPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
 function dashboard(){
  const tab=roleAdmin()?(state.dashboardTab||'tasks'):'tasks';
  const all=[['tasks','Tâches & exécutions'],['agents','Agents actifs'],['proxmox','DC Proxmox / PRA']];
@@ -93,7 +93,8 @@ function dashboardProxmox(){
   +'<div class="stat-card"><span class="label">Synchronisations actives</span><div class="value">—</div><div class="sub">Non mesurées : moteur PRA absent</div></div></div>'
   +'<div class="notice">Les statuts de réplication (dernier point de restauration, retard, réussite / échec) ne seront affichés qu’après intégration d’un moteur réel. Aucun statut « synchronisé » n’est inventé.</div>'
   +'<div class="panel"><div class="panel-title"><h2>Datacenters Proxmox</h2>'
-  +'<button class="btn primary" data-action="page" data-page="datacenters">Administrer les DC / sites PRA ↗</button></div>'
+  +'<div class="tool-row"><button class="btn primary" data-action="page" data-page="datacenters">Administrer les DC / sites PRA ↗</button>'
+  +'<button class="btn" data-action="page" data-page="protected-vms">VM protégées ↗</button></div></div>'
   +'<div class="workflow-grid overview-dc-grid">'+(cards||'<p class="hint">Aucun DC Proxmox enregistré.</p>')+'</div>'
   +(dcs.length>80?'<p class="hint">80 premiers DC affichés. Ouvrir Proxmox pour la liste complète.</p>':'')
   +'</div>';
@@ -320,6 +321,7 @@ function agentsPage(){
   +'<button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')
   +agentConnectionSettingsPanel()
   +'<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2>'
+  +'<button class="btn tiny" data-action="agents-status-refresh">↻ Actualiser les états reçus</button>'
   +'<span class="hint">'+state.agents.length+' agent(s)</span></div>'
   +'<div class="table-wrap"><table><thead><tr><th>Nom / hôte</th><th>OS / version</th><th>Groupe</th>'
   +'<th>État</th><th>Modules & synchronisation</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
@@ -421,13 +423,13 @@ function agentBatchPanel(){
  if(!batches.length)return '<p class="hint">Aucun déploiement groupé pour le moment.</p>';
  return batches.slice(0,8).map(batch=>{
   const stateLabel=batch.status==='success'?'Terminé':batch.status==='completed_with_errors'?'Terminé avec erreurs':batch.status==='interrupted'?'Interrompu':'En cours';
-  const rows=batch.targets.map(t=>'<div class="agent-batch-host"><strong>'+e(t.host)+':'+e(t.port)+'</strong><span class="chip">'+e(t.status)+'</span>'
+  const rows=batch.targets.map(t=>'<div class="agent-batch-host"><strong>'+e(t.host)+':'+e(t.port)+'</strong><span class="status '+e(t.status)+'">'+e(statusName[t.status]||t.status)+'</span>'
    +(t.error?'<small class="hint">'+e(t.error)+'</small>':'')+'</div>').join('');
   const planName=batch.dr_plan_name||'';
   const scope=batch.datacenter_name
    ?'<small class="hint">'+(planName?'PRA : '+e(planName)+' · ':'PRA non classé · ')+e(batch.datacenter_name)+'</small>'
    :'<small class="hint">Déploiement générique (hors groupe PRA)</small>';
-  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong>'+scope+'<span>'+e(stateLabel)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
+  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong>'+scope+'<span class="dr-batch-summary">'+labelStatus(batch.status)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
    +'<div class="agent-batch-hosts">'+rows+'</div></details>';
  }).join('');
 }
@@ -540,7 +542,7 @@ function renderDRSitesPanel(){
  const plans=state.drPlans||[],sites=state.drSites||[];
  const card=site=>{
   const clusters=(site.datacenters||[]).map(dc=>e(dc.name)).join(' · ')||'—';
-  const ags=(site.agents||[]).map(agent=>e(agent.name)+' ('+e(agent.status)+')').join(' · ')||'Aucun';
+  const ags=(site.agents||[]).map(agent=>e(agent.name)+' '+labelStatus(agent.status)).join(' · ')||'Aucun';
   const role=site.role==='primary'?'Principal':site.role==='standby'?'Secours':'Autre';
   const storage={auto:'À détecter',iscsi_lvm:'iSCSI + LVM',zfs:'ZFS',ceph:'Ceph',pbs:'PBS',other:'Autre'}[site.storage_profile]||site.storage_profile;
   return '<div class="job-card dr-site-card"><div class="job-card-head"><span class="chip tag">'+e(role)+'</span><span class="chip">'+e(storage)+'</span></div>'
@@ -553,7 +555,8 @@ function renderDRSitesPanel(){
  const group=(plan,items)=>
   '<div class="dr-plan-section"><div class="panel-title"><div><h3>'+e(plan.name)+'</h3>'
   +'<p class="hint">'+e(plan.description||'Périmètre de protection indépendant')+' · '+items.length+' site(s)</p></div>'
-  +'<div class="tool-row"><button class="btn tiny" data-action="dr-site-new" data-plan-id="'+plan.id+'">＋ Site</button>'
+  +'<div class="tool-row"><button class="btn tiny" data-action="dr-plan-protected" data-id="'+plan.id+'">VM protégées</button>'
+  +'<button class="btn tiny" data-action="dr-site-new" data-plan-id="'+plan.id+'">＋ Site</button>'
   +'<button class="btn tiny" data-action="dr-plan-edit" data-id="'+plan.id+'">Modifier le groupe</button>'
   +'<button class="btn tiny danger" data-action="dr-plan-delete" data-id="'+plan.id+'">Supprimer</button></div></div>'
   +'<div class="workflow-grid dr-sites-grid">'+(items.map(card).join('')||'<p class="hint">Aucun site associé. Ajouter les clusters principal et secours de ce périmètre.</p>')+'</div></div>';
@@ -567,6 +570,8 @@ function renderDRSitesPanel(){
   +'<p class="hint">Créer autant de périmètres PP, Production, Recette ou autres que nécessaire. '
   +'Chaque groupe contient ses propres sites et clusters. Aucune association ou simulation inter-groupes.</p></div>'
   +'<div class="tool-row"><button class="btn primary" data-action="dr-plan-new">＋ Nouveau groupe PRA</button>'
+  +'<button class="btn" data-action="dr-plans-refresh">↻ Actualiser</button>'
+  +'<button class="btn" data-action="page" data-page="protected-vms">VM protégées</button>'
   +'<button class="btn" data-action="dr-simulation-form">Simuler une panne (sans action)</button></div></div>'
   +(plans.map(p=>group(p,sites.filter(s=>s.plan_id===p.id))).join('')||'<div class="notice">Créer un premier groupe PRA pour séparer les environnements.</div>')
   +(legacy.length?'<div class="dr-plan-section"><h3>Sites existants à classer</h3><div class="notice">'
