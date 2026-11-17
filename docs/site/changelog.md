@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.13-rc1 — 2026-11-17
+
+- **Proxmox discovery:** instant search by name, VMID, node, ID, status and storage; QEMU VM/LXC/node/storage filters, sort by name/type/VMID/node/status in either direction, 100-item pagination, API refresh. Existing per-VM DR assessment remains accessible.
+- **SD→AU DR architecture:** bilingual design for managed site agents, powered-off REP_ standbys, storage-specific replication, independent witness and effective fencing, no double-start, controlled failover and explicit failback. **This version implements neither replication nor automatic failover.**
+
 ## 0.3.12-rc1 — 2026-11-17
 
 - **Proxmox:** per-node/per-cluster administrator checkbox **Skip TLS certificate verification (self-signed certificate)**, also available in vault Proxmox credentials. Disabled by default, stored persistently, reversible and scoped to the selected endpoint. HTTPS remains encrypted, but server identity is not authenticated in bypass mode.
