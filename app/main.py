@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms
 
 
 @asynccontextmanager
@@ -518,6 +518,112 @@ def test_datacenter(dc_id:int,request:Request):
     except (connection_tests.ConnectionTestError,integrations.IntegrationError,
             proxmox_cas.ProxmoxCAError) as exc:
         raise HTTPException(422,str(exc)) from None
+
+
+@app.get('/api/dr/vms')
+def list_protected_vms(request:Request,plan_id:int|None=None):
+    security.require(request,role='admin')
+    return {'items':dr_protected_vms.list_vms(plan_id)}
+
+
+@app.get('/api/dr/vms/options')
+def protected_vm_options(request:Request,plan_id:int,source_dc_id:int,target_dc_id:int):
+    security.require(request,role='admin')
+    try:
+        return dr_protected_vms.options(plan_id,source_dc_id,target_dc_id)
+    except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Découverte source ou destination indisponible : vérifier API et TLS') from None
+
+
+@app.post('/api/dr/vms')
+def create_protected_vm(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=dr_protected_vms.save(payload,user['username'])
+    except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Préparation VM impossible : vérifier les deux API Proxmox') from None
+    db.audit(user['username'],'dr.vm.plan.create',result['id'],
+             'Configuration seulement ; aucune copie ou VM créée')
+    return result
+
+
+@app.put('/api/dr/vms/{vm_id}')
+def update_protected_vm(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=dr_protected_vms.save(payload,user['username'],vm_id)
+    except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Mise à jour impossible : vérifier API et stockage') from None
+    db.audit(user['username'],'dr.vm.plan.update',vm_id,
+             'Configuration seulement ; aucun disque modifié')
+    return result
+
+
+@app.post('/api/dr/vms/{vm_id}/state')
+def change_protected_vm_state(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        if not isinstance(payload,dict) or set(payload)!={'state'}:
+            raise dr_protected_vms.ProtectedVMError('État invalide')
+        result=dr_protected_vms.set_state(vm_id,payload['state'])
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.vm.plan.state',vm_id,result['state'])
+    return result
+
+
+@app.delete('/api/dr/vms/{vm_id}')
+def remove_protected_vm(vm_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=dr_protected_vms.delete(vm_id)
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+    db.audit(user['username'],'dr.vm.plan.delete',vm_id,
+             'Configuration supprimée ; aucun disque ni VM supprimé')
+    return result
+
+
+@app.get('/api/dr/vms/{vm_id}/tests')
+def protected_vm_test_history(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':dr_protected_vms.history(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/simulate')
+def simulate_protected_vm(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'scenario'}:
+        raise HTTPException(422,'Scénario invalide')
+    try:
+        result=dr_protected_vms.run_readonly_test(vm_id,payload.get('scenario'),
+                                                   user['username'])
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.vm.simulate',vm_id,
+             str(payload['scenario'])+' : BLOCKED, aucune action infrastructure')
+    return result
+
+
+@app.post('/api/dr/vms/{vm_id}/replicate')
+def replicate_protected_vm_not_available(vm_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    # Explicitly fail closed: no API or SSH requests are made for copying.
+    dr_protected_vms.history(vm_id,limit=1)
+    db.audit(user['username'],'dr.vm.replication.blocked',vm_id,
+             'Moteur iSCSI/LVM/PBS non validé ; aucune copie lancée')
+    raise HTTPException(409,
+        'Réplication réelle indisponible : définir et valider un transport '
+        'cohérent (baie/PBS), la gestion du stockage et le fencing avant copie.')
 
 
 @app.get('/api/dr/plans')
