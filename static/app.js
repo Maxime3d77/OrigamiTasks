@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -260,6 +260,68 @@ function agentBulkDeployForm(){
 function agentEnrollForm(){modal('Enrôlement manuel','<form id="agentEnrollForm"><div class="form-grid">'+
  field('Nom','name')+selectField('Plateforme','platform',[['linux','Linux'],['windows','Windows']],'linux')+
  field('Groupe','group','default')+'</div><p class="hint">Jeton unique valable 15 minutes. Installer agents/linux/agent.py ou agents/windows/agent.ps1 avec config.json sur la machine.</p><button class="btn primary" type="submit">Créer un jeton</button></form>')}
+
+
+const PVE_TYPES={node:'Nœuds',qemu:'VM',lxc:'LXC',storage:'Stockages'};
+function openProxmoxDiscovery(dcId,response){
+ const items=Array.isArray(response.resources)?response.resources.filter(x=>x&&PVE_TYPES[x.type]):[];
+ state.proxmoxDiscovery={dcId,name:String(response.datacenter||''),items,type:'all',query:'',sort:'name',descending:false,page:0,pageSize:100};
+ const options=[['all','Tous les types'],['node','Nœuds'],['qemu','VM'],['lxc','LXC'],['storage','Stockages']];
+ const ordering=[['name','Nom / VMID'],['type','Type'],['vmid','VMID'],['node','Nœud'],['status','État']];
+ const content='<p class="hint">Données obtenues en lecture seule via l’API Proxmox. Le filtre et le tri s’appliquent à toutes les ressources récupérées.</p>'
+   +'<div class="proxmox-discovery-tools">'
+   +'<label class="field"><span>Rechercher nom, VMID, nœud ou état</span><input id="proxmoxResourceSearch" type="search" placeholder="Ex. 106, postgres, sd-cardano…"></label>'
+   +'<label class="field"><span>Type de ressource</span><select id="proxmoxResourceType">'+option(options,'all')+'</select></label>'
+   +'<label class="field"><span>Trier par</span><select id="proxmoxResourceSort">'+option(ordering,'name')+'</select></label>'
+   +'<label class="field"><span>Ordre</span><select id="proxmoxResourceDirection">'+option([['asc','Croissant'],['desc','Décroissant']],'asc')+'</select></label></div>'
+   +'<div id="proxmoxDiscoveryCounts" class="proxmox-discovery-counts" aria-live="polite"></div>'
+   +'<div id="proxmoxDiscoveryTable" class="table-wrap"></div>'
+   +'<div id="proxmoxDiscoveryPager" class="proxmox-discovery-pager"></div>';
+ modal('Ressources Proxmox · '+e(state.proxmoxDiscovery.name),content,
+  '<button class="btn" data-action="proxmox-discovery-refresh">Actualiser depuis Proxmox</button><button class="btn primary" data-action="modal-close">Fermer</button>',true);
+ renderProxmoxDiscoveryResults();
+}
+function renderProxmoxDiscoveryResults(){
+ const d=state.proxmoxDiscovery;
+ if(!d||!document.getElementById('proxmoxDiscoveryTable'))return;
+ const counts={node:0,qemu:0,lxc:0,storage:0};
+ d.items.forEach(item=>{if(Object.prototype.hasOwnProperty.call(counts,item.type))counts[item.type]++});
+ const query=d.query.trim().toLocaleLowerCase('fr');
+ const filtered=d.items.filter(item=>(d.type==='all'||item.type===d.type)&&
+  (!query||[item.name,item.vmid,item.id,item.node,item.status,item.storage]
+    .some(value=>String(value??'').toLocaleLowerCase('fr').includes(query))));
+ const str=value=>String(value??'');
+ const valueFor=item=>d.sort==='name'?(item.name||item.vmid||item.id||''):item[d.sort];
+ filtered.sort((a,b)=>{
+  const x=valueFor(a),y=valueFor(b);
+  let result=(d.sort==='vmid')?(Number(x||0)-Number(y||0))
+      :str(x).localeCompare(str(y),'fr',{numeric:true,sensitivity:'base'});
+  if(result===0)result=str(a.id||a.vmid||a.name).localeCompare(str(b.id||b.vmid||b.name),'fr',{numeric:true});
+  return d.descending?-result:result;
+ });
+ const pages=Math.max(1,Math.ceil(filtered.length/d.pageSize));
+ d.page=Math.max(0,Math.min(d.page,pages-1));
+ const slice=filtered.slice(d.page*d.pageSize,(d.page+1)*d.pageSize);
+ $('#proxmoxDiscoveryCounts').innerHTML='<span class="chip">Total : '+d.items.length+'</span>'
+  +Object.entries(counts).map(([key,count])=>'<span class="chip">'+PVE_TYPES[key]+' : '+count+'</span>').join('')
+  +'<span class="chip tag">Résultats : '+filtered.length+'</span>';
+ const rows=slice.map(item=>{
+  const label=PVE_TYPES[item.type]||item.type;
+  const vmid=item.vmid??'—';
+  return '<tr><td>'+e(label)+'</td><td><strong>'+e(item.name||item.vmid||item.id||'—')+'</strong></td>'
+    +'<td>'+e(vmid)+'</td><td>'+e(item.node||'—')+'</td><td>'+e(item.status||'—')+'</td>'
+    +'<td>'+(item.type==='qemu'&&Number.isSafeInteger(Number(item.vmid))
+      ?'<button class="btn tiny" data-action="assess-dr" data-id="'+d.dcId+'" data-vmid="'+e(item.vmid)+'">Évaluer PRA</button>':'')
+    +'</td></tr>';
+ }).join('');
+ $('#proxmoxDiscoveryTable').innerHTML='<table class="proxmox-discovery-table"><thead><tr>'
+  +'<th>Type</th><th>Nom</th><th>VMID</th><th>Nœud</th><th>État</th><th>Actions</th></tr></thead><tbody>'
+  +(rows||'<tr><td colspan="6">Aucune ressource ne correspond aux filtres.</td></tr>')+'</tbody></table>';
+ $('#proxmoxDiscoveryPager').innerHTML='<span class="hint">'+(filtered.length?(d.page*d.pageSize+1)+'–'+Math.min((d.page+1)*d.pageSize,filtered.length):'0')
+  +' sur '+filtered.length+' · page '+(d.page+1)+'/'+pages+'</span>'
+  +'<div class="tool-row"><button class="btn tiny" data-action="proxmox-discovery-prev" '+(d.page===0?'disabled':'')+'>Précédent</button>'
+  +'<button class="btn tiny" data-action="proxmox-discovery-next" '+(d.page>=pages-1?'disabled':'')+'>Suivant</button></div>';
+}
 
 function datacenters(){
  if(!roleAdmin())return title('Proxmox','Administration uniquement.');
@@ -1192,7 +1254,17 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   const lines=new Set([...area.value.split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean),...targets]);
   area.value=[...lines].join('\n');
   toast(targets.length+' serveur(s) ajoutés');return
- }if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='edit-datacenter'){openDatacenterForm(id);return}if(a==='test-datacenter'){const result=await api('/datacenters/'+id+'/test');modal('Diagnostic Proxmox · #'+id,'<div class="notice">'+e(result.message)+'</div>'+(result.checks||[]).map(v=>'<p><b>'+e(v.name)+'</b> : '+e(v.detail)+'</p>').join(''),'<button class="btn primary" data-action="modal-close">Fermer</button>');return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-failure-step'){
+ }if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='edit-datacenter'){openDatacenterForm(id);return}if(a==='test-datacenter'){const result=await api('/datacenters/'+id+'/test');modal('Diagnostic Proxmox · #'+id,'<div class="notice">'+e(result.message)+'</div>'+(result.checks||[]).map(v=>'<p><b>'+e(v.name)+'</b> : '+e(v.detail)+'</p>').join(''),'<button class="btn primary" data-action="modal-close">Fermer</button>');return}if(a==='discover-datacenter'){const result=await api('/datacenters/'+id+'/discover');openProxmoxDiscovery(id,result);return}
+ if(a==='proxmox-discovery-prev'||a==='proxmox-discovery-next'){
+   if(state.proxmoxDiscovery){state.proxmoxDiscovery.page+=a==='proxmox-discovery-next'?1:-1;renderProxmoxDiscoveryResults();}
+   return
+ }
+ if(a==='proxmox-discovery-refresh'){
+   if(!state.proxmoxDiscovery)return;
+   const targetId=state.proxmoxDiscovery.dcId;
+   const result=await api('/datacenters/'+targetId+'/discover');
+   openProxmoxDiscovery(targetId,result);return
+ }if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-failure-step'){
   captureEditor();
   const step=state.editor.steps_json[state.selectedStep];
   const next=addStep();
@@ -1349,6 +1421,7 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
   $('.ssh-server-row[data-ssh-search]').forEach(row=>row.hidden=!row.dataset.sshSearch.includes(ev.target.value.toLowerCase()));
  }
  if(ev.target.id==='groupSearch'){state.groupQuery=ev.target.value;clearTimeout(state.groupTimer);state.groupTimer=setTimeout(searchGroups,250)}
+ if(ev.target.id==='proxmoxResourceSearch'&&state.proxmoxDiscovery){state.proxmoxDiscovery.query=ev.target.value;state.proxmoxDiscovery.page=0;renderProxmoxDiscoveryResults();}
  if(ev.target.id==='proxmoxDcSearch'){const q=ev.target.value.toLowerCase().trim();$$('[data-dc-search]').forEach(card=>card.hidden=!card.dataset.dcSearch.includes(q));}
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',async ev=>{
  if(ev.target.matches('[data-ssh-filter-group]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
@@ -1384,5 +1457,12 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  }
  if(ev.target.name==='cfg_connection_mode'&&state.editor){captureEditor();renderEditor();return}
  if(ev.target.name==='job_interval_preset'){applySchedulePreset();return}
+ if(['proxmoxResourceType','proxmoxResourceSort','proxmoxResourceDirection'].includes(ev.target.id)&&state.proxmoxDiscovery){
+  const d=state.proxmoxDiscovery;
+  d.type=document.getElementById('proxmoxResourceType').value;
+  d.sort=document.getElementById('proxmoxResourceSort').value;
+  d.descending=document.getElementById('proxmoxResourceDirection').value==='desc';
+  d.page=0;renderProxmoxDiscoveryResults();
+ }
  if(ev.target.name==='dc_auth_mode'&&ev.target.closest('#datacenterForm'))updateProxmoxAuthFields();if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config=CONNECTION_STEP_TYPES[newType]?{connection_mode:'vault'}:{};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
 bootstrap();
