@@ -1,14 +1,18 @@
 # Proxmox VE : découverte et reprise d'activité
 
-**Actuellement :** enregistrement de plusieurs API Proxmox indépendantes, découverte des nœuds/VM QEMU/LXC/stockages et, si explicitement autorisé, `start/shutdown/reboot` encadrés. Une **évaluation PRA en lecture seule** identifie les types de stockage de chaque disque VM et propose les voies de reprise à étudier. **Pas de réplication en temps réel, de bascule ni de migration inter-clusters dans la v0.2.**
+**Actuellement :** enregistrement de plusieurs API Proxmox indépendantes, découverte des nœuds/VM QEMU/LXC/stockages et, si explicitement autorisé, `start/shutdown/reboot` encadrés. Une **évaluation PRA en lecture seule** identifie les types de stockage de chaque disque VM et propose les voies de reprise à étudier. **Pas encore de moteur de réplication, de bascule automatique ni de migration inter-clusters dans la v0.3.13-rc1.**
 
-## Ajouter un datacenter
+## Ajouter un serveur ou cluster et découvrir les VM
 
-1. Créer un token API Proxmox de **lecture seule** pour l'inventaire (`user@realm!tokenid` et sa valeur).
-2. Déclarer `https://pve01.example.org:8006` et `PROXMOX_ALLOWED_HOSTS=pve01.example.org:8006`.
-3. Faire confiance à sa CA ; ne jamais désactiver la validation TLS. Pour une CA interne, monter un PEM et paramétrer `PROXMOX_CA_CERT`.
-4. Ouvrir **Datacenters → Ajouter**, sélectionner le token et lancer **Découvrir**. Sur une VM QEMU, utiliser **Évaluer PRA** : le diagnostic interroge la configuration disque et `/storage` sans modifier les volumes.
-5. Pour les opérations, autoriser explicitement `ALLOW_PROXMOX_ACTIONS=true` ; chaque bloc d'action doit aussi porter `approved=true` et utiliser un token de droits limités.
+1. Dans **Administration → Serveurs & clusters Proxmox**, choisir **Ajouter un serveur / cluster**, puis renseigner son type, FQDN HTTPS, nom et token API (ou sélectionner une connexion du coffre).
+2. Importer une CA interne au format PEM/CRT/CER/DER si possible ; pour un certificat autosigné sans CA importable, l'administrateur peut **ignorer la vérification TLS pour ce seul serveur**, avec un risque d'usurpation à accepter. Aucune modification du fichier .env n'est nécessaire.
+3. **Découvrir les nœuds/VM** puis rechercher par nom/VMID/nœud/état. Filtres **VM / LXC / Nœuds / Stockages**, tri et pagination de 100 résultats.
+4. Sur une VM QEMU, utiliser **Évaluer PRA** pour vérifier la configuration disque et le type de stockage. Le diagnostic ne réplique ni ne démarre de VM.
+5. Les seules actions actuellement implémentées dans une tâche Proxmox sont inventaire, start, shutdown et reboot ; les mutations requièrent toujours les autorisations serveur et workflow spécifiques. Les VMID/nœuds ne sont pas encore proposés comme sélecteurs dynamiques de workflow.
+
+### Agents inter-sites et stratégie de reprise SD → AU
+
+Le futur module de réplication doit gérer **SD actif → AU copie REP_ arrêtée**, des agents appairés en mTLS, un **témoin indépendant**, du **fencing vérifié** pour éviter tout double démarrage, et un **failback demandé explicitement** après synchronisation AU→SD. Une panne d'agent, un ping absent ou une API source injoignable **ne suffisent jamais** à démarrer la copie AU. **Architecture de référence** : [RFC PRA intersites](../ARCHITECTURE-PRA-INTERSITES.fr.md). Cette architecture reste au stade de la conception.
 
 ## Quel moteur de réplication ?
 
