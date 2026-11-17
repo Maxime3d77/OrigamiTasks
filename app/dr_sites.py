@@ -183,6 +183,16 @@ def simulate(payload, actor):
         raise DRSiteError(
             "Simulation refusée : sites appartenant à deux groupes PRA différents (PP / PROD)."
         )
+    with db.session() as con:
+        selected_vms=[
+            dict(r) for r in con.execute(
+                "SELECT id,source_vmid,source_name,source_node,target_vmid,"
+                "replica_name,target_node,target_storage,state,last_check_at "
+                "FROM dr_protected_vms "
+                "WHERE source_site_id=? AND target_site_id=? ORDER BY source_vmid",
+                (source_id,target_id)
+            )
+        ]
     checks=[
         {"name":"Sites", "pass":source["role"]=="primary" and target["role"]=="standby",
          "detail":"Source principale et cible secours associées" if source["role"]=="primary" and target["role"]=="standby" else "Rôles primary/standby à corriger"},
@@ -195,7 +205,8 @@ def simulate(payload, actor):
         {"name":"Fencing source", "pass":False,
          "detail":"Aucune preuve de neutralisation de la VM source ; injoignable ne veut pas dire arrêtée"},
         {"name":"Réplication consistante", "pass":False,
-         "detail":"Aucun snapshot validé ou copie REP_ liée à une VM source"},
+         "detail":str(len(selected_vms))+" VM(s) sélectionnées ; aucune copie REP_ "
+                  "cohérente ou point de restauration validé"},
         {"name":"Interdiction de redémarrage SD", "pass":False,
          "detail":"Aucun verrou HA/onboot et stockage opposable au site SD"},
     ]
@@ -214,6 +225,9 @@ def simulate(payload, actor):
         "would_start_replica":False,
         "would_stop_source":False,
         "would_modify_infrastructure":False,
+        "protected_vms":[dict(vm,replica_verified=False,
+                              last_successful_sync=None,
+                              failover_ready=False) for vm in selected_vms],
         "checks":checks,
         "next_step":"Installer et vérifier des agents PRA autonomes, témoin, fencing et copie consistante avant une bascule réelle.",
     }
