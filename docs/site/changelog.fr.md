@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.21-rc1 — 17 novembre 2026
+
+- **VM protégées PRA** : écran dédié dans l'administration et raccourci depuis chaque groupe PRA. Sélection **manuelle** d'une VM QEMU découverte sur le cluster principal ; saisie du VMID cible libre, nœud et stockage cible Proxmox, fréquence souhaitée et stratégie envisagée (étude, copie à froid, PBS ou baie). Enregistrement d'une **fiche de protection**, avec nom candidat `REP_<nom-vm>`, sans créer de VM ni copier de disques. Une protection par VM source et par VMID cible pour éviter les collisions. Les clusters de PP et Production ne peuvent pas être croisés.
+- **Tests par VM** : prévol de réplication (lecture seule), bascule simulée, partition réseau et panne de la console. Vérifie par API GET la présence de la VM source, le statut de la VM, le VMID destination disponible, l'état du nœud cible, le stockage déclaré et les prérequis manquants. Historique d'essais immuable avec auteur et résultat **BLOCKED** tant que moteur de copie, réplique consistante, témoin, fencing et anti-redémarrage ne sont pas réels.
+- **Aucune réplication réelle à ce stade** : le bouton API de copie renvoie une erreur explicite, aucune migration distante, `vzdump`, `qmrestore`, snapshot ou manipulation de LUN n'est effectuée. La fréquence stockée est indicative, aucun ordonnanceur de copies n'est activé. Aucune prétendue synchronisation réussie.
+- **Statuts UI** : vert pour succès/en ligne, orange pour en cours/en attente, rouge pour erreur/bloqué/hors ligne ; gris pour inconnu/désactivé. Mise à jour des déploiements groupés et des agents. Boutons de rafraîchissement global/par agent : relisent le **dernier heartbeat reçu**, sans forcer un contact sortant vers l'agent.
+- **Renommage groupe PRA** : réponse serveur contenant le nom réellement enregistré et rechargement direct des groupes et sites indépendamment des autres API ; requêtes sans cache pour éviter les titres périmés.
+- **Garde-fous** : impossible de supprimer un site ou de déplacer sa liaison principale/secours tant qu'il est utilisé par une VM protégée ; suppression d'une fiche de protection **sans suppression des VM ni volumes**.
+
 ## 0.3.20-rc1 — 17 novembre 2026
 
 - **Déploiement agent Proxmox :** la clé SSH du coffre (authentification utilisateur, par exemple utilisée aussi par Rundeck) ne doit plus être confondue avec la **clé d'hôte du serveur SSH**. Le parcours **DC Proxmox → Agents du cluster** enregistre automatiquement au premier contact la clé publique d'hôte du nœud dans le `known_hosts` persistant d'OrigamiTasks (**TOFU / accept-new**), sans demander de valider manuellement chaque empreinte.
