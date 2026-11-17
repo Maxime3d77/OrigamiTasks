@@ -1,11 +1,11 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,drSites:[],drSimulations:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,drSites:[],drSimulations:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dt=v=>v?new Date(v).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'}):'—';
-const statusName={success:'Réussi',failed:'Échec',running:'En cours',queued:'En attente',interrupted:'Interrompu',skipped:'Ignoré'};
+const statusName={success:'Réussi',failed:'Échec',running:'En cours',queued:'En attente',interrupted:'Interrompu',skipped:'Ignoré',online:'En ligne',offline:'Hors ligne',pending:'En attente',revoked:'Révoqué',uninstalled:'Désinstallé'};
 const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>`;
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
@@ -17,12 +17,87 @@ const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').sl
 const badgeTags=tags=>tags.map(t=>`<span class="chip tag">#${e(t)}</span>`).join('');
 function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'DC Proxmox',agents:'Agents Linux / Windows','ssh-inventory':'Serveurs & groupes SSH',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
 function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage,'ssh-inventory':sshInventoryPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
-function dashboard(){const s=state.summary;return title('Vue d’ensemble','Votre centre de contrôle de l’automatisation.','<button class="btn primary" data-action="create">＋ Nouveau workflow</button>')+`<div class="stats-grid">
- <div class="stat-card featured"><span class="label">Workflows disponibles</span><span class="stat-icon">◈</span><div class="value">${s.jobs||0}</div><div class="sub">${s.enabled||0} workflows actifs</div></div>
- <div class="stat-card"><span class="label">Exécutions réussies</span><span class="stat-icon">✓</span><div class="value">${s.success||0}</div><div class="sub">sur les 100 dernières</div></div>
- <div class="stat-card"><span class="label">Erreurs détectées</span><span class="stat-icon">⚑</span><div class="value">${s.failed||0}</div><div class="sub">exécutions en anomalie</div></div>
- <div class="stat-card"><span class="label">Activité en temps réel</span><span class="stat-icon">◴</span><div class="value">${s.running||0}</div><div class="sub">en cours / en attente</div></div></div>
- <div class="section-grid"><section><div class="panel"><div class="panel-title"><h2>Dernières exécutions</h2><button class="text-btn" data-action="page" data-page="runs">Voir tout ↗</button></div>${runsTable(state.runs.slice(0,7))}</div><div class="panel"><div class="panel-title"><h2>Workflows récents</h2><button class="text-btn" data-action="page" data-page="jobs">Explorer ↗</button></div>${jobsTable(state.jobs.slice(0,5))}</div></section><section><div class="panel"><div class="panel-title"><h2>Performance des automatisations</h2><span class="hint">100 dernières</span></div>${activityBars()}</div><div class="panel"><div class="panel-title"><h2>Actions rapides</h2></div><div class="quick-grid"><button class="quick-card" data-action="create"><span>⤳</span><b>Créer un workflow</b><small>Visuel et conditionnel</small></button><button class="quick-card" data-action="page" data-page="runs"><span>◷</span><b>Consulter les logs</b><small>Dernières exécutions</small></button><button class="quick-card" data-action="page" data-page="vault"><span>◇</span><b>Coffre sécurisé</b><small>Secrets chiffrés</small></button><button class="quick-card" data-action="page" data-page="updates"><span>⇣</span><b>Version & Git</b><small>Maintenance</small></button></div></div></section></div>`}
+function dashboard(){
+ const tab=roleAdmin()?(state.dashboardTab||'tasks'):'tasks';
+ const all=[['tasks','Tâches & exécutions'],['agents','Agents actifs'],['proxmox','DC Proxmox / PRA']];
+ const tabs='<div class="overview-tabs" role="tablist" aria-label="Vue d’ensemble">'
+    +(roleAdmin()?all:[all[0]]).map(([key,label])=>
+      '<button type="button" role="tab" aria-selected="'+(tab===key?'true':'false')+'" class="'+(tab===key?'active':'')+'" data-action="overview-tab" data-value="'+key+'">'+label+'</button>').join('')
+    +'</div>';
+ let page=tab==='agents'?dashboardAgents():tab==='proxmox'?dashboardProxmox():dashboardTasks();
+ return title('Vue d’ensemble','Workflows, agents et état des clusters dans un centre de supervision unique.','<button class="btn tiny" data-action="refresh">↻ Actualiser</button>')
+  +tabs+'<div role="tabpanel" class="overview-panel">'+page+'</div>';
+}
+function dashboardTasks(){
+ const s=state.summary;
+ return '<div class="stats-grid">'
+  +'<div class="stat-card featured"><span class="label">Workflows disponibles</span><span class="stat-icon">◈</span><div class="value">'+(s.jobs||0)+'</div><div class="sub">'+(s.enabled||0)+' actifs</div></div>'
+  +'<div class="stat-card"><span class="label">Exécutions réussies</span><span class="stat-icon">✓</span><div class="value">'+(s.success||0)+'</div><div class="sub">sur les 100 dernières</div></div>'
+  +'<div class="stat-card"><span class="label">Exécutions échouées</span><span class="stat-icon">⚑</span><div class="value">'+(s.failed||0)+'</div><div class="sub">à examiner</div></div>'
+  +'<div class="stat-card"><span class="label">En cours / en attente</span><span class="stat-icon">◴</span><div class="value">'+(s.running||0)+'</div><div class="sub">exécutions actives</div></div></div>'
+  +'<div class="section-grid"><section><div class="panel"><div class="panel-title"><h2>Dernières exécutions</h2>'
+  +'<button class="text-btn" data-action="page" data-page="runs">Voir tout ↗</button></div>'
+  +runsTable(state.runs.slice(0,7))+'</div>'
+  +'<div class="panel"><div class="panel-title"><h2>Workflows récents</h2>'
+  +'<button class="text-btn" data-action="page" data-page="jobs">Explorer ↗</button></div>'
+  +jobsTable(state.jobs.slice(0,5))+'</div></section><section>'
+  +'<div class="panel"><div class="panel-title"><h2>Répartition des exécutions</h2>'
+  +'<span class="hint">100 dernières</span></div>'+activityBars()+'</div>'
+  +'<div class="panel"><div class="panel-title"><h2>Actions rapides</h2></div><div class="quick-grid">'
+  +'<button class="quick-card" data-action="create"><span>⤳</span><b>Créer un workflow</b><small>Visuel et conditionnel</small></button>'
+  +'<button class="quick-card" data-action="page" data-page="runs"><span>◷</span><b>Consulter les logs</b><small>Dernières exécutions</small></button>'
+  +'<button class="quick-card" data-action="page" data-page="vault"><span>◇</span><b>Coffre sécurisé</b><small>Secrets chiffrés</small></button>'
+  +'<button class="quick-card" data-action="page" data-page="updates"><span>⇣</span><b>Version & Git</b><small>Maintenance</small></button>'
+  +'</div></div></section></div>';
+}
+function dashboardAgents(){
+ const items=state.agents||[],online=items.filter(x=>x.status==='online'),offline=items.filter(x=>x.status==='offline'),
+       pending=items.filter(x=>x.status==='pending'),removed=items.filter(x=>['revoked','uninstalled'].includes(x.status));
+ const mini=(label,value,sub)=>'<div class="stat-card"><span class="label">'+e(label)+'</span><div class="value">'+value+'</div><div class="sub">'+e(sub)+'</div></div>';
+ const summary='<div class="stats-grid">'+mini('Agents en ligne',online.length,'Heartbeat reçu sous 90 secondes')
+  +mini('Agents hors ligne',offline.length,'Aucun contact récent')
+  +mini('Agents en attente',pending.length,'Enrôlement non terminé')
+  +mini('Révoqués / désinstallés',removed.length,'Jetons invalidés')+'</div>';
+ const rows=items.slice(0,25).map(agent=>
+  '<tr><td><b>'+e(agent.name)+'</b><div class="muted tinytext">'+e(agent.hostname||'Non enrôlé')+'</div></td>'
+  +'<td>'+labelStatus(agent.status)+'</td><td>'+e(agent.platform)+' · '+e(agent.version||'—')+'</td>'
+  +'<td>'+(Number.isFinite(agent.cpu_percent)?e(agent.cpu_percent.toFixed(1))+' %':'Non remonté')+'</td>'
+  +'<td>'+(Number.isFinite(agent.memory_mb)?e(agent.memory_mb.toFixed(1))+' Mio':'Non remontée')+'</td>'
+  +'<td>'+dt(agent.last_seen)+'</td></tr>').join('');
+ return summary+'<div class="panel"><div class="panel-title"><div><h2>État des agents</h2>'
+  +'<p class="hint">CPU et RAM du processus agent uniquement, sans les scripts lancés ni les VM hébergées.</p></div>'
+  +'<button class="btn primary" data-action="page" data-page="agents">Gérer les agents ↗</button></div>'
+  +'<div class="table-wrap"><table><thead><tr><th>Agent</th><th>État</th><th>Plateforme / version</th><th>CPU</th><th>RAM</th><th>Dernier contact</th></tr></thead>'
+  +'<tbody>'+(rows||'<tr><td colspan="6">Aucun agent enregistré.</td></tr>')+'</tbody></table></div>'
+  +'<p class="hint">Les agents de tâches classiques dépendent toujours de la console. Leur état « en ligne » ne garantit pas la disponibilité du PRA autonome.</p></div>';
+}
+function dashboardProxmox(){
+ const dcs=state.datacenters||[],sites=state.drSites||[];
+ const cards=dcs.slice(0,80).map(dc=>{
+  const site=sites.find(s=>(s.datacenters||[]).some(d=>d.id===dc.id));
+  const assoc=site?.agents||[],active=assoc.filter(x=>x.status==='online').length;
+  return '<article class="job-card overview-dc-card"><div class="job-card-head"><div class="job-icon">◈</div>'
+   +'<span class="chip tag">'+e(dc.kind==='node'?'Nœud seul':'Cluster')+'</span></div>'
+   +'<h3>'+e(dc.name)+'</h3><p>'+e(dc.url)+'</p>'
+   +'<div class="overview-dc-details"><span>Site : <b>'+e(site?.name||'Non rattaché')+'</b></span>'
+   +'<span>Agents standards : <b>'+active+' / '+assoc.length+' en ligne</b></span>'
+   +'<span>Réplication PRA : <b>Non disponible (moteur non implémenté)</b></span>'
+   +'<span>État API : <b>Non testé en temps réel sur cette vue</b></span>'
+   +'</div><button class="btn tiny" data-action="page" data-page="datacenters">Ouvrir dans Proxmox ↗</button></article>';
+ }).join('');
+ const agents=sites.reduce((acc,site)=>acc+(site.agents||[]).filter(x=>x.status==='online').length,0);
+ return '<div class="stats-grid">'
+  +'<div class="stat-card featured"><span class="label">Clusters / serveurs déclarés</span><div class="value">'+dcs.length+'</div><div class="sub">Inventaire OrigamiTasks</div></div>'
+  +'<div class="stat-card"><span class="label">Sites PRA</span><div class="value">'+sites.length+'</div><div class="sub">Sites nommés</div></div>'
+  +'<div class="stat-card"><span class="label">Agents liés en ligne</span><div class="value">'+agents+'</div><div class="sub">Agents classiques, non autonomes PRA</div></div>'
+  +'<div class="stat-card"><span class="label">Synchronisations actives</span><div class="value">—</div><div class="sub">Non mesurées : moteur PRA absent</div></div></div>'
+  +'<div class="notice">Les statuts de réplication (dernier point de restauration, retard, réussite / échec) ne seront affichés qu’après intégration d’un moteur réel. Aucun statut « synchronisé » n’est inventé.</div>'
+  +'<div class="panel"><div class="panel-title"><h2>Datacenters Proxmox</h2>'
+  +'<button class="btn primary" data-action="page" data-page="datacenters">Administrer les DC / sites PRA ↗</button></div>'
+  +'<div class="workflow-grid overview-dc-grid">'+(cards||'<p class="hint">Aucun DC Proxmox enregistré.</p>')+'</div>'
+  +(dcs.length>80?'<p class="hint">80 premiers DC affichés. Ouvrir Proxmox pour la liste complète.</p>':'')
+  +'</div>';
+}
 function activityBars(){const count=state.runs.slice(0,100).length,total=count||1,success=state.runs.slice(0,100).filter(r=>r.status==='success').length,fail=state.runs.slice(0,100).filter(r=>['failed','interrupted'].includes(r.status)).length;return [['Exécutions réussies',success],['Erreurs',fail],['Autres',count-success-fail]].map(([name,n])=>`<div class="activity-line"><span>${name}</span><b>${Math.round(n/total*100)}%</b></div><div class="bar-track"><span style="width:${Math.round(n/total*100)}%"></span></div>`).join('')+`<p class="hint" style="margin-top:18px">Historique conservé en base, traçabilité de chaque étape.</p>`}
 function runsTable(items){if(!items.length)return empty('Aucune exécution pour le moment','Un workflow lancé apparaîtra ici.');return `<div class="table-wrap"><table><thead><tr><th>Workflow</th><th>État</th><th>Déclencheur</th><th>Date</th><th></th></tr></thead><tbody>${items.map(r=>`<tr><td><div class="name-cell">${e(r.job_name)}</div><span class="muted tinytext">#${r.id}</span></td><td>${labelStatus(r.status)}</td><td class="muted">${e(r.trigger)}</td><td class="muted">${dt(r.queued_at)}</td><td><button class="text-btn" data-action="run-detail" data-id="${r.id}">Détails ↗</button></td></tr>`).join('')}</tbody></table></div>`}
 function jobsTable(items){if(!items.length)return empty('Pas encore de workflow','Créez votre première automatisation.');return `<div class="table-wrap"><table><thead><tr><th>Nom</th><th>Dossier</th><th>Étapes</th><th>Planification</th><th></th></tr></thead><tbody>${items.map(j=>`<tr><td class="name-cell">${e(j.name)}</td><td class="muted">${e(j.folder)}</td><td>${j.steps_json.length} étapes</td><td class="muted">${e(j.schedule_json.cron||'Manuel')}</td><td><button class="text-btn" data-action="edit" data-id="${j.id}">Ouvrir ↗</button></td></tr>`).join('')}</tbody></table></div>`}
@@ -1235,7 +1310,8 @@ async function openRun(id){try{const r=await api('/runs/'+id);state.selectedRun=
 async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit')).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateVersionSummary').innerHTML=renderUpdateVersion(u);$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
 function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP();if(state.page==='agents')scheduleAgentBatchPoll()}
 async function refresh(){await load();render()}
-async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='graph-zoom-in'){graphZoomTo((state.graphZoom||1)*1.25);return}
+async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='overview-tab'){state.dashboardTab=b.dataset.value||'tasks';render();return}
+ if(a==='graph-zoom-in'){graphZoomTo((state.graphZoom||1)*1.25);return}
  if(a==='graph-zoom-out'){graphZoomTo((state.graphZoom||1)/1.25);return}
  if(a==='graph-zoom-reset'){graphZoomTo(1);return}
  if(a==='graph-fit-width'){graphFit('width');return}
