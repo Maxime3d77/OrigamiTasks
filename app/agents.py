@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from fastapi import HTTPException
-from . import config, db, security
+from . import config, db, security, agent_modules
 
 ACTIONS = {'inventory', 'script', 'processes', 'disk', 'service_status',
            'service_start', 'service_stop', 'service_restart'}
@@ -107,18 +107,21 @@ def poll(agent, body):
         con.execute("UPDATE agents SET last_seen=?,hostname=CASE WHEN ?<>'' THEN ? ELSE hostname END,"
                     "version=?,cpu_percent=?,memory_mb=? WHERE id=?",
                     (db.now(),hostname,hostname,version,cpu,memory,agent['id']))
+        agent_modules.report(agent['id'],body,con)
+        modules_bundle=agent_modules.bundle(agent['id'],con)
         task = con.execute(
             "SELECT * FROM agent_tasks WHERE agent_id=? AND status='queued' ORDER BY id LIMIT 1", (agent['id'],)).fetchone()
         if not task:
-            return {'task': None}
+            return {'task': None, **modules_bundle}
         lease = secrets.token_urlsafe(32)
         updated = con.execute(
             "UPDATE agent_tasks SET status='claimed', lease_hash=?, claimed_at=? WHERE id=? AND status='queued'",
             (security.sha(lease), db.now(), task['id'])).rowcount
         if not updated:
-            return {'task': None}
+            return {'task': None, **modules_bundle}
     return {'task': {'id':task['id'], 'lease':lease, 'action':task['action'],
-                     'payload':json.loads(task['payload_json']), 'timeout':task['timeout_seconds']}}
+                     'payload':json.loads(task['payload_json']), 'timeout':task['timeout_seconds']},
+            **modules_bundle}
 
 
 def report(agent, body):
