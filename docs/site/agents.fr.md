@@ -1,5 +1,15 @@
 # Agents Linux et Windows — préversion v0.3.0-rc1
 
+## Paramètres HTTPS des agents et rôles Windows (0.3.18-rc1)
+
+Avant de déployer un agent, aller dans **Agents Linux et Windows → Paramètres de connexion des agents**, renseigner **l'URL HTTPS publique** de la console puis cliquer **Enregistrer l'URL des agents**. L'adresse est préremplie avec l'origine HTTPS du navigateur si aucune URL n'est encore configurée. Exemple : `https://origamitasks.example.org` derrière Nginx, qui proxifie en interne vers `http://127.0.0.1:8091`. Ne pas inscrire `127.0.0.1:8091` dans la configuration des agents : cette adresse pointerait vers **chaque agent lui-même**, pas la console. L'URL enregistrée dans l'interface est effective immédiatement pour les **nouveaux déploiements** ; `AGENT_SERVER_URL` dans `.env` n'est plus qu'une valeur de repli facultative.
+
+Le FQDN doit être joignable depuis les machines Linux/Windows, avec un certificat HTTPS dont la CA est reconnue par le système sur chaque machine. La vérification TLS du client n'est pas désactivée. L'adresse n'est pas automatiquement changée sur les agents déjà installés. Leur URL d'origine est mémorisée lors de la nouvelle installation et utilisée pour sécuriser la désinstallation. Pour un ancien agent installé avant cette version, le formulaire de désinstallation permet de renseigner manuellement son **ancienne URL HTTPS exacte**, que le serveur distant doit confirmer dans `config.json`.
+
+Lors du déploiement depuis **DC Proxmox → Agents du cluster** ou **Sites PRA → Déployer sur les nœuds**, l'assistant affiche cette URL. Si elle est absente, il interdit le lancement et propose un raccourci vers sa configuration. Le module **PRA préparatoire** n'est **plus coché par défaut**. Il conserve uniquement un état local et un heartbeat passif ; **pas de réplication de VM, pas de restauration, pas de fencing ni de failover** à ce stade.
+
+**Windows :** l'agent est **Standard uniquement**, pour exécuter des workflows Windows, scripts PowerShell, opérations sur les processus/services et autres actions de poste/serveur. Les rôles **Proxmox et PRA sont interdits par l'API et masqués dans l'interface**. La console peut déployer et désinstaller cet agent via SSH sur Windows avec les prérequis d'administration existants.
+
 ## Agent unique avec modules administrés (0.3.16-rc1)
 
 L'installation OrigamiTasks devient **un seul agent par machine**, administrable depuis **Agents Linux et Windows → Configurer modules**. Trois fonctions sont visibles :
