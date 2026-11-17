@@ -19,6 +19,7 @@ def admin(client):
 
 
 def _settings():
+    db.initialize()
     with db.session() as con:
         r=con.execute("SELECT controller_url,updated_at FROM agent_settings WHERE id=1").fetchone()
         return dict(r) if r else None
