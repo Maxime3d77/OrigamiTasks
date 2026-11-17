@@ -504,7 +504,8 @@ function renderProxmoxDiscoveryResults(){
   return '<tr><td>'+e(label)+'</td><td><strong>'+e(item.name||item.vmid||item.id||'—')+'</strong></td>'
     +'<td>'+e(vmid)+'</td><td>'+e(item.node||'—')+'</td><td>'+e(item.status||'—')+'</td>'
     +'<td>'+(item.type==='qemu'&&Number.isSafeInteger(Number(item.vmid))
-      ?'<button class="btn tiny" data-action="assess-dr" data-id="'+d.dcId+'" data-vmid="'+e(item.vmid)+'">Évaluer PRA</button>':'')
+      ?'<div class="tool-row"><button class="btn tiny" data-action="assess-dr" data-id="'+d.dcId+'" data-vmid="'+e(item.vmid)+'">Évaluer PRA</button>'
+        +'<button class="btn tiny primary" data-action="protect-vm-resource" data-id="'+d.dcId+'" data-vmid="'+e(item.vmid)+'">Protéger</button></div>':'')
     +'</td></tr>';
  }).join('');
  $('#proxmoxDiscoveryTable').innerHTML='<table class="proxmox-discovery-table"><thead><tr>'
@@ -536,6 +537,151 @@ function datacenters(){
     +renderDRSitesPanel()
    +'<div class="notice">Chaque cluster dévoile ses nœuds et VM via la découverte. Les tokens restent chiffrés dans le coffre. '
    +'La vérification TLS est activée par défaut ; une exception est possible sur chaque fiche Proxmox pour les certificats autosignés. Les actions sensibles restent soumises à des permissions et validations distinctes.</div>';
+}
+
+
+/* A protected VM is a manually selected plan, never an actual running replica.
+   All tests perform read-only GET requests to Proxmox and return BLOCKED. */
+function protectedVMsPage(){
+ if(!roleAdmin())return title('VM protégées PRA','Administration uniquement.');
+ const plans=state.drPlans||[],all=state.drProtectedVMs||[];
+ const selected=state.drVMPlanFilter||'all';
+ const current=selected==='all'?all:all.filter(x=>String(x.plan_id)===String(selected));
+ const tableRows=current.map(vm=>{
+  const last=vm.last_check||{};
+  return '<tr><td><b>'+e(vm.source_name||'VM #'+vm.source_vmid)+'</b>'
+   +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
+   +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
+   +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
+   +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
+   +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
+   +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
+   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point : jamais vérifié</div></td>'
+   +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
+     +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
+   +'<td class="dr-vm-actions">'
+   +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
+   +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
+   +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
+   +'<button class="btn tiny" data-action="dr-vm-edit" data-id="'+vm.id+'">Modifier</button>'
+   +'<button class="btn tiny" data-action="dr-vm-pause" data-id="'+vm.id+'">'+(vm.state==='paused'?'Reprendre la préparation':'Mettre en pause')+'</button>'
+   +'<button class="btn tiny danger" data-action="dr-vm-delete" data-id="'+vm.id+'">Retirer</button>'
+   +'</td></tr>';
+ }).join('');
+ return title('VM protégées PRA','Choix manuel par VM, destination, stockage et tests de reprise sans action sur les hyperviseurs.',
+   '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
+   +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
+  +'<div class="notice dr-safety-notice"><b>Protection encore préparatoire :</b> une entrée REP_ est un nom réservé dans OrigamiTasks, '
+  +'pas une VM réellement créée. Aucun moteur de copie iSCSI/LVM, PBS ou Pure n’a encore été activé ; '
+  +'pas de synchronisation réelle, de démarrage ni de bascule. Les tests sont des vérifications en lecture seule.</div>'
+  +'<div class="stats-grid dr-vm-stat-grid">'
+  +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Protections déclaratives</div></div>'
+  +'<div class="stat-card"><span class="label">Préparations actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Aucune copie lancée</div></div>'
+  +'<div class="stat-card"><span class="label">En pause</span><div class="value">'+current.filter(x=>x.state==='paused').length+'</div><div class="sub">Enregistrements conservés</div></div>'
+  +'<div class="stat-card"><span class="label">Répliques vérifiées</span><div class="value">0</div><div class="sub">Moteur non disponible</div></div></div>'
+  +'<div class="panel"><div class="panel-title"><h2>Inventaire des VM sélectionnées</h2>'
+  +'<div class="tool-row"><label class="field">Groupe PRA'
+  +'<select id="drVMPlanFilter">'+option([['all','Tous les groupes'],...plans.map(p=>[p.id,p.name])],selected)+'</select>'
+  +'</label></div></div>'
+  +'<div class="table-wrap"><table><thead><tr><th>VM source</th><th>Périmètre</th>'
+  +'<th>Réplique prévue</th><th>État</th><th>Réplication</th><th>Dernier test</th><th>Actions</th></tr></thead>'
+  +'<tbody>'+(tableRows||'<tr><td colspan="7">Aucune VM sélectionnée dans ce groupe. '
+    +'Ajoute manuellement une VM après découverte des clusters.</td></tr>')+'</tbody></table></div></div>';
+}
+function drVMClusters(planId,role){
+ const sites=(state.drSites||[]).filter(s=>s.plan_id===Number(planId)&&s.role===role);
+ return sites.flatMap(s=>(s.datacenters||[]).map(d=>({
+  id:d.id,name:d.name+' · '+s.name,site:s.name
+ })));
+}
+function openProtectedVMWizard(existingId=null,preselectDC=null,preselectVMID=null,preselectPlan=null){
+ const current=(state.drProtectedVMs||[]).find(x=>x.id===Number(existingId));
+ const groups=(state.drPlans||[]).filter(p=>
+  drVMClusters(p.id,'primary').length&&drVMClusters(p.id,'standby').length);
+ if(!groups.length)return toast('Créer d’abord un groupe PRA avec un cluster principal et un cluster secours.',false);
+ const site=(state.drSites||[]).find(s=>(s.datacenters||[]).some(d=>d.id===Number(preselectDC)));
+ const planId=current?.plan_id||preselectPlan||site?.plan_id||Number(groups[0].id);
+ const src=drVMClusters(planId,'primary');
+ const dst=drVMClusters(planId,'standby');
+ if(!src.length||!dst.length)return toast('Les deux sites du groupe PRA doivent être configurés.',false);
+ const sourceId=current?.source_dc_id||(src.find(x=>x.id===Number(preselectDC))||src[0]).id;
+ const targetId=current?.target_dc_id||dst[0].id;
+ state.drVMWizard={existingId:current?.id||null,
+                   preselectVMID:current?.source_vmid||preselectVMID||null};
+ const body='<form id="drVMSourceForm"><div class="notice">Étape 1 — choisir le groupe PRA et deux clusters de sites différents. '
+  +'Les VM et stockages seront ensuite lus directement dans les API Proxmox.</div>'
+  +'<div class="form-grid">'
+  +selectField('Groupe PRA','dr_vm_plan',groups.map(p=>[p.id,p.name]),planId)
+  +selectField('Cluster principal','dr_vm_source_dc',src.map(x=>[x.id,x.name]),sourceId)
+  +selectField('Cluster secours','dr_vm_target_dc',dst.map(x=>[x.id,x.name]),targetId)
+  +'</div><div class="tool-row"><button class="btn primary" type="submit">Découvrir les VM et stockages</button>'
+  +'<button class="btn" data-action="modal-close" type="button">Annuler</button></div></form>';
+ modal(current?'Modifier la protection de VM #'+current.source_vmid:'Ajouter une VM protégée',body,'',true);
+}
+async function openProtectedVMConfig(planId,sourceDC,targetDC){
+ const r=await api('/dr/vms/options?plan_id='+Number(planId)
+    +'&source_dc_id='+Number(sourceDC)+'&target_dc_id='+Number(targetDC));
+ state.drVMOptions=r;
+ const current=(state.drProtectedVMs||[]).find(x=>x.id===state.drVMWizard?.existingId);
+ const vmid=current?.source_vmid||Number(state.drVMWizard?.preselectVMID)||r.vms[0]?.vmid;
+ if(!r.vms.length)throw Error('Aucune VM QEMU n’a été découverte sur le cluster principal.');
+ const src= r.vms.find(x=>x.vmid===vmid)||r.vms[0];
+ const candidate=current?.target_vmid||src.vmid;
+ const targetDefault=r.target_vmids_in_use.includes(candidate)?'':candidate;
+ const nodes=r.target_nodes.filter(x=>x.status==='online');
+ const pools=r.target_storages.filter(x=>x.images);
+ if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
+ const engines=[['planning_only','Préparation / simulation uniquement'],
+   ['offline_copy','Copie à froid (transport à développer)'],
+   ['pbs_backup_restore','PBS backup + restore (à intégrer)'],
+   ['storage_array_replication','Réplication de baie/LUN (à valider)']];
+ const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
+  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Aucune copie ni VM REP_ ne sera créée lors de l’enregistrement. '
+  +'Le stockage cible doit accepter des images VM ; un VG iSCSI/LVM peut contenir plusieurs disques sur une même LUN.</div>'
+  +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)+'</p>'
+  +'<div class="form-grid">'
+  +selectField('VM source (choix manuel)','source_vmid',
+    r.vms.map(v=>[v.vmid,v.vmid+' — '+v.name+' · '+v.node+' ['+v.status+']']),src.vmid)
+  +field('VMID cible réservé pour REP_','target_vmid',targetDefault,'number')
+  +selectField('Nœud Proxmox cible','target_node',
+    nodes.map(x=>[x.name,x.name]),current?.target_node||nodes[0].name)
+  +selectField('Stockage cible','target_storage',
+    pools.map(x=>[x.storage,x.storage+' · '+x.type+(x.shared?' (partagé)':'')]),
+    current?.target_storage||pools[0].storage)
+  +selectField('Moteur envisagé (NON exécuté)','engine',engines,current?.engine||'planning_only')
+  +selectField('Fréquence souhaitée (indicative)','interval_minutes',
+    [[15,'15 minutes'],[30,'30 minutes'],[60,'1 heure'],[240,'4 heures'],
+     [720,'12 heures'],[1440,'24 heures']],
+    current?.interval_minutes||60)+'</div>'
+  +'<p class="hint">Noms cibles prévus : REP_&lt;nom de VM&gt;. Le VMID cible doit être libre. '
+  +'Aucune création ou réservation n’est envoyée au cluster de secours.</p>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer la protection préparatoire</button>'
+  +'<button type="button" class="btn" data-action="modal-close">Annuler</button></div></form>';
+ modal('VM protégée · '+e(r.source_name)+' → '+e(r.target_name),body,'',true);
+}
+function showProtectedVMTest(report){
+ const rows=(report.checks||[]).map(x=>
+  '<tr><td>'+e(x.name)+'</td><td>'+labelStatus(x.pass?'success':'failed')+'</td><td>'+e(x.detail)+'</td></tr>').join('');
+ modal('Test PRA · VM #'+e(report.vmid)+' · '+e(report.scenario),
+  '<div class="notice error"><b>Décision : '+e(report.decision)+'.</b> '+e(report.conclusion)
+   +' Aucune copie de disque, aucun arrêt ni démarrage de VM.</div>'
+  +'<div class="tool-row"><span class="chip">Préfixe cible : '+e(report.replica_name)+'</span>'
+  +'<span class="chip">Source : '+e(report.source_status)+'</span></div>'
+  +'<div class="table-wrap"><table><thead><tr><th>Contrôle</th><th>État</th><th>Constat</th></tr></thead>'
+  +'<tbody>'+rows+'</tbody></table></div>'
+  +'<p class="hint">'+e(report.next_step)+'</p>',
+  '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
+}
+async function openProtectedVMHistory(vmId){
+ const item=(state.drProtectedVMs||[]).find(x=>x.id===vmId);
+ const rows=(await api('/dr/vms/'+vmId+'/tests')).items;
+ const html=rows.map(t=>'<div class="dr-vm-test-history"><div class="tool-row">'
+   +labelStatus(t.outcome)+' <b>'+e(t.scenario)+'</b><small class="hint">'+dt(t.created_at)
+   +' · '+e(t.actor)+'</small></div><p>'+e(t.report.conclusion)+'</p>'
+   +'<small class="hint">Lecture seule : '+e(t.report.mode)+'</small></div>').join('');
+ modal('Historique des tests · '+e(item?.source_name||vmId),html||
+   '<div class="notice">Aucun test réalisé. Tu peux lancer le prévol de réplication ou une bascule simulée.</div>',
+   '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
 }
 
 function renderDRSitesPanel(){
