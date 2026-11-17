@@ -1336,7 +1336,26 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   const lines=new Set([...area.value.split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean),...targets]);
   area.value=[...lines].join('\n');
   toast(targets.length+' serveur(s) ajoutés');return
- }if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='edit-datacenter'){openDatacenterForm(id);return}if(a==='test-datacenter'){const result=await api('/datacenters/'+id+'/test');modal('Diagnostic Proxmox · #'+id,'<div class="notice">'+e(result.message)+'</div>'+(result.checks||[]).map(v=>'<p><b>'+e(v.name)+'</b> : '+e(v.detail)+'</p>').join(''),'<button class="btn primary" data-action="modal-close">Fermer</button>');return}if(a==='discover-datacenter'){const result=await api('/datacenters/'+id+'/discover');openProxmoxDiscovery(id,result);return}
+ }if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='dr-site-new'){openDRSiteForm();return}
+ if(a==='dr-site-edit'){openDRSiteForm(id);return}
+ if(a==='dr-site-delete'){
+  if(!confirm('Supprimer cette association PRA ? Les clusters, les agents et les VM ne seront pas modifiés.'))return;
+  await api('/dr/sites/'+id,'DELETE');toast('Site PRA supprimé sans action sur les clusters');await refresh();return
+ }
+ if(a==='dr-site-deploy-agent'){
+  const site=(state.drSites||[]).find(x=>x.id===id);
+  if(!site)return;
+  agentDeployForm();
+  const form=document.getElementById('agentDeployForm');
+  if(form){
+   form.elements.namedItem('group').value='dr_site_'+id;
+   form.elements.namedItem('name').value='pra-'+site.name.replace(/[^a-zA-Z0-9_-]/g,'-').slice(0,60);
+  }
+  toast('Installer un agent standard : il faudra ensuite le rattacher au site. Le service PRA autonome n’est pas encore développé.');
+  return
+ }
+ if(a==='dr-simulation-form'){openDRSimulationForm();return}
+ if(a==='new-datacenter'){openDatacenterForm();return}if(a==='edit-datacenter'){openDatacenterForm(id);return}if(a==='test-datacenter'){const result=await api('/datacenters/'+id+'/test');modal('Diagnostic Proxmox · #'+id,'<div class="notice">'+e(result.message)+'</div>'+(result.checks||[]).map(v=>'<p><b>'+e(v.name)+'</b> : '+e(v.detail)+'</p>').join(''),'<button class="btn primary" data-action="modal-close">Fermer</button>');return}if(a==='discover-datacenter'){const result=await api('/datacenters/'+id+'/discover');openProxmoxDiscovery(id,result);return}
  if(a==='proxmox-discovery-prev'||a==='proxmox-discovery-next'){
    if(state.proxmoxDiscovery){state.proxmoxDiscovery.page+=a==='proxmox-discovery-next'?1:-1;renderProxmoxDiscoveryResults();}
    return
@@ -1366,6 +1385,34 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   hydrateAdmins();return
  }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='drSiteForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id)||0;
+  const body={name:String(f.get('dr_site_name')||'').trim(),
+              role:String(f.get('dr_role')||'other'),
+              storage_profile:String(f.get('dr_storage')||'auto'),
+              datacenter_ids:f.getAll('dr_dc').map(Number),
+              agent_ids:f.getAll('dr_agent').map(Number)};
+  try{
+   await api(id?'/dr/sites/'+id:'/dr/sites',id?'PUT':'POST',body);
+   closeModal();toast(id?'Site PRA mis à jour':'Site PRA déclaré');await refresh();showPage('datacenters');
+  }catch(ex){toast(ex.message,false)}
+  return
+ }
+ if(ev.target.id==='drSimulationForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target);
+  try{
+   const result=await api('/dr/simulate','POST',{
+    source_site_id:Number(f.get('dr_source')),target_site_id:Number(f.get('dr_target')),
+    scenario:String(f.get('dr_scenario'))
+   });
+   state.drSimulations=(await api('/dr/simulations')).items;
+   showDRSimulationResult(result);
+  }catch(ex){toast(ex.message,false)}
+  return
+ }
+
  if(ev.target.id==='sshGroupForm'){
   ev.preventDefault();
   const f=new FormData(ev.target),id=Number(ev.target.dataset.id),name=String(f.get('name')||'').trim();
