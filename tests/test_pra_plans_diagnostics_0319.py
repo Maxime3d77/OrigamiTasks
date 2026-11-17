@@ -106,7 +106,7 @@ def test_agent_error_categories_do_not_reveal_secrets():
     from app.agent_deployments import DeploymentError,public_failure
     assert 'empreinte SSH' in public_failure(DeploymentError('Clé hôte SSH inconnue : approbation nécessaire')) or 'Clé hôte' in public_failure(DeploymentError('Clé hôte SSH inconnue : approbation nécessaire'))
     assert 'Connexion SSH impossible' in public_failure(ConnectionError('token=sensitive'))
-    assert 'Commande d’installation' in public_failure(RuntimeError('sudo password secret=private-key'))
+    assert "Commande d'installation" in public_failure(RuntimeError('sudo password secret=private-key'))
     assert 'Autorisation refusée' in public_failure(HTTPException(403,'userpassword'))
     for exc in (ConnectionError('SECRET_0319'),RuntimeError('SECRET_0319'),
                 HTTPException(403,'SECRET_0319')):
