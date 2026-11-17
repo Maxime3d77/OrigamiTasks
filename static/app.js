@@ -423,7 +423,11 @@ function agentBatchPanel(){
   const stateLabel=batch.status==='success'?'Terminé':batch.status==='completed_with_errors'?'Terminé avec erreurs':batch.status==='interrupted'?'Interrompu':'En cours';
   const rows=batch.targets.map(t=>'<div class="agent-batch-host"><strong>'+e(t.host)+':'+e(t.port)+'</strong><span class="chip">'+e(t.status)+'</span>'
    +(t.error?'<small class="hint">'+e(t.error)+'</small>':'')+'</div>').join('');
-  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong><span>'+e(stateLabel)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
+  const planName=batch.dr_plan_name||'';
+  const scope=batch.datacenter_name
+   ?'<small class="hint">'+(planName?'PRA : '+e(planName)+' · ':'PRA non classé · ')+e(batch.datacenter_name)+'</small>'
+   :'<small class="hint">Déploiement générique (hors groupe PRA)</small>';
+  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong>'+scope+'<span>'+e(stateLabel)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
    +'<div class="agent-batch-hosts">'+rows+'</div></details>';
  }).join('');
 }
