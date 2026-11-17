@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,drSites:[],drSimulations:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +10,7 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
@@ -339,9 +339,91 @@ function datacenters(){
    +'<div class="form-grid"><label class="field"><span>Rechercher parmi '+list.length+' serveurs et clusters</span>'
    +'<input id="proxmoxDcSearch" placeholder="Nom, FQDN, URL…"></label></div>'
    +'<div class="workflow-grid proxmox-grid">'+(cards||empty('Aucun Proxmox enregistré','Ajoute un cluster ou un serveur depuis cette page.'))+'</div>'
+    +renderDRSitesPanel()
    +'<div class="notice">Chaque cluster dévoile ses nœuds et VM via la découverte. Les tokens restent chiffrés dans le coffre. '
    +'La vérification TLS est activée par défaut ; une exception est possible sur chaque fiche Proxmox pour les certificats autosignés. Les actions sensibles restent soumises à des permissions et validations distinctes.</div>';
 }
+
+function renderDRSitesPanel(){
+ const sites=state.drSites||[];
+ const cards=sites.map(site=>{
+  const clusters=(site.datacenters||[]).map(dc=>e(dc.name)).join(' · ')||'—';
+  const ags=(site.agents||[]).map(agent=>e(agent.name)+' ('+e(agent.status)+')').join(' · ')||'Aucun';
+  const role=site.role==='primary'?'Principal':site.role==='standby'?'Secours':'Autre';
+  const storage={auto:'À détecter',iscsi_lvm:'iSCSI + LVM',zfs:'ZFS',ceph:'Ceph',pbs:'PBS',other:'Autre'}[site.storage_profile]||site.storage_profile;
+  return '<div class="job-card dr-site-card"><div class="job-card-head"><span class="chip tag">'+e(role)+'</span><span class="chip">'+e(storage)+'</span></div>'
+    +'<h3>'+e(site.name)+'</h3><p>Clusters : '+clusters+'</p><p class="hint">Agents standards associés : '+ags+'</p>'
+    +'<p class="hint"><b>Mode PRA :</b> simulation uniquement ; aucun agent PRA autonome installé.</p>'
+    +'<div class="actions"><button class="btn tiny" data-action="dr-site-edit" data-id="'+site.id+'">Modifier</button>'
+    +'<button class="btn tiny" data-action="dr-site-deploy-agent" data-id="'+site.id+'">Déployer agent SSH</button>'
+    +'<button class="btn tiny danger" data-action="dr-site-delete" data-id="'+site.id+'">Supprimer</button></div></div>';
+ }).join('');
+ const history=(state.drSimulations||[]).slice(0,5).map(item=>
+  '<div class="dr-sim-history"><span class="chip">#'+e(item.id)+' · '+e(item.scenario)+'</span>'
+  +'<span>'+e(item.result.source.name)+' → '+e(item.result.target.name)+'</span>'
+  +'<span class="status failed">'+e(item.outcome)+'</span>'
+  +'<small class="muted">'+e(dt(item.created_at))+'</small></div>').join('');
+ return '<section class="panel dr-sites-panel"><div class="panel-title"><div><h2>Sites PRA et agents</h2>'
+  +'<p class="hint">Associer plusieurs clusters par site, affecter les agents existants et configurer le stockage. '
+  +'Le service PRA autonome et les mises à jour d’agents restent à développer.</p></div>'
+  +'<div class="tool-row"><button class="btn primary" data-action="dr-site-new">＋ Déclarer un site</button>'
+  +'<button class="btn" data-action="dr-simulation-form">Simuler une panne (sans action)</button></div></div>'
+  +'<div class="workflow-grid dr-sites-grid">'+(cards||'<p class="hint">Aucun site PRA configuré.</p>')+'</div>'
+  +'<h3>Dernières simulations</h3>'+(history||'<p class="hint">Aucune simulation effectuée.</p>')+'</section>';
+}
+function openDRSiteForm(siteId=null){
+ const site=(state.drSites||[]).find(x=>x.id===Number(siteId)),selectedDCs=new Set((site?.datacenters||[]).map(x=>x.id)),
+ selectedAgents=new Set((site?.agents||[]).map(x=>x.id));
+ const checkboxes=(list,field,selected,valueLabel)=>
+  list.map(item=>'<label class="dr-site-choice"><input type="checkbox" name="'+field+'" value="'+item.id+'" '
+   +(selected.has(item.id)?'checked':'')+'><span>'+e(valueLabel(item))+'</span></label>').join('');
+ const dcs=checkboxes(state.datacenters,'dr_dc',selectedDCs,x=>x.name+' · '+x.url);
+ const allAgents=(state.agents||[]).filter(x=>x.platform==='linux'&&!x.revoked);
+ const agentsHTML=checkboxes(allAgents,'dr_agent',selectedAgents,x=>x.name+' · '+(x.hostname||'non enrôlé')+' · '+(x.version||'version inconnue'));
+ const form='<form id="drSiteForm" data-id="'+(site?.id||'')+'"><div class="form-grid">'
+  +field('Nom du site','dr_site_name',site?.name||'')
+  +selectField('Rôle du site','dr_role',[['primary','Principal / actif'],['standby','Secours / standby'],['other','Autre']],site?.role||'other')
+  +selectField('Profil de stockage (déclaratif, à vérifier)','dr_storage',[
+   ['auto','Détection à réaliser'],['iscsi_lvm','iSCSI sur LVM partagé'],['zfs','ZFS'],['ceph','Ceph'],['pbs','Proxmox Backup Server'],['other','Autre']
+   ],site?.storage_profile||'auto')+'</div>'
+  +'<label class="field"><span>Clusters ou serveurs Proxmox déjà déclarés</span><div class="dr-site-choices">'
+  +(dcs||'<span class="hint">Déclarer un DC Proxmox avant le site.</span>')+'</div></label>'
+  +'<label class="field"><span>Agents Linux standards à rattacher (facultatif)</span><div class="dr-site-choices">'
+  +(agentsHTML||'<span class="hint">Aucun agent Linux. Utiliser Agents → Déployer via SSH.</span>')+'</div></label>'
+  +'<div class="notice">Cette association ne rend pas les agents autonomes : ils continuent à contacter la console OrigamiTasks pour leurs tâches. '
+  +'La simulation ne coupe aucun nœud, aucune VM, aucun réseau et aucun stockage.</div>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer le site</button>'
+  +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal(site?'Modifier le site PRA · '+e(site.name):'Déclarer un site PRA',form,'',true);
+}
+function openDRSimulationForm(){
+ const sites=state.drSites||[];
+ if(sites.length<2){toast('Déclarer au moins deux sites avant de simuler une panne',false);return;}
+ const source=sites.find(x=>x.role==='primary')?.id||sites[0].id;
+ const target=sites.find(x=>x.role==='standby')?.id||sites[1].id;
+ const body='<form id="drSimulationForm"><div class="notice">'
+  +'<b>Simulation totalement virtuelle.</b> Aucun arrêt de nœud, commande Proxmox ou mise en route de copie. '
+  +'On affiche les prérequis manquants et la décision de sécurité en cas de panne.</div>'
+  +'<div class="form-grid">'
+  +selectField('Site supposé en panne','dr_source',sites.map(x=>[x.id,x.name+' ('+x.role+')']),source)
+  +selectField('Site de secours','dr_target',sites.map(x=>[x.id,x.name+' ('+x.role+')']),target)
+  +selectField('Scénario','dr_scenario',[
+   ['cluster_down','Cluster principal indisponible'],['network_partition','Coupure réseau entre sites'],
+   ['console_down','VM OrigamiTasks indisponible']
+  ],'cluster_down')+'</div><button class="btn primary" type="submit">Lancer la simulation sans risque</button></form>';
+ modal('Simulation de perte de site / cluster',body);
+}
+function showDRSimulationResult(result){
+ const lines=(result.checks||[]).map(c=>
+  '<tr><td>'+e(c.name)+'</td><td>'+e(c.pass?'Validé':'Bloquant')+'</td><td>'+e(c.detail)+'</td></tr>').join('');
+ modal('Simulation #'+e(result.simulation_id)+' · '+e(result.decision),
+  '<div class="notice error"><b>Aucune bascule effectuée.</b> '+e(result.conclusion)+'</div>'
+  +'<p>'+e(result.source.name)+' → '+e(result.target.name)+'</p>'
+  +'<table><thead><tr><th>Contrôle</th><th>Résultat</th><th>Explication</th></tr></thead><tbody>'+lines+'</tbody></table>'
+  +'<p class="hint">'+e(result.next_step)+'</p>',
+  '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
+}
+
 function proxmoxCAChoices(selected=''){
  const choices=[['','Autorités du système (CA publique)'],
     ...(state.proxmoxCAs||[]).map(item=>[item.id,item.subject+' · '+item.id.slice(0,12)])];
