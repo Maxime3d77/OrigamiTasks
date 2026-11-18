@@ -10,9 +10,18 @@ sid=$1; host=$2; did=$3; approve=$4; key=$5; port=$6; protection=$7
 [[ $sid =~ ^[1-9][0-9]{1,8}$ && $did =~ ^[1-9][0-9]{1,8}$ && $protection =~ ^[1-9][0-9]{0,8}$ ]] || die 'Invalid IDs'
 [[ $host =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]] || die 'Invalid target host'
 [[ $port =~ ^[0-9]{1,5}$ ]] && ((10#$port>=1 && 10#$port<=65535)) || die 'Invalid port'
-[[ $key =~ ^/[A-Za-z0-9_./-]+$ && -f $key && ! -L $key ]] || die 'Missing source-local key'
+if [[ "$key" == /proc/self/fd/* ]]; then
+  [[ "$key" =~ ^/proc/self/fd/[0-9]+$ && -r "$key" ]] || die 'Invalid ephemeral key'
+else
+  [[ $key =~ ^/[A-Za-z0-9_./-]+$ && -f $key && ! -L $key ]] || die 'Missing source-local key'
+fi
+ssh_pins=()
+if [[ -n "${PRA_PINNED_KNOWN_HOSTS:-}" ]]; then
+  [[ "$PRA_PINNED_KNOWN_HOSTS" =~ ^/proc/self/fd/[0-9]+$ ]] || die 'Invalid pinned host file'
+  ssh_pins=(-o "UserKnownHostsFile=$PRA_PINNED_KNOWN_HOSTS" -o GlobalKnownHostsFile=/dev/null)
+fi
 target="root@$host"
-remote(){ ssh -i "$key" -p "$port" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes "$target" "$1"; }
+remote(){ ssh -i "$key" -p "$port" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes "${ssh_pins[@]}" "$target" "$1"; }
 source_guard(){
   [[ -f "/etc/pve/nodes/$(hostname -s)/qemu-server/$sid.conf" ]] || die 'VM migrated: rerun on its current Proxmox node'
   [[ "$(qm status "$sid")" == 'status: stopped' ]] || die 'Source VM running'
@@ -71,7 +80,7 @@ while IFS= read -r slot; do
   disk_log=$(mktemp)
   rsync --checksum --no-whole-file --copy-devices --write-devices \
     --inplace --block-size=65536 --stats \
-    -e "ssh -i $key -p $port -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes" \
+    -e "ssh -i $key -p $port -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes${PRA_PINNED_KNOWN_HOSTS:+ -o UserKnownHostsFile=$PRA_PINNED_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null}" \
     "$srcdev" "$target:$dstdev" | tee "$disk_log"
   sent_this=$(awk '/^Total bytes sent:/ {gsub(/,/,"",$4);print $4}' "$disk_log" | tail -1)
   rm -f "$disk_log"
