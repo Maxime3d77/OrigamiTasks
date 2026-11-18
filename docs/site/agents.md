@@ -1,5 +1,17 @@
 # Linux and Windows agents — v0.3.0-rc1 preview
 
+## Autonomous DR site agents: design target, not yet available
+
+Current Linux Python/Windows PowerShell agents poll the OrigamiTasks controller over outbound HTTPS. If its VM is on SD and becomes unavailable, **they cannot receive new jobs**. These are not yet replication agents or failover arbitrators.
+
+Under **Proxmox servers and clusters → DR sites and agents**, administrators can **name sites**, set primary/standby roles, link **multiple Proxmox clusters per site** (with multiple nodes inside each cluster), and associate existing Linux agents. The shared iSCSI + LVM storage profile is **operator-declared**, not verification of Pure LUNs or consistency groups.
+
+The future design requires **standalone DR services**, SSH-installed using vault credentials onto **at least two independent servers per site** when redundancy is required; not necessarily on each PVE cluster node. Agents maintain locally signed policies, **mTLS** identity, durable checkpoints and ownership epochs. They should be able to continue replication during controller downtime, **but cannot promote a standby on their own**: an independent witness and verifiable effective SD fencing remain mandatory.
+
+Planned version management: **signed package** delivery and verification, compatibility checks, **one agent at a time** upgrades, service health checks and version rollback on failure. Freeze updates during a failover. If the controller is down, agents continue their last verified version and reject unsigned updates.
+
+**Important:** the existing DR site **Deploy SSH agent** button invokes only the **legacy agent installer**, which still uses `AGENT_DEPLOY_ALLOWED_HOSTS` and server approval settings. This does **not** create an autonomous PRA agent, or provide independent rolling updates; these remain separate engineering and validation milestones.
+
 OrigamiTasks includes **portable script agents**, not signed native binaries: Python 3.9+ on Linux with systemd (`agents/linux/agent.py`) and Windows PowerShell 5.1+ on Windows 10/11 or Server 2016+ (`agents/windows/agent.ps1`). Test on dedicated machines first. Agents make **outbound HTTPS** connections; they do not listen for inbound connections.
 
 ## Server configuration

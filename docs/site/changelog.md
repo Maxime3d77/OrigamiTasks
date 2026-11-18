@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.14-rc1 — 2026-11-17
+
+- **DR sites:** manage freely named sites directly from the Proxmox screen, with **primary / standby / other** role, multiple registered Proxmox clusters, existing Linux agents, and declared storage profiles (auto, shared iSCSI+LVM, ZFS, Ceph, PBS, other).
+- **Outage simulation:** **cluster unavailable**, **site network partition**, and **OrigamiTasks console unavailable**. All scenarios are virtual, never touching VMs, hypervisors, agents or storage. Failure checks and outcomes are auditable.
+- **Agents:** links to existing SSH deployment and shows existing agent versions and heartbeats. Current agents still depend on the central controller; they are **not autonomous DR agents**. Rolling updates, an independent witness, fencing and replication require later implementation and validation.
+- **Fail closed:** no REP_ standby can start from a simulation.
+
 ## 0.3.13-rc1 — 2026-11-17
 
 - **Proxmox discovery:** instant search by name, VMID, node, ID, status and storage; QEMU VM/LXC/node/storage filters, sort by name/type/VMID/node/status in either direction, 100-item pagination, API refresh. Existing per-VM DR assessment remains accessible.

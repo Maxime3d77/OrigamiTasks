@@ -1,5 +1,17 @@
 # Agents Linux et Windows — préversion v0.3.0-rc1
 
+## Agents PRA autonomes : architecture cible, non encore disponible
+
+Les agents actuels (Python Linux/PowerShell Windows) sollicitent la console OrigamiTasks en HTTPS pour recevoir leurs tâches. Si la VM de la console est sur SD et tombe, **ils ne peuvent plus recevoir de nouvelles commandes**. Ils ne sont pas encore des agents de réplication ni des arbitres de bascule.
+
+Dans la nouvelle section **Serveurs & clusters Proxmox → Sites PRA et agents**, on peut **nommer les sites**, leur attribuer le rôle principal/secours, rattacher **plusieurs clusters Proxmox par site** (chaque cluster possède plusieurs nœuds) et lier les agents Linux existants. Le profil iSCSI + LVM est **déclaratif** : il ne valide ni les LUNs Pure ni les groupes de cohérence.
+
+La cible future sera un **service PRA indépendant** de la console, installé par SSH avec une identité du coffre sur **au moins deux machines indépendantes par site** lorsque la haute disponibilité est recherchée (pas nécessairement un agent sur chaque nœud Proxmox). Les agents connaîtront localement leurs politiques signées, une identité **mTLS**, leurs derniers points de restauration et l'epoch de propriétaire. Ils devront pouvoir poursuivre la synchronisation si la console disparaît, **mais jamais décider seuls d'activer une VM** : témoin indépendant et preuve réelle de fencing de SD restent obligatoires.
+
+La gestion des mises à jour visée : téléchargement d'un paquet **signé**, vérification de l'empreinte et de la signature, contrôle de compatibilité protocole, distribution **agent par agent**, vérification du service et rollback de la version précédente si elle ne démarre pas. Pendant un failover, les mises à jour doivent être gelées. Si la console tombe, les agents conservent leur version opérationnelle et n'acceptent aucun exécutable non signé.
+
+**À ne pas confondre** : le bouton actuel **Déployer agent SSH** depuis le site PRA appelle l'installateur **standard**, qui utilise encore `AGENT_DEPLOY_ALLOWED_HOSTS` et les autorisations serveur existantes. Cela ne crée **pas** encore un agent PRA autonome, ni une chaîne de mise à jour indépendante. Cette fonctionnalité doit être développée et testée avant toute bascule automatique.
+
 OrigamiTasks intègre des **agents portables sous forme de scripts**, pas des exécutables natifs signés : Python 3.9+ sous Linux/systemd (`agents/linux/agent.py`) et PowerShell 5.1+ sous Windows 10/11 et Server 2016+ (`agents/windows/agent.ps1`). Faire la recette sur des machines dédiées. Les agents contactent le serveur en **HTTPS sortant** ; aucun port entrant ne leur est nécessaire.
 
 ## Configuration du serveur

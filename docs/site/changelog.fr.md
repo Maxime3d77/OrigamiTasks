@@ -1,5 +1,12 @@
 # Historique des modifications
 
+## 0.3.14-rc1 — 17 novembre 2026
+
+- **Sites PRA :** nouveau gestionnaire directement dans « Serveurs & clusters Proxmox », création de sites aux noms libres avec rôle **principal / secours / autre**, rattachement de plusieurs clusters Proxmox, des agents Linux existants et annotation du profil de stockage (auto, iSCSI+LVM, ZFS, Ceph, PBS ou autre).
+- **Simulation de panne :** scénarios **cluster indisponible**, **partition réseau** et **console OrigamiTasks indisponible**. Exécution entièrement virtuelle, sans action sur VM, agent, hyperviseur ou stockage ; résultats et contrôles bloquants tracés dans le journal d'audit.
+- **Agents :** lien vers l'installation SSH de l'agent standard et affichage du dernier contact/version. Cet agent dépend toujours du contrôle central et n'est pas un agent PRA autonome. Les mises à jour sans interruption, le témoin, le fencing et la réplication restent à implémenter et valider.
+- **Sécurité :** aucune décision de démarrage d'une copie REP_ n'est possible depuis le simulateur. Les VM ne sont jamais modifiées par la déclaration d'un site PRA.
+
 ## 0.3.13-rc1 — 17 novembre 2026
 
 - **Découverte Proxmox :** recherche instantanée sur nom, VMID, nœud, ID, statut et stockage ; filtres VM (QEMU), LXC, nœuds et stockages ; tri nom/type/VMID/nœud/état croissant ou décroissant ; pagination de 100 résultats et actualisation via API. L'évaluation PRA existante reste accessible pour les VM.

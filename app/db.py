@@ -100,6 +100,29 @@ CREATE TABLE IF NOT EXISTS datacenters (
  skip_tls_verification INTEGER NOT NULL DEFAULT 0,
  created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS dr_sites (
+ id INTEGER PRIMARY KEY,
+ name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+ role TEXT NOT NULL CHECK(role IN ('primary','standby','other')),
+ storage_profile TEXT NOT NULL DEFAULT 'auto',
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dr_site_datacenters (
+ site_id INTEGER NOT NULL REFERENCES dr_sites(id) ON DELETE CASCADE,
+ datacenter_id INTEGER NOT NULL UNIQUE REFERENCES datacenters(id) ON DELETE CASCADE,
+ PRIMARY KEY(site_id,datacenter_id)
+);
+CREATE TABLE IF NOT EXISTS dr_site_agents (
+ site_id INTEGER NOT NULL REFERENCES dr_sites(id) ON DELETE CASCADE,
+ agent_id INTEGER NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+ PRIMARY KEY(site_id,agent_id)
+);
+CREATE TABLE IF NOT EXISTS dr_simulations (
+ id INTEGER PRIMARY KEY, source_site_id INTEGER REFERENCES dr_sites(id) ON DELETE SET NULL,
+ target_site_id INTEGER REFERENCES dr_sites(id) ON DELETE SET NULL,
+ scenario TEXT NOT NULL, outcome TEXT NOT NULL,
+ result_json TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS runs (
  id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
  job_name TEXT NOT NULL, steps_snapshot TEXT NOT NULL, variables_json TEXT NOT NULL DEFAULT '{}',

@@ -245,3 +245,22 @@
 .proxmox-discovery-pager .tool-row{margin:0}
 @media(max-width:980px){.proxmox-discovery-tools{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:580px){.proxmox-discovery-tools{grid-template-columns:minmax(0,1fr)}.proxmox-discovery-pager{align-items:flex-start;flex-direction:column}}
+
+
+/* 0.3.14: readonly DR-site organization and fault simulation */
+.dr-sites-panel{margin:26px 0}
+.dr-sites-panel .panel-title{align-items:flex-start;flex-wrap:wrap}
+.dr-sites-panel .panel-title p{max-width:760px;line-height:1.55}
+.dr-sites-panel .tool-row{margin:0}
+.dr-sites-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+.dr-site-card{min-width:0}
+.dr-site-card .actions{display:flex;flex-wrap:wrap}
+.dr-site-card .actions .btn{flex:1 1 130px;white-space:normal}
+.dr-site-choices{border:1px solid var(--stroke);background:var(--panel2);padding:10px;border-radius:10px;display:flex;flex-direction:column;gap:6px;max-height:230px;overflow:auto}
+.dr-site-choice{display:flex;gap:10px;align-items:flex-start;cursor:pointer;padding:8px;border-radius:7px;font-size:12px}
+.dr-site-choice:hover{background:var(--glow)}
+.dr-site-choice input[type=checkbox]{width:17px;height:17px;flex:0 0 17px;margin:0}
+.dr-site-choice span{min-width:0;overflow-wrap:anywhere}
+.dr-sim-history{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--stroke);padding:9px 0;font-size:12px}
+.dr-sim-history small{margin-left:auto}
+@media(max-width:720px){.dr-sites-panel .panel-title{flex-direction:column}.dr-site-card .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}}
