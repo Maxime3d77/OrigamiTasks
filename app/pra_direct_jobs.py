@@ -68,8 +68,11 @@ def _agent(con,vm,node):
 
 
 def _validate(vm_id,kind,source_ssh_id,target_ssh_id):
-    if kind not in ("seed","offline_incremental"):
-        raise PRAJobError("Mode PRA invalide")
+    if kind!="seed":
+        raise PRAJobError(
+            "Réplication incrémentale à chaud non disponible : "
+            "l'ancien moteur à froid est désactivé pour ne jamais imposer l'arrêt de SD"
+        )
     if any(type(x) is not int or x<1 for x in (vm_id,source_ssh_id,target_ssh_id)):
         raise PRAJobError("Identités SSH et VM invalides")
     vm=dr_protected_vms._one(vm_id)
@@ -111,6 +114,57 @@ def queue(vm_id,kind,source_ssh_id,target_ssh_id,approved,actor):
     db.audit(actor,"pra.direct.queue",vm_id,"job="+str(record)+" mode="+kind)
     return {"job_id":record,"status":"queued","kind":kind,
             "source_node":node,"target_node":vm["target_node"]}
+
+
+def hot_preflight(vm_id,source_ssh_id):
+    """Read-only QMP inspection of the current live VM via selected vault SSH.
+
+    This never starts a backup, creates a bitmap, or touches replica disks.
+    """
+    from .executor import _ssh,credential
+    if type(source_ssh_id) is not int or source_ssh_id<1:
+        raise PRAJobError("Sélectionner une identité SSH source")
+    vm=dr_protected_vms._one(vm_id)
+    if vm["engine"]!="offline_copy":
+        raise PRAJobError("Protection de copie directe requise")
+    node=_vm_owner(vm)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}",node):
+        raise PRAJobError("Nœud Proxmox invalide")
+    with db.session() as con:
+        source=_host(con,vm["source_dc_id"],node)
+        agent=_agent(con,vm,node)
+        row=con.execute("SELECT kind FROM credentials WHERE id=?",(source_ssh_id,)).fetchone()
+    if not row or row["kind"]!="ssh":
+        raise PRAJobError("Identité SSH du coffre invalide")
+    client=None
+    try:
+        client,_=_ssh(None,{"host":source["fqdn"],"port":source["port"]},
+                      credential(source_ssh_id),30)
+        # Escalate before accessing the root-only installed PRA module.
+        script="python3 /usr/local/lib/origamitasks/pra/pra-hot-preflight.py "+str(vm["source_vmid"])
+        user=credential(source_ssh_id).get("username")
+        command=(script if user=="root" else "sudo -n "+script)
+        _,out,err=client.exec_command(command,timeout=25)
+        content=out.read(500000)
+        status=out.channel.recv_exit_status()
+        if status:
+            raise PRAJobError("Prétest QMP échoué (code "+str(status)+")")
+        result=json.loads(content)
+        if not isinstance(result,dict) or result.get("vmid")!=vm["source_vmid"]:
+            raise PRAJobError("Réponse QMP invalide")
+        # This field never authorizes a DR promotion or incremental write.
+        result["hot_incremental_ready"]=False
+        result["target_vm_must_be_stopped"]=True
+        result["source_node"]=node
+        result["requires_provider_implementation"]=True
+        return result
+    except PRAJobError:
+        raise
+    except Exception:
+        raise PRAJobError("Prétest QMP impossible sur le nœud source") from None
+    finally:
+        if client:
+            client.close()
 
 
 def list_jobs(vm_id):
