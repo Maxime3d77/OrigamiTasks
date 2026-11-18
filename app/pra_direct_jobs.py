@@ -162,9 +162,10 @@ try:
  env=os.environ.copy()
  env["PRA_PINNED_KNOWN_HOSTS"]="/proc/self/fd/"+str(h)
  if data["kind"]=="seed":
-  args.extend(["root","/proc/self/fd/"+str(k)])
+  args.extend([data["target_user"],"/proc/self/fd/"+str(k)])
  else:
   args.insert(4,"/proc/self/fd/"+str(k))
+  args.append(data["target_user"])
  child=subprocess.Popen(["bash",script,*args],env=env,pass_fds=(k,h))
  raise SystemExit(child.wait())
 finally:
@@ -213,8 +214,9 @@ def _execute(job,vm,source,target):
     from . import host_keys
     source_cred=credential(job["source_credential_id"])
     target_cred=credential(job["target_credential_id"])
-    if str(target_cred.get("username") or "")!="root":
-        raise PRAJobError("Le pilote actuel requiert une identité SSH root sur le nœud cible")
+    target_user=str(target_cred.get("username") or "")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,63}",target_user):
+        raise PRAJobError("Utilisateur SSH du coffre invalide")
     target_key=_plain_key(target_cred)
     pinned=_known_host_line(target["fqdn"],target["port"])
     # Validate the vault identity independently on BOTH endpoints before
@@ -224,11 +226,13 @@ def _execute(job,vm,source,target):
     try:
         try:
             client_target,_=_ssh(None,{"host":target["fqdn"],"port":target["port"]},target_cred,40)
-            dest_check="test \"$(id -u)\" -eq 0; command -v qm; command -v pvesm"
+            dest_check="command -v qm; command -v pvesm"
             if job["kind"]=="offline_incremental":
                 dest_check+="; test \"$(qm status '"+str(vm["target_vmid"])+"')\" = 'status: stopped'"
             else:
                 dest_check+="; ! qm config '"+str(vm["target_vmid"])+"' >/dev/null 2>&1"
+            if target_user!="root":
+                dest_check="sudo -n sh -c "+shlex.quote(dest_check)
             _check_remote(client_target,dest_check)
         except PRAJobError:
             raise
@@ -259,7 +263,7 @@ def _execute(job,vm,source,target):
                   "--confirm-offline",str(target["port"]),str(vm["id"])]
         package={
             "kind":job["kind"],"args":args,
-            "key":target_key,"known_hosts":pinned
+            "key":target_key,"known_hosts":pinned,"target_user":target_user
         }
         # Script text contains no secret. The key and pinned host record are
         # provided exclusively on the encrypted SSH stdin, never on argv.
@@ -304,9 +308,12 @@ def _execute(job,vm,source,target):
             raise PRAJobError("Transfert terminé sans confirmation explicite")
         # Check once more that a target exists, is stopped and cannot
         # reboot automatically; do not allow failover on this evidence.
-        _check_remote(client_target,"test \"$(qm status '"+str(vm["target_vmid"])+
+        final_check="test \"$(qm status '"+str(vm["target_vmid"])+
                       "')\" = 'status: stopped'; test \"$(qm config '"+str(vm["target_vmid"])+
-                      "' | sed -n 's/^onboot: //p')\" != 1")
+                      "' | sed -n 's/^onboot: //p')\" != 1"
+        if target_user!="root":
+            final_check="sudo -n sh -c "+shlex.quote(final_check)
+        _check_remote(client_target,final_check)
         return {"output":text_out[-1200:]}
     finally:
         if client_target: client_target.close()
