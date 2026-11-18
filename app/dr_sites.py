@@ -27,7 +27,7 @@ def _id_list(data, maximum, label):
 
 def _validated(payload):
     if not isinstance(payload, dict) or set(payload)-{
-        "name", "role", "storage_profile", "datacenter_ids", "agent_ids"
+        "name", "role", "storage_profile", "datacenter_ids", "agent_ids", "plan_id"
     }:
         raise DRSiteError("Configuration du site PRA invalide")
     name = str(payload.get("name") or "").strip()
@@ -41,13 +41,16 @@ def _validated(payload):
     agentids = _id_list(payload.get("agent_ids", []), 40, "Agents")
     if not dcids:
         raise DRSiteError("Associer au moins un cluster Proxmox déclaré")
-    return name,role,storage,dcids,agentids
+    plan_id=payload.get("plan_id")
+    if plan_id is not None and (type(plan_id) is not int or plan_id<=0):
+        raise DRSiteError("Groupe PRA invalide")
+    return name,role,storage,dcids,agentids,plan_id
 
 
 def list_sites():
     with db.session() as con:
         sites = [dict(s) for s in con.execute(
-            "SELECT id,name,role,storage_profile,created_at,updated_at FROM dr_sites ORDER BY name"
+            "SELECT id,plan_id,name,role,storage_profile,created_at,updated_at FROM dr_sites ORDER BY name"
         )]
         for site in sites:
             site["datacenters"]=[dict(r) for r in con.execute(
@@ -70,8 +73,10 @@ def list_sites():
 
 
 def save_site(payload, existing_id=None):
-    name,role,storage,dcids,agentids=_validated(payload)
+    name,role,storage,dcids,agentids,plan_id=_validated(payload)
     with db.session() as con:
+        if plan_id is not None and not con.execute("SELECT 1 FROM dr_plans WHERE id=?",(plan_id,)).fetchone():
+            raise DRSiteError("Groupe PRA sélectionné introuvable")
         if existing_id is not None:
             old=con.execute("SELECT id FROM dr_sites WHERE id=?",(existing_id,)).fetchone()
             if not old:
@@ -99,15 +104,15 @@ def save_site(payload, existing_id=None):
         try:
             if existing_id is None:
                 cursor=con.execute(
-                    "INSERT INTO dr_sites(name,role,storage_profile,created_at,updated_at) "
-                    "VALUES(?,?,?,?,?)",(name,role,storage,db.now(),db.now())
+                    "INSERT INTO dr_sites(name,role,storage_profile,plan_id,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?)",(name,role,storage,plan_id,db.now(),db.now())
                 )
                 site_id=cursor.lastrowid
             else:
                 site_id=existing_id
                 con.execute(
-                    "UPDATE dr_sites SET name=?,role=?,storage_profile=?,updated_at=? WHERE id=?",
-                    (name,role,storage,db.now(),site_id)
+                    "UPDATE dr_sites SET name=?,role=?,storage_profile=?,plan_id=?,updated_at=? WHERE id=?",
+                    (name,role,storage,plan_id,db.now(),site_id)
                 )
             con.execute("DELETE FROM dr_site_datacenters WHERE site_id=?",(site_id,))
             con.execute("DELETE FROM dr_site_agents WHERE site_id=?",(site_id,))
@@ -155,6 +160,10 @@ def simulate(payload, actor):
     if source_id not in site_map or target_id not in site_map:
         raise DRSiteError("Site source ou destination inconnu")
     source,target=site_map[source_id],site_map[target_id]
+    if source["plan_id"]!=target["plan_id"]:
+        raise DRSiteError(
+            "Simulation refusée : sites appartenant à deux groupes PRA différents (PP / PROD)."
+        )
     checks=[
         {"name":"Sites", "pass":source["role"]=="primary" and target["role"]=="standby",
          "detail":"Source principale et cible secours associées" if source["role"]=="primary" and target["role"]=="standby" else "Rôles primary/standby à corriger"},

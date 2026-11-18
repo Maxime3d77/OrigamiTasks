@@ -19,6 +19,29 @@ class DeploymentError(ValueError):
     pass
 
 
+def public_failure(exc):
+    """Categorize errors without exposing SSH stderr, credentials or tokens."""
+    from fastapi import HTTPException
+    if isinstance(exc,DeploymentError):
+        # All DeploymentError messages are authored locally (never SSH output).
+        return str(exc)[:250]
+    if isinstance(exc,HTTPException):
+        if exc.status_code==403:
+            return "Autorisation refusée : vérifier la stratégie de déploiement ou les droits de l'identité SSH"
+        if exc.status_code==422:
+            return "Paramètres d'installation invalides (FQDN, port, coffre ou URL HTTPS)"
+    kind=type(exc).__name__
+    if kind in ('AuthenticationException','BadAuthenticationType','PasswordRequiredException'):
+        return "Authentification SSH refusée : vérifier la clé et l'utilisateur du coffre"
+    if kind in ('BadHostKeyException','SSHException'):
+        return "Vérification SSH échouée : clé d'hôte ou négociation SSH à contrôler"
+    if isinstance(exc,(TimeoutError,ConnectionError,OSError)):
+        return "Connexion SSH impossible : vérifier DNS, port 22, réseau et pare-feu"
+    if isinstance(exc,RuntimeError):
+        return "Commande d'installation distante en échec : vérifier droits sudo -n, systemd et Python 3"
+    return "Installation interrompue au stade SSH ou installation ("+kind[:45]+") : consulter les journaux serveur"
+
+
 def _target(raw):
     if not isinstance(raw, dict) or set(raw) - {'server_id', 'host'}:
         raise DeploymentError("Cible invalide : server_id ou host")
@@ -131,7 +154,13 @@ def queue(payload, actor):
 def list_batches():
     with db.session() as con:
         groups = [dict(x) for x in con.execute(
-            "SELECT * FROM agent_deploy_batches ORDER BY id DESC LIMIT 25")]
+            "SELECT b.*, p.name AS dr_plan_name, s.name AS dr_site_name, "
+            "dc.name AS datacenter_name FROM agent_deploy_batches b "
+            "LEFT JOIN datacenters dc ON dc.id=b.proxmox_datacenter_id "
+            "LEFT JOIN dr_site_datacenters link ON link.datacenter_id=dc.id "
+            "LEFT JOIN dr_sites s ON s.id=link.site_id "
+            "LEFT JOIN dr_plans p ON p.id=s.plan_id "
+            "ORDER BY b.id DESC LIMIT 25")]
         targets = [dict(x) for x in con.execute(
             "SELECT id,batch_id,host,port,status,agent_id,error,started_at,finished_at "
             "FROM agent_deploy_targets ORDER BY id DESC LIMIT 2500")]
@@ -244,8 +273,9 @@ def process_one():
                             (json.dumps(roles,separators=(',',':'),sort_keys=True),result['id'])
                         )
     except Exception as exc:
-        # Never return SSH failure messages (they may contain secrets).
-        error = 'Installation échouée ('+type(exc).__name__+') ; vérifier SSH, sudo et journaux'
+        # Never reveal exception strings from SSH, SFTP or remote stderr:
+        # they can contain credentials or attacker-controlled text.
+        error = public_failure(exc)
     with db.session() as con:
         con.execute("UPDATE agent_deploy_targets SET status=?,agent_id=?,error=?,finished_at=? "
                     "WHERE id=?", ('success' if result else 'failed', result['id'] if result else None,

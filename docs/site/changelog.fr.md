@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.19-rc1 — 17 novembre 2026
+
+- **Isolation PRA PP/PROD** : création de **groupes PRA indépendants** entièrement nommables et modifiables depuis la page Proxmox (ex. Préproduction, Production, Recette). Chaque site source/secours est affecté à un groupe. Les clusters conservent une appartenance exclusive à un site. Les simulations entre groupes différents sont explicitement refusées par l'API et par l'interface ; aucune action sur l'infrastructure.
+- **Migration non destructive** : les sites existants apparaissent comme « Sites existants à classer » jusqu'à affectation explicite. Aucune réaffectation automatique à PP ou Production. Un groupe contenant des sites ne peut pas être supprimé. Les groupes SSH Proxmox demeurent liés à leurs clusters propres.
+- **Erreurs d'agents exploitables** : les échecs d'installation par hôte distinguent maintenant une **empreinte SSH non approuvée**, une **authentification SSH refusée**, une **connexion impossible**, un problème de **droits sudo/systemd/Python** ou un refus de paramètres. Les erreurs distantes brutes, les tokens et le contenu de clés privées ne sont pas transmis au navigateur.
+- **Projet générique** : pas d'URL d'entreprise en valeur par défaut ; le paramètre HTTPS de chaque instance est vierge jusqu'à configuration par son administrateur. Les exemples utilisent `example.org` et les groupes PRA sont personnalisables.
+- **Recette nécessaire** : les cinq échecs de l'ancien lot ne contiennent pas le diagnostic précis ; lancer un **nouvel essai sur un seul nœud** après vérification de la clé d'hôte SSH. Aucune réplication / bascule PRA réelle dans cette version.
+
 ## 0.3.18-rc1 — 17 novembre 2026
 
 - **Correction du déploiement groupé :** l'adresse de contrôle des agents n'est plus obligatoirement `AGENT_SERVER_URL` dans le `.env`. Nouveau formulaire **Agents → Paramètres de connexion** pour enregistrer l'origine HTTPS vue par les agents derrière Nginx ; repli vers l'ancienne variable si disponible.

@@ -1,5 +1,19 @@
 # Proxmox VE : découverte et reprise d'activité
 
+### Isoler les environnements PP / Production via les groupes PRA (0.3.19)
+
+Sous **DC Proxmox → Groupes PRA indépendants**, créer des groupes aux noms entièrement personnalisables, par exemple **Préproduction** et **Production**. Dans chaque groupe, créer deux sites : le site principal et le site de secours. Un site peut contenir plusieurs clusters ; un cluster ne peut appartenir qu'à un seul site. Il est ainsi impossible d'affecter silencieusement le même cluster au groupe PP et au groupe PROD. Les simulations ne peuvent sélectionner que des sites appartenant **au même groupe PRA**, et l'API refuse un croisement même si une requête est construite manuellement.
+
+Le nom du **groupe PRA** n'est pas le nom physique d'un datacenter ou d'un cluster : c'est un **périmètre logique de protection** destiné à empêcher les mélanges. Pour distinguer des clusters ou sites portant le même rôle, donner des noms uniques aux sites (ex. Site principal PP, Site principal Production). Les groupes permettent d'utiliser les mêmes rôles « principal » et « secours » dans plusieurs environnements.
+
+Les sites créés avant 0.3.19 sont conservés, affichés dans **Sites existants à classer** et peuvent être affectés à un groupe en cliquant sur **Modifier**. Aucun transfert automatique n'a lieu lors de la migration. La création du groupe et la déclaration des sites ne déclenchent ni réplication ni déplacement de VM.
+
+### Dépannage des installations d'agents Proxmox (0.3.19)
+
+Après une installation groupée, l'écran **Agents → Déploiements groupés** affiche le résultat par nœud. Si un agent est refusé, rechercher le nouveau message précis : **empreinte SSH inconnue** (comparer avec celle du serveur et approuver), **authentification refusée** (clé et utilisateur du coffre), **connexion impossible** (DNS/port/pare-feu), ou **installation distante en échec** (sudo non interactif, Python 3 et systemd). Les messages ne renvoient pas de secrets SSH.
+
+Avant une nouvelle tentative, vérifier sur un seul nœud non critique : la clé hôte SSH doit être approuvée, le compte du coffre doit réussir une connexion SSH/SFTP, et la commande `sudo -n true` doit fonctionner si le compte n'est pas root. Les nœuds Proxmox ont plusieurs services critiques : ne pas modifier les droits sudo globalement ni installer sur tous les nœuds avant la recette. Les anciens lots enregistrent seulement le message générique précédemment disponible ; leurs causes exactes ne peuvent être reconstituées.
+
 ### URL HTTPS de contrôle pour le déploiement des agents (0.3.18)
 
 Le déploiement sur les nœuds Proxmox exige que chaque agent puisse joindre la console via son nom DNS HTTPS, et **non** via `127.0.0.1:8091` (adresse de liaison interne Nginx/Docker). Configurer une fois **Agents → Paramètres de connexion des agents**, par exemple `https://origamitasks.example.org`. L'assistant de déploiement du cluster affiche l'URL et propose de la configurer si elle manque. L'ancien `AGENT_SERVER_URL` dans `.env` n'est plus nécessaire pour le déploiement cluster si l'URL est enregistrée dans la console.

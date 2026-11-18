@@ -117,8 +117,16 @@ CREATE TABLE IF NOT EXISTS proxmox_ssh_nodes (
  PRIMARY KEY(datacenter_id,server_id),
  UNIQUE(datacenter_id,node_name)
 );
+CREATE TABLE IF NOT EXISTS dr_plans (
+ id INTEGER PRIMARY KEY,
+ name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+ description TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS dr_sites (
  id INTEGER PRIMARY KEY,
+ plan_id INTEGER REFERENCES dr_plans(id) ON DELETE RESTRICT,
  name TEXT NOT NULL UNIQUE COLLATE NOCASE,
  role TEXT NOT NULL CHECK(role IN ('primary','standby','other')),
  storage_profile TEXT NOT NULL DEFAULT 'auto',
@@ -220,6 +228,7 @@ def initialize():
             ("datacenters", "skip_tls_verification", "INTEGER NOT NULL DEFAULT 0"),
             ("agents", "cpu_percent", "REAL"),
             ("agents", "memory_mb", "REAL"),
+            ("dr_sites", "plan_id", "INTEGER REFERENCES dr_plans(id) ON DELETE RESTRICT"),
             ("agents", "uninstalled_at", "TEXT"),
             ("agents", "installed_controller_url", "TEXT"),
             ("agents", "modules_json", "TEXT NOT NULL DEFAULT '{\"standard\":true,\"proxmox\":false,\"pra\":false}'"),

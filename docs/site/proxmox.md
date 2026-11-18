@@ -1,5 +1,17 @@
 # Proxmox VE: discovery and disaster recovery
 
+### Keep staging and production DR environments isolated (0.3.19)
+
+Under **Proxmox DC → Independent DR Groups**, create any number of custom protection scopes, e.g. **Staging** and **Production**, then associate primary and standby **sites** with each scope. Sites can contain multiple registered clusters; a cluster belongs to only one site. Simulations can only use sites within the **same DR group**, enforced both by the UI and backend.
+
+DR groups are logical protection boundaries, not physical cluster names. Site names currently remain globally unique; use distinct site names such as *Staging primary* and *Production primary*. Existing sites are preserved in **Unassigned sites** until an administrator explicitly classifies them. The migration does not silently move workloads or configure replication.
+
+### Troubleshoot agent installation on Proxmox nodes (0.3.19)
+
+**Agents → Bulk deployments** now shows actionable but sanitized errors per node: untrusted SSH host fingerprint, refused SSH identity, unreachable host/DNS/network/firewall, or failed remote prerequisite such as root/noninteractive sudo, Python 3 and systemd. No raw remote stderr or SSH secrets are displayed.
+
+Before retrying, approve the server fingerprint after out-of-band verification, check SSH and SFTP connectivity and verify `sudo -n true` if not using root. Retry on **one non-critical PVE node** before provisioning a fleet. Previously failed batches cannot retrospectively recover error detail that was never recorded.
+
 ### Agent-facing HTTPS controller URL for PVE rollouts (0.3.18)
 
 Proxmox node rollout requires every agent to contact the controller via its reachable HTTPS DNS name, **not** the internal Nginx/Docker binding `127.0.0.1:8091`. Set **Agents → Connection settings** once, e.g. `https://origamitasks.example.org`; the wizard displays it and links to settings if missing. The legacy `AGENT_SERVER_URL` in `.env` is not required for managed cluster rollouts after saving this value in the UI.

@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +10,7 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
@@ -278,15 +278,15 @@ function catalog(){const entries=state.catalog.available||[];const groups=[...ne
 
 function agentConnectionSettingsPanel(){
  const settings=state.agentSettings||{};
- const url=settings.controller_url||(location.protocol==='https:'?location.origin:'');
+ const url=settings.controller_url||'';
  const configured=!!settings.configured;
  return '<section class="panel agent-settings-panel"><div class="panel-title"><div><h2>Paramètres de connexion des agents</h2>'
   +'<p class="hint">URL HTTPS de la console accessible depuis les machines Linux et Windows, via le proxy inverse Nginx.</p></div>'
   +'<span class="chip '+(configured?'tag':'')+'">'+(configured?'Configurée · '+e(settings.source):'URL manquante')+'</span></div>'
   +'<form id="agentConnectionSettingsForm">'
   +'<label class="field"><span>Adresse HTTPS utilisée par les agents</span>'
-  +'<input name="controller_url" type="url" autocomplete="url" spellcheck="false" placeholder="https://origamitasks.example.org" value="'+e(url)+'" required></label>'
-  +'<p class="hint">La valeur proposée reprend l’adresse HTTPS du navigateur ; vérifier qu’elle est accessible depuis les hôtes distants. Saisir uniquement le FQDN HTTPS, sans /api, sans 127.0.0.1:8091, sans chemin. '
+  +'<input name="controller_url" type="url" autocomplete="off" spellcheck="false" placeholder="https://controller.example.org" value="'+e(url)+'" required></label>'
+  +'<p class="hint">Chaque installation OrigamiTasks configure son propre FQDN HTTPS accessible par ses agents. Saisir uniquement l’origine HTTPS, sans /api, identifiants, ni adresse localhost / 127.0.0.1. '
   +'L’URL interne d’écoute du conteneur ne doit jamais être écrite dans les agents distants. '
   +'Les certificats TLS doivent être reconnus par chaque hôte agent (installer la CA interne si nécessaire).</p>'
   +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer l’URL des agents</button>'
@@ -423,7 +423,11 @@ function agentBatchPanel(){
   const stateLabel=batch.status==='success'?'Terminé':batch.status==='completed_with_errors'?'Terminé avec erreurs':batch.status==='interrupted'?'Interrompu':'En cours';
   const rows=batch.targets.map(t=>'<div class="agent-batch-host"><strong>'+e(t.host)+':'+e(t.port)+'</strong><span class="chip">'+e(t.status)+'</span>'
    +(t.error?'<small class="hint">'+e(t.error)+'</small>':'')+'</div>').join('');
-  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong><span>'+e(stateLabel)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
+  const planName=batch.dr_plan_name||'';
+  const scope=batch.datacenter_name
+   ?'<small class="hint">'+(planName?'PRA : '+e(planName)+' · ':'PRA non classé · ')+e(batch.datacenter_name)+'</small>'
+   :'<small class="hint">Déploiement générique (hors groupe PRA)</small>';
+  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong>'+scope+'<span>'+e(stateLabel)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
    +'<div class="agent-batch-hosts">'+rows+'</div></details>';
  }).join('');
 }
@@ -457,7 +461,7 @@ function openProxmoxDiscovery(dcId,response){
  const ordering=[['name','Nom / VMID'],['type','Type'],['vmid','VMID'],['node','Nœud'],['status','État']];
  const content='<p class="hint">Données obtenues en lecture seule via l’API Proxmox. Le filtre et le tri s’appliquent à toutes les ressources récupérées.</p>'
    +'<div class="proxmox-discovery-tools">'
-   +'<label class="field"><span>Rechercher nom, VMID, nœud ou état</span><input id="proxmoxResourceSearch" type="search" placeholder="Ex. 106, postgres, sd-cardano…"></label>'
+   +'<label class="field"><span>Rechercher nom, VMID, nœud ou état</span><input id="proxmoxResourceSearch" type="search" placeholder="Ex. 106, postgres, pve-node01…"></label>'
    +'<label class="field"><span>Type de ressource</span><select id="proxmoxResourceType">'+option(options,'all')+'</select></label>'
    +'<label class="field"><span>Trier par</span><select id="proxmoxResourceSort">'+option(ordering,'name')+'</select></label>'
    +'<label class="field"><span>Ordre</span><select id="proxmoxResourceDirection">'+option([['asc','Croissant'],['desc','Décroissant']],'asc')+'</select></label></div>'
@@ -533,73 +537,102 @@ function datacenters(){
 }
 
 function renderDRSitesPanel(){
- const sites=state.drSites||[];
- const cards=sites.map(site=>{
+ const plans=state.drPlans||[],sites=state.drSites||[];
+ const card=site=>{
   const clusters=(site.datacenters||[]).map(dc=>e(dc.name)).join(' · ')||'—';
   const ags=(site.agents||[]).map(agent=>e(agent.name)+' ('+e(agent.status)+')').join(' · ')||'Aucun';
   const role=site.role==='primary'?'Principal':site.role==='standby'?'Secours':'Autre';
   const storage={auto:'À détecter',iscsi_lvm:'iSCSI + LVM',zfs:'ZFS',ceph:'Ceph',pbs:'PBS',other:'Autre'}[site.storage_profile]||site.storage_profile;
   return '<div class="job-card dr-site-card"><div class="job-card-head"><span class="chip tag">'+e(role)+'</span><span class="chip">'+e(storage)+'</span></div>'
-    +'<h3>'+e(site.name)+'</h3><p>Clusters : '+clusters+'</p><p class="hint">Agents standards associés : '+ags+'</p>'
-    +'<p class="hint"><b>Mode PRA :</b> agent unique modulaire et superviseur passif ; réplication / bascule non disponibles.</p>'
+    +'<h3>'+e(site.name)+'</h3><p>Clusters : '+clusters+'</p><p class="hint">Agents associés : '+ags+'</p>'
+    +'<p class="hint">PRA : préparation uniquement, aucune réplication / bascule opérationnelle</p>'
     +'<div class="actions"><button class="btn tiny" data-action="dr-site-edit" data-id="'+site.id+'">Modifier</button>'
     +'<button class="btn tiny" data-action="dr-site-fleet" data-id="'+site.id+'">Déployer sur les nœuds</button>'
     +'<button class="btn tiny danger" data-action="dr-site-delete" data-id="'+site.id+'">Supprimer</button></div></div>';
- }).join('');
+ };
+ const group=(plan,items)=>
+  '<div class="dr-plan-section"><div class="panel-title"><div><h3>'+e(plan.name)+'</h3>'
+  +'<p class="hint">'+e(plan.description||'Périmètre de protection indépendant')+' · '+items.length+' site(s)</p></div>'
+  +'<div class="tool-row"><button class="btn tiny" data-action="dr-site-new" data-plan-id="'+plan.id+'">＋ Site</button>'
+  +'<button class="btn tiny" data-action="dr-plan-edit" data-id="'+plan.id+'">Modifier le groupe</button>'
+  +'<button class="btn tiny danger" data-action="dr-plan-delete" data-id="'+plan.id+'">Supprimer</button></div></div>'
+  +'<div class="workflow-grid dr-sites-grid">'+(items.map(card).join('')||'<p class="hint">Aucun site associé. Ajouter les clusters principal et secours de ce périmètre.</p>')+'</div></div>';
+ const legacy=sites.filter(x=>x.plan_id==null);
  const history=(state.drSimulations||[]).slice(0,5).map(item=>
   '<div class="dr-sim-history"><span class="chip">#'+e(item.id)+' · '+e(item.scenario)+'</span>'
   +'<span>'+e(item.result.source.name)+' → '+e(item.result.target.name)+'</span>'
   +'<span class="status failed">'+e(item.outcome)+'</span>'
   +'<small class="muted">'+e(dt(item.created_at))+'</small></div>').join('');
- return '<section class="panel dr-sites-panel"><div class="panel-title"><div><h2>Sites PRA et agents</h2>'
-  +'<p class="hint">Associer plusieurs clusters par site, affecter les agents existants et configurer le stockage. '
-  +'Le service PRA autonome et les mises à jour d’agents restent à développer.</p></div>'
-  +'<div class="tool-row"><button class="btn primary" data-action="dr-site-new">＋ Déclarer un site</button>'
+ return '<section class="panel dr-sites-panel"><div class="panel-title"><div><h2>Groupes PRA indépendants</h2>'
+  +'<p class="hint">Créer autant de périmètres PP, Production, Recette ou autres que nécessaire. '
+  +'Chaque groupe contient ses propres sites et clusters. Aucune association ou simulation inter-groupes.</p></div>'
+  +'<div class="tool-row"><button class="btn primary" data-action="dr-plan-new">＋ Nouveau groupe PRA</button>'
   +'<button class="btn" data-action="dr-simulation-form">Simuler une panne (sans action)</button></div></div>'
-  +'<div class="workflow-grid dr-sites-grid">'+(cards||'<p class="hint">Aucun site PRA configuré.</p>')+'</div>'
+  +(plans.map(p=>group(p,sites.filter(s=>s.plan_id===p.id))).join('')||'<div class="notice">Créer un premier groupe PRA pour séparer les environnements.</div>')
+  +(legacy.length?'<div class="dr-plan-section"><h3>Sites existants à classer</h3><div class="notice">'
+   +'Ces sites ont été créés avant les groupes PRA. Ouvrir « Modifier » pour leur attribuer un groupe '
+   +'sans perdre leur configuration. Ne pas les mélanger avec de nouveaux groupes.</div>'
+   +'<div class="workflow-grid dr-sites-grid">'+legacy.map(card).join('')+'</div></div>':'')
   +'<h3>Dernières simulations</h3>'+(history||'<p class="hint">Aucune simulation effectuée.</p>')+'</section>';
 }
-function openDRSiteForm(siteId=null){
+function openDRPlanForm(id=null){
+ const plan=(state.drPlans||[]).find(x=>x.id===Number(id));
+ const form='<form id="drPlanForm" data-id="'+(plan?.id||'')+'">'
+ +field('Nom du groupe PRA','dr_plan_name',plan?.name||'','text')
+ +field('Description (facultatif)','dr_plan_description',plan?.description||'','text')
+ +'<p class="hint">Exemples génériques : Préproduction, Production, Recette. Un groupe est un périmètre isolé, pas un cluster physique.</p>'
+ +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer le groupe</button>'
+ +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal(plan?'Modifier le groupe PRA':'Créer un groupe PRA indépendant',form,'',true);
+}
+function openDRSiteForm(siteId=null,presetPlanId=null){
  const site=(state.drSites||[]).find(x=>x.id===Number(siteId)),selectedDCs=new Set((site?.datacenters||[]).map(x=>x.id)),
  selectedAgents=new Set((site?.agents||[]).map(x=>x.id));
+ const plans=state.drPlans||[];
+ if(!plans.length){toast('Créer un groupe PRA avant de déclarer les sites',false);return}
  const checkboxes=(list,field,selected,valueLabel)=>
   list.map(item=>'<label class="dr-site-choice"><input type="checkbox" name="'+field+'" value="'+item.id+'" '
    +(selected.has(item.id)?'checked':'')+'><span>'+e(valueLabel(item))+'</span></label>').join('');
  const dcs=checkboxes(state.datacenters,'dr_dc',selectedDCs,x=>x.name+' · '+x.url);
  const allAgents=(state.agents||[]).filter(x=>x.platform==='linux'&&!x.revoked);
- const agentsHTML=checkboxes(allAgents,'dr_agent',selectedAgents,x=>x.name+' · '+(x.hostname||'non enrôlé')+' · '+(x.version||'version inconnue'));
+ const agentsHTML=checkboxes(allAgents,'dr_agent',selectedAgents,x=>x.name+' · '+(x.hostname||'non enrôlé'));
+ const chosen=site?.plan_id||presetPlanId||plans[0].id;
  const form='<form id="drSiteForm" data-id="'+(site?.id||'')+'"><div class="form-grid">'
+  +selectField('Groupe PRA (isolation PP / Production)','dr_plan',plans.map(p=>[p.id,p.name]),chosen)
   +field('Nom du site','dr_site_name',site?.name||'')
   +selectField('Rôle du site','dr_role',[['primary','Principal / actif'],['standby','Secours / standby'],['other','Autre']],site?.role||'other')
-  +selectField('Profil de stockage (déclaratif, à vérifier)','dr_storage',[
-   ['auto','Détection à réaliser'],['iscsi_lvm','iSCSI sur LVM partagé'],['zfs','ZFS'],['ceph','Ceph'],['pbs','Proxmox Backup Server'],['other','Autre']
+  +selectField('Profil de stockage (déclaratif)','dr_storage',[
+   ['auto','À détecter'],['iscsi_lvm','iSCSI + LVM'],['zfs','ZFS'],['ceph','Ceph'],['pbs','PBS'],['other','Autre']
    ],site?.storage_profile||'auto')+'</div>'
-  +'<label class="field"><span>Clusters ou serveurs Proxmox déjà déclarés</span><div class="dr-site-choices">'
-  +(dcs||'<span class="hint">Déclarer un DC Proxmox avant le site.</span>')+'</div></label>'
-  +'<label class="field"><span>Agents Linux standards à rattacher (facultatif)</span><div class="dr-site-choices">'
-  +(agentsHTML||'<span class="hint">Aucun agent Linux. Utiliser Agents → Déployer via SSH.</span>')+'</div></label>'
-  +'<div class="notice">Cette association ne rend pas les agents autonomes : ils continuent à contacter la console OrigamiTasks pour leurs tâches. '
-  +'La simulation ne coupe aucun nœud, aucune VM, aucun réseau et aucun stockage.</div>'
+  +'<label class="field"><span>Clusters Proxmox de ce site</span><div class="dr-site-choices">'
+  +(dcs||'<span class="hint">Déclarer d’abord un cluster Proxmox.</span>')+'</div></label>'
+  +'<label class="field"><span>Agents Linux du site (facultatif)</span><div class="dr-site-choices">'
+  +(agentsHTML||'<span class="hint">Les agents pourront être installés ensuite depuis le cluster.</span>')+'</div></label>'
+  +'<div class="notice">Chaque cluster ne peut appartenir qu’à un seul site, donc un seul groupe PRA. '
+  +'Les simulations entre groupes différents sont interdites. Aucune copie de VM n’est créée.</div>'
   +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer le site</button>'
   +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
- modal(site?'Modifier le site PRA · '+e(site.name):'Déclarer un site PRA',form,'',true);
+ modal(site?'Modifier le site · '+e(site.name):'Déclarer un site PRA',form,'',true);
 }
 function openDRSimulationForm(){
- const sites=state.drSites||[];
- if(sites.length<2){toast('Déclarer au moins deux sites avant de simuler une panne',false);return;}
+ const plans=(state.drPlans||[]).filter(p=>(state.drSites||[]).filter(s=>s.plan_id===p.id).length>=2);
+ if(!plans.length){toast('Créer un groupe PRA avec au moins deux sites avant de simuler',false);return}
+ const plan=plans[0];
+ const sites=(state.drSites||[]).filter(s=>s.plan_id===plan.id);
  const source=sites.find(x=>x.role==='primary')?.id||sites[0].id;
  const target=sites.find(x=>x.role==='standby')?.id||sites[1].id;
- const body='<form id="drSimulationForm"><div class="notice">'
-  +'<b>Simulation totalement virtuelle.</b> Aucun arrêt de nœud, commande Proxmox ou mise en route de copie. '
-  +'On affiche les prérequis manquants et la décision de sécurité en cas de panne.</div>'
+ const body='<form id="drSimulationForm"><div class="notice">Simulation virtuelle uniquement : aucune action sur les VM ou hyperviseurs.</div>'
   +'<div class="form-grid">'
-  +selectField('Site supposé en panne','dr_source',sites.map(x=>[x.id,x.name+' ('+x.role+')']),source)
+  +selectField('Groupe PRA à simuler','dr_sim_plan',plans.map(p=>[p.id,p.name]),plan.id)
+  +selectField('Site source supposé en panne','dr_source',sites.map(x=>[x.id,x.name+' ('+x.role+')']),source)
   +selectField('Site de secours','dr_target',sites.map(x=>[x.id,x.name+' ('+x.role+')']),target)
   +selectField('Scénario','dr_scenario',[
-   ['cluster_down','Cluster principal indisponible'],['network_partition','Coupure réseau entre sites'],
-   ['console_down','VM OrigamiTasks indisponible']
-  ],'cluster_down')+'</div><button class="btn primary" type="submit">Lancer la simulation sans risque</button></form>';
- modal('Simulation de perte de site / cluster',body);
+   ['cluster_down','Cluster indisponible'],['network_partition','Partition réseau'],
+   ['console_down','Console OrigamiTasks indisponible']
+  ],'cluster_down')+'</div>'
+  +'<p class="hint">Changer de groupe actualise les deux listes de sites. Aucune simulation inter-groupes n’est autorisée.</p>'
+  +'<button class="btn primary" type="submit">Simuler sans action</button></form>';
+ modal('Simulation PRA isolée',body);
 }
 function showDRSimulationResult(result){
  const lines=(result.checks||[]).map(c=>
@@ -1634,7 +1667,16 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='fleet-ssh-key'){await inspectClusterSSHKey(b);return}
  if(a==='dr-site-fleet'){await openPRAClusterSelector(id);return}
- if(a==='dr-site-new'){openDRSiteForm();return}
+ if(a==='dr-plan-new'){openDRPlanForm();return}
+ if(a==='dr-plan-edit'){openDRPlanForm(id);return}
+ if(a==='dr-plan-delete'){
+  const plan=(state.drPlans||[]).find(p=>p.id===id);
+  if(!plan)return;
+  if(!confirm('Supprimer le groupe PRA '+plan.name+' ? Il doit être vide.'))return;
+  await api('/dr/plans/'+id,'DELETE');
+  toast('Groupe PRA supprimé');await refresh();return
+ }
+ if(a==='dr-site-new'){openDRSiteForm(null,Number(b.dataset.planId)||null);return}
  if(a==='dr-site-edit'){openDRSiteForm(id);return}
  if(a==='dr-site-delete'){
   if(!confirm('Supprimer cette association PRA ? Les clusters, les agents et les VM ne seront pas modifiés.'))return;
@@ -1683,6 +1725,19 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   hydrateAdmins();return
  }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='drPlanForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id)||0;
+  try{
+   await api(id?'/dr/plans/'+id:'/dr/plans',id?'PUT':'POST',{
+    name:String(f.get('dr_plan_name')||'').trim(),
+    description:String(f.get('dr_plan_description')||'').trim()
+   });
+   closeModal();toast('Groupe PRA enregistré');await refresh();showPage('datacenters');
+  }catch(ex){toast(ex.message,false)}
+  return
+ }
+
  if(ev.target.id==='agentConnectionSettingsForm'){
   ev.preventDefault();
   const f=new FormData(ev.target);
@@ -1785,7 +1840,7 @@ async function handleSubmit(ev){
  if(ev.target.id==='drSiteForm'){
   ev.preventDefault();
   const f=new FormData(ev.target),id=Number(ev.target.dataset.id)||0;
-  const body={name:String(f.get('dr_site_name')||'').trim(),
+  const body={plan_id:Number(f.get('dr_plan'))||null,name:String(f.get('dr_site_name')||'').trim(),
               role:String(f.get('dr_role')||'other'),
               storage_profile:String(f.get('dr_storage')||'auto'),
               datacenter_ids:f.getAll('dr_dc').map(Number),
@@ -1798,7 +1853,11 @@ async function handleSubmit(ev){
  }
  if(ev.target.id==='drSimulationForm'){
   ev.preventDefault();
-  const f=new FormData(ev.target);
+  const f=new FormData(ev.target),selectedPlan=Number(f.get('dr_sim_plan'));
+  const src=(state.drSites||[]).find(s=>s.id===Number(f.get('dr_source')));
+  const dst=(state.drSites||[]).find(s=>s.id===Number(f.get('dr_target')));
+  if(!src||!dst||src.plan_id!==selectedPlan||dst.plan_id!==selectedPlan)
+   return toast('Simulation entre groupes PRA différents interdite',false);
   try{
    const result=await api('/dr/simulate','POST',{
     source_site_id:Number(f.get('dr_source')),target_site_id:Number(f.get('dr_target')),
@@ -1950,6 +2009,19 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  if(ev.target.id==='proxmoxResourceSearch'&&state.proxmoxDiscovery){state.proxmoxDiscovery.query=ev.target.value;state.proxmoxDiscovery.page=0;renderProxmoxDiscoveryResults();}
  if(ev.target.id==='proxmoxDcSearch'){const q=ev.target.value.toLowerCase().trim();$$('[data-dc-search]').forEach(card=>card.hidden=!card.dataset.dcSearch.includes(q));}
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',async ev=>{
+ if(ev.target.name==='dr_sim_plan'&&ev.target.closest('#drSimulationForm')){
+  const planId=Number(ev.target.value);
+  const sites=(state.drSites||[]).filter(site=>site.plan_id===planId);
+  const form=ev.target.closest('form');
+  const sources=form.elements.namedItem('dr_source'),targets=form.elements.namedItem('dr_target');
+  if(sources&&targets){
+   const options=sites.map(site=>[site.id,site.name+' ('+site.role+')']);
+   sources.innerHTML=option(options,sites.find(s=>s.role==='primary')?.id||sites[0]?.id);
+   targets.innerHTML=option(options,sites.find(s=>s.role==='standby')?.id||sites[1]?.id);
+   sources.value=String(sites.find(s=>s.role==='primary')?.id||sites[0]?.id||'');
+   targets.value=String(sites.find(s=>s.role==='standby')?.id||sites[1]?.id||'');
+  }
+ }
  if(ev.target.matches('[data-ssh-filter-group]'))sshRefreshPicker(ev.target.closest('[data-ssh-picker]'));
  if(ev.target.id==='sshInventoryGroupFilter'){state.sshInventoryGroupFilter=ev.target.value;render();}
  if(ev.target.closest('#credentialTestForm')){
