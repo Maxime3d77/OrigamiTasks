@@ -6,7 +6,7 @@ test double is a snapshot backup on the configured PBS storage.
 from fastapi.testclient import TestClient
 from app import config, db, dr_protected_vms, integrations, pra_pbs
 from app.main import app
-from tests.test_dr_protected_vms_0321 import (
+from test_dr_protected_vms_0321 import (
     login, dc, plan, site, fake_pve, protected_payload, cleanup,
 )
 
