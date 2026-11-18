@@ -47,3 +47,5 @@ For a disposable VM:
 5. Poll restore UPID until completion and verify the guest remains stopped with autostart disabled in target PVE.
 
 **Not provided:** repeated changed-block application to a preexisting standby, near-real-time streaming, independent witness, host-wide PVE fencing, safe automated failover or failback. Never boot both copies together on connected networks. This is a manual backup/restore proof-of-concept, not a production-ready high-availability solution.
+
+To retire a test copy, manually stop/remove the disposable standby VM in Proxmox only after confirming it contains no needed data, then use **Release after manual clone removal**. The API checks the target VMID is absent before unbinding restore tracking. OrigamiTasks never deletes remote VMs or disks in this action.
