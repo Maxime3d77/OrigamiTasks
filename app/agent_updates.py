@@ -2,6 +2,7 @@
 import base64
 import json
 import re
+import secrets
 import shlex
 import threading
 from pathlib import Path
@@ -89,11 +90,11 @@ def _remote(job):
         sftp=client.open_sftp()
         try:
             base=sftp.normalize(".").rstrip("/")
-            stage=base+"/origami_upgrade_"+str(job["id"])
+            stage=base+"/origami_upgrade_"+secrets.token_hex(12)
             names=["agent.ps1"] if job["platform"]=="windows" else ["agent.py","pra_worker.py"]
             for name in names:
                 src=ROOT/("windows" if job["platform"]=="windows" else "linux")/name
-                with sftp.file(stage+"_"+name,"wb") as f:
+                with sftp.file(stage+"_"+name,"xb") as f:
                     f.write(src.read_bytes())
                 if job["platform"]=="linux":
                     sftp.chmod(stage+"_"+name,0o600)
@@ -125,8 +126,8 @@ def _remote(job):
                 "if([int]$cfg.agent_id -ne "+str(job["agent_id"])+"){throw 'Wrong agent ID'};"
                 "$target=Join-Path $dest 'agent.ps1';"
                 "Copy-Item -LiteralPath $target -Destination (Join-Path $dest 'agent.ps1.origami-backup') -Force;"
-                "Copy-Item -LiteralPath '"+staged+"' -Destination $target -Force;"
                 "Stop-ScheduledTask -TaskName 'OrigamiTasksAgent' -ErrorAction SilentlyContinue;"
+                "Copy-Item -LiteralPath '"+staged+"' -Destination $target -Force;"
                 "Start-ScheduledTask -TaskName 'OrigamiTasksAgent' -ErrorAction Stop;"
                 "Remove-Item -LiteralPath '"+staged+"' -Force;"
                 "Write-Output ORIGAMI_AGENT_UPDATED"
