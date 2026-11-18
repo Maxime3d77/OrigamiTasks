@@ -314,7 +314,7 @@
 
 /* v0.3.21: consistent success / in-progress / failure signals */
 .status.success,.status.online{color:var(--success);background:color-mix(in srgb,var(--success) 13%,transparent);border:1px solid color-mix(in srgb,var(--success) 25%,transparent)}
-.status.running,.status.queued,.status.pending,.status.planned{color:var(--yellow);background:color-mix(in srgb,var(--yellow) 13%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 25%,transparent)}
+.status.running,.status.queued,.status.pending,.status.planned,.status.awaiting_heartbeat{color:var(--yellow);background:color-mix(in srgb,var(--yellow) 13%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 25%,transparent)}
 .status.failed,.status.offline,.status.interrupted,.status.revoked,.status.completed_with_errors,.status.BLOCKED{color:var(--danger);background:color-mix(in srgb,var(--danger) 13%,transparent);border:1px solid color-mix(in srgb,var(--danger) 25%,transparent)}
 .status.uninstalled,.status.paused,.status.not_configured,.status.unknown{color:var(--muted);background:var(--panel2);border:1px solid var(--stroke)}
 .agent-batch summary .dr-batch-summary{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end;font-size:12px}
