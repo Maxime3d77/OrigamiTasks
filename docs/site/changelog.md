@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.27-rc1 — 2026-11-18
+
+- **First actual VM data copy between independent Proxmox clusters** through PBS: restores an explicitly selected available backup onto destination cluster-local image storage. Target VM is created stopped, without overwriting or failover.
+- Tracks Proxmox restore UPID, checks stopped/autostart-disabled status and keeps protection bound to restored targets.
+- **Limitations**: shared/synchronized PBS backup required. No direct host-to-host replication, continuous delta-streaming, host fencing or automatic failover/failback.
+
+
 ## 0.3.23-rc1 — 2026-11-18
 
 - **Single agent update** button for an agent reporting an older known version.
