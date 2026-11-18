@@ -282,10 +282,12 @@ def _execute(job,vm,source,target):
         while True:
             if channel.recv_ready():
                 data=channel.recv(65536)
-                if len(stdout)<8192: stdout.extend(data[:8192-len(stdout)])
+                stdout.extend(data)
+                if len(stdout)>8192: del stdout[:-8192]
             if channel.recv_stderr_ready():
                 data=channel.recv_stderr(65536)
-                if len(stderr)<8192: stderr.extend(data[:8192-len(stderr)])
+                stderr.extend(data)
+                if len(stderr)>8192: del stderr[:-8192]
             if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
                 break
             if time.monotonic()-started>MAX_SECONDS:
