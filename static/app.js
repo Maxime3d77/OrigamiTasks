@@ -240,11 +240,13 @@ function sshGroupForm(groupId=null){
  const group=(state.sshInventory.groups||[]).find(g=>g.id===groupId);
  const servers=group?(state.sshInventory.servers||[]).filter(s=>group.server_ids.includes(s.id)):[];
  const lines=servers.map(x=>x.fqdn+(x.port!==22?':'+x.port:'')).join('\n');
- const body='<form id="sshGroupForm" data-id="'+(group?.id||'')+'">'
+ const body='<form id="sshGroupForm" data-id="'+(group?.id||'')+'" data-managed="'+(group?.managed_proxmox?'1':'0')+'">'
   +'<div class="form-grid">'+field('Nom du groupe','name',group?.name||'')
   +field('Description','description',group?.description||'')+'</div>'
-  +'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="serveur-a.example.org&#10;serveur-b.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>'
-  +'<small class="hint">Ajouter ou retirer des lignes modifie l’appartenance au groupe. Les serveurs retirés restent dans l’inventaire. Port 22 par défaut, préciser :2222 si nécessaire. Max. 250 serveurs.</small></div>'
+  +(group?.managed_proxmox
+   ?'<div class="notice">Groupe géré par découverte Proxmox : nom et description modifiables. Les membres sont synchronisés depuis le cluster, sans être modifiés ici.</div>'
+   :'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="serveur-a.example.org&#10;serveur-b.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>')
+  +(group?.managed_proxmox?'':'<small class="hint">Ajouter ou retirer des lignes modifie l’appartenance au groupe. Les serveurs retirés restent dans l’inventaire. Port 22 par défaut, préciser :2222 si nécessaire. Max. 250 serveurs.</small></div>')
   +'<div class="tool-row"><button class="btn primary" type="submit">'+(group?'Enregistrer le groupe':'Créer le groupe')+'</button>'
   +'<button class="btn" data-action="layer-close" data-layer="sshInventoryLayer" type="button">Annuler</button></div></form>';
  openLayer('sshInventoryLayer',group?'Modifier le groupe SSH':'Créer un groupe SSH',body);
@@ -2135,8 +2137,8 @@ async function handleSubmit(ev){
   ev.preventDefault();
   const f=new FormData(ev.target),id=Number(ev.target.dataset.id),name=String(f.get('name')||'').trim();
   if(!name)return toast('Renseigner un nom de groupe',false);
-  const payload={name,description:String(f.get('description')||'').trim(),
-                 servers:String(f.get('servers')||'').split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean)};
+  const payload={name,description:String(f.get('description')||'').trim()};
+  if(ev.target.dataset.managed!=='1')payload.servers=String(f.get('servers')||'').split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean);
   try{
    await api(id?'/ssh/groups/'+id:'/ssh/groups',id?'PUT':'POST',payload);
    closeLayer('sshInventoryLayer');toast('Groupe SSH enregistré');await refresh();
