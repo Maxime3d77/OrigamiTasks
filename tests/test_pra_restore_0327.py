@@ -98,9 +98,16 @@ def test_restore_creates_stopped_vm_without_overwrite(monkeypatch):
             })
             assert repeat.status_code==409
             assert sum(x[0]=='POST' for x in calls)==1
+            assert client.post(endpoint+'/pbs/release',headers=h,json={'approved':True}).status_code==409
+            # Simulate a separate operator deleting the stopped clone in PVE.
+            # OrigamiTasks itself never removes any VM or disk.
+            target_resources[:]=[x for x in target_resources if x.get('type')!='qemu']
+            released=client.post(endpoint+'/pbs/release',headers=h,json={'approved':True})
+            assert released.status_code==200,released.text
+            assert released.json()['remote_vm_deleted'] is False
+            assert client.delete(endpoint,headers=h).status_code==200
+            vm_id=None
         finally:
-            # The test simulated an actual restored target and the delete guard
-            # deliberately requires an operator clearance; only test DB cleanup.
             if vm_id is not None:
                 with db.session() as con:
                     con.execute('DELETE FROM pra_pbs_restores WHERE protected_vm_id=?',(vm_id,))
