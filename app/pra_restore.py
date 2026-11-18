@@ -128,7 +128,8 @@ def start_restore(vm_id, backup_job_id, target_pbs_storage, archive, approved, a
     try:
         upid=_pve(dc,cred,"/api2/json/nodes/"+quote(vm["target_node"])+"/qemu",method="POST",
                    data={"vmid":str(vm["target_vmid"]),"archive":archive,
-                         "storage":vm["target_storage"],"start":"0","unique":"1"})
+                         "storage":vm["target_storage"],"start":"0","unique":"1",
+                         "onboot":"0","ha-managed":"0"})
         if not isinstance(upid,str) or not upid.startswith("UPID:"):
             raise RestoreError("La restauration n'a pas retourné d'identifiant de tâche Proxmox")
     except httpx.HTTPStatusError:
@@ -172,7 +173,14 @@ def restore_status(vm_id,job_id):
         if len(entries)!=1 or entries[0].get("status")!="stopped":
             state="uncertain"
         else:
-            verified=True
+            # Fail closed: standby must have no automatic boot before reporting
+            # success, even if backup archive retained an onboot setting.
+            conf=_pve(dc,cred,"/api2/json/nodes/"+quote(record["node"])+
+                      "/qemu/"+str(record["target_vmid"])+"/config")
+            if not isinstance(conf,dict) or str(conf.get("onboot",0)) not in ("0","False","false"):
+                state="uncertain"
+            else:
+                verified=True
     with db.session() as con:
         con.execute("UPDATE pra_pbs_restores SET status=?,finished_at=CASE WHEN ? THEN COALESCE(finished_at,?) ELSE finished_at END WHERE id=?",
                     (state,int(state in ("completed","failed")),db.now(),job_id))
