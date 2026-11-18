@@ -213,3 +213,28 @@ def list_restores(vm_id):
         rows=con.execute("SELECT id,status,archive,target_vmid,created_at,finished_at "
                          "FROM pra_pbs_restores WHERE protected_vm_id=? ORDER BY id DESC LIMIT 20",(vm_id,)).fetchall()
     return {"items":[dict(r) for r in rows]}
+
+
+def release_after_manual_removal(vm_id,approved,actor):
+    """Unbind a test restore only after an operator removed it in PVE.
+
+    This never deletes a remote VM, disk, backup or storage. Manual cleanup
+    must be performed in Proxmox first and its absence verified by API.
+    """
+    if approved is not True:
+        raise RestoreError("Confirmation de libération du suivi requise")
+    vm=dr_protected_vms._one(vm_id)
+    dc,cred=_target(vm)
+    resources=integrations.discover_datacenter(dc,cred,20)
+    if any(r.get("type")=="qemu" and r.get("vmid")==vm["target_vmid"] for r in resources):
+        raise RestoreError("VM secours toujours présente : aucune protection libérée")
+    with db.session() as con:
+        con.execute("BEGIN IMMEDIATE")
+        if con.execute("SELECT 1 FROM pra_pbs_restores WHERE protected_vm_id=? "
+                       "AND status IN ('starting','submitted','running','uncertain')",
+                       (vm_id,)).fetchone():
+            raise RestoreError("Restauration en cours ou incertaine : contrôle manuel obligatoire")
+        count=con.execute("DELETE FROM pra_pbs_restores WHERE protected_vm_id=?",(vm_id,)).rowcount
+    db.audit(actor,"pra.pbs.restore.release",vm_id,
+             "Après vérification API de l'absence du VMID secours; "+str(count)+" enregistrements retirés")
+    return {"released":True,"removed_history":count,"remote_vm_deleted":False}
