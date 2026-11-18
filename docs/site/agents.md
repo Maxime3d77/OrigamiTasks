@@ -1,5 +1,18 @@
 # Linux and Windows agents — v0.3.0-rc1 preview
 
+## Unified centrally managed modular agent (0.3.16-rc1)
+
+OrigamiTasks deploys **one agent identity and installation per machine**, configured from **Linux/Windows Agents → Configure modules**. Three role choices are displayed:
+- **Standard**, always on to preserve current workflow task execution.
+- **Proxmox**, site/cluster inventory role only; PVE tokens are not copied to the agent and Proxmox API work still happens centrally through OrigamiTasks.
+- **Passive DR**, Linux only; a local foundation for future DR work, **no VM replication or failover**.
+
+An agent must first be linked to a **named DR site** with at least one registered Proxmox cluster before assigning Proxmox or DR. DR also requires a **primary** or **standby** site role. Then enable the desired modules. Linux and Windows script agents **0.3.2** receive their scoped module policy during HTTPS polling, cache it atomically and acknowledge the applied revision. The UI distinguishes requested and acknowledged settings, and can identify a missing passive DR service. Older agents continue standard tasks but cannot apply module activation until upgraded.
+
+The same Linux SSH installer includes `origamitasks-agent.service` (standard) and `origamitasks-agent-pra.service` (isolated passive monitor). The second worker can continue a local state heartbeat if the control-plane VM is unavailable, but it does **not** replicate, control storage, call PVE APIs, fence a source, or promote a VM. Its sole persisted local metadata are `modules.json` and `pra-state.json` under `/opt/origamitasks-agent`. This is **not yet** working failover when SD goes offline. HTTPS bearer agent credentials are still used (no mTLS), and policy bundles are not signed yet. Witness, enforced fencing, signed policies and destructive-action security reviews remain mandatory.
+
+Both Linux services are managed and removed as **one agent installation**. The passive worker has a systemd cap of **64 MiB / 10% of a CPU core**; standard agent caps remain **192 MiB / 20%**. They are ceilings, not measured resource usage. On Windows, Standard and Proxmox role configuration is supported, but DR remains Linux-only for the current foundation. Existing 0.3.1 installations need a deliberate reinstall/update to get the 0.3.2 module-aware agent; signed rolling updates are still planned.
+
 ## Overview, consumption and remote uninstall (v0.3.15)
 
 The **Overview** has three tabs: **Tasks**, **Agents** and **Proxmox DC / DR**. Agent view shows last heartbeat, reported version, CPU and RAM of the **agent process only** when agent version 0.3.1+ reports these values. This does not include spawned scripts, VMs or services managed on the host; unavailable metrics mean *not reported*, not zero.

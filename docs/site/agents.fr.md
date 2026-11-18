@@ -1,5 +1,18 @@
 # Agents Linux et Windows — préversion v0.3.0-rc1
 
+## Agent unique avec modules administrés (0.3.16-rc1)
+
+L'installation OrigamiTasks devient **un seul agent par machine**, administrable depuis **Agents Linux et Windows → Configurer modules**. Trois fonctions sont visibles :
+- **Standard**, toujours actif pour les commandes de workflows existantes.
+- **Proxmox**, module d'affectation au site/cluster, sans copie de token PVE sur l'agent ; les fonctions Proxmox opérationnelles continuent à appeler l'API depuis la console.
+- **PRA passif**, uniquement Linux : superviseur local préparatoire pour un futur moteur PRA, **sans réplication de VM et sans bascule**.
+
+Pour activer Proxmox ou PRA, rattacher d'abord l'agent Linux à un **site PRA nommé** contenant au moins un cluster Proxmox. Pour PRA, le rôle du site doit être **principal** ou **secours**. Cocher ensuite les modules et enregistrer. L'agent version **0.3.2** reçoit la politique sur sa prochaine interrogation HTTPS, l'enregistre atomiquement en local et retourne un numéro de version effectivement appliquée. L'interface distingue **demande en attente**, **configuration appliquée**, **service PRA passif** et **agent non à jour**. Les agents déjà installés en 0.3.1 ou antérieure ne prennent pas automatiquement en charge le module PRA.
+
+Sous Linux, le même déploiement via clé SSH installe `origamitasks-agent.service` (standard) et `origamitasks-agent-pra.service` (surveillance passive). Le deuxième service fonctionne de manière indépendante du processus standard et de la console après avoir reçu sa politique ; il ne dispose d'aucun mécanisme de promotion des VM. Il écrit uniquement son état local (`modules.json` et `pra-state.json` sous `/opt/origamitasks-agent`) : aucune réplication, aucune manipulation de stockage, aucune requête API Proxmox et aucune action de fencing. Même si la console est sur SD et tombe, le processus passif reste localement vivant sur AU, **mais il ne garantit pas encore la continuité PRA**. Les permissions actuelles sont des tokens HTTPS, pas encore mTLS ; les politiques ne sont pas encore signées : avant de permettre des actions sensibles, ajouter signature, témoin externe, preuve de fencing et tests de partition réseau.
+
+Les deux services sont installés, mis à l'inventaire et désinstallés via la même identité d'agent. Le superviseur a une limite système de **64 Mio / 10 % d'un cœur**, et l'agent standard garde **192 Mio / 20 %**. Ces plafonds ne sont pas une mesure de consommation normale. Sous Windows, **Standard et Proxmox** sont configurables ; **PRA Linux seulement** pour cette première base. Les agents préexistants doivent être réinstallés de manière contrôlée pour obtenir la version 0.3.2 ; **il n'existe pas encore de bouton de mise à jour signée automatique**.
+
 ## Tableau de bord, consommation et désinstallation (v0.3.15)
 
 La **Vue d'ensemble** dispose maintenant de trois onglets : **Tâches**, **Agents** et **DC Proxmox / PRA**. L'onglet Agents indique l'état de chaque agent (dernier heartbeat, version), ainsi que le CPU et la RAM du **processus agent uniquement** lorsque l'agent version 0.3.1 ou supérieure remonte ces métriques. Cela ne mesure pas l'utilisation des scripts enfants, des VM ou des services gérés. Des valeurs vides signifient « non remontées », pas zéro.

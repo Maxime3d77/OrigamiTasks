@@ -284,3 +284,15 @@
 .agent-action-buttons{min-width:240px}
 .agent-action-buttons .btn{white-space:normal;line-height:1.25;margin:3px 3px 3px 0}
 @media(max-width:760px){.overview-tabs{flex-direction:column}.overview-tabs button{flex:0 1 auto;text-align:left}.overview-panel .stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.agent-action-buttons{min-width:170px}}
+
+
+/* v0.3.16 unified agent Standard/Proxmox/PRA role manager */
+.agent-module-choices{display:flex;flex-direction:column;gap:9px;margin:16px 0}
+.agent-module-choice{display:flex;gap:13px;align-items:flex-start;border:1px solid var(--stroke);background:var(--panel2);border-radius:11px;padding:15px;cursor:pointer;min-width:0}
+.agent-module-choice:has(input:disabled){opacity:.7;cursor:default}
+.agent-module-choice input{flex:0 0 18px;width:18px;height:18px;accent-color:var(--yellow);margin:1px 0}
+.agent-module-choice span{display:flex;flex-direction:column;gap:5px;min-width:0}
+.agent-module-choice strong{font-size:13px}
+.agent-module-choice small{font-size:11px;color:var(--muted);line-height:1.55;overflow-wrap:anywhere}
+.agent-action-buttons{min-width:280px}
+@media(max-width:760px){.agent-module-choice{padding:11px}.agent-action-buttons{min-width:210px}}

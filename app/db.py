@@ -152,7 +152,12 @@ CREATE TABLE IF NOT EXISTS agents (
  version TEXT NOT NULL DEFAULT '', enroll_hash TEXT, enroll_expires TEXT,
  token_hash TEXT, enrolled INTEGER NOT NULL DEFAULT 0,
  revoked INTEGER NOT NULL DEFAULT 0, last_seen TEXT,
- cpu_percent REAL, memory_mb REAL, uninstalled_at TEXT, created_at TEXT NOT NULL
+ cpu_percent REAL, memory_mb REAL, uninstalled_at TEXT,
+ modules_json TEXT NOT NULL DEFAULT '{"standard":true,"proxmox":false,"pra":false}',
+ modules_revision INTEGER NOT NULL DEFAULT 1,
+ modules_applied_revision INTEGER NOT NULL DEFAULT 0,
+ modules_reported_json TEXT NOT NULL DEFAULT '{}',
+ created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agent_deploy_batches (
  id INTEGER PRIMARY KEY, actor TEXT NOT NULL, platform TEXT NOT NULL,
@@ -199,6 +204,10 @@ def initialize():
             ("agents", "cpu_percent", "REAL"),
             ("agents", "memory_mb", "REAL"),
             ("agents", "uninstalled_at", "TEXT"),
+            ("agents", "modules_json", "TEXT NOT NULL DEFAULT '{\"standard\":true,\"proxmox\":false,\"pra\":false}'"),
+            ("agents", "modules_revision", "INTEGER NOT NULL DEFAULT 1"),
+            ("agents", "modules_applied_revision", "INTEGER NOT NULL DEFAULT 0"),
+            ("agents", "modules_reported_json", "TEXT NOT NULL DEFAULT '{}'"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:

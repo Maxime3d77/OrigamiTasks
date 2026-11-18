@@ -14,7 +14,9 @@ from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHand
 from urllib.error import HTTPError
 
 CONFIG = Path(__file__).with_name('config.json')
-VERSION = '0.3.1'
+VERSION = '0.3.2'
+MODULES_FILE = CONFIG.with_name('modules.json')
+PRA_HEALTH = CONFIG.with_name('pra-state.json')
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -89,6 +91,78 @@ def process_memory_mb():
         return None
 
 
+def apply_modules(response, agent_id):
+    """Persist admin policy locally. No secrets or VM mutation instructions."""
+    modules=response.get('modules')
+    revision=response.get('modules_revision')
+    if (not isinstance(modules,dict) or
+            set(modules)!={'standard','proxmox','pra'} or
+            any(type(x) is not bool for x in modules.values()) or
+            modules['standard'] is not True or
+            type(revision) is not int or revision<1):
+        return
+    policy=response.get('pra_policy')
+    if (not isinstance(policy,dict) or
+            set(policy)!={'replication_enabled','promotion_enabled',
+                          'fencing_ready','witness_ready'} or
+            any(x is not False for x in policy.values())):
+        return
+    site=response.get('site')
+    if site is not None and (not isinstance(site,dict) or
+                             not isinstance(site.get('clusters'),list)):
+        return
+    data={'agent_id':agent_id,'revision':revision,'modules':modules,
+          'site':site,'pra_policy':policy}
+    if MODULES_FILE.exists():
+        try:
+            old=json.loads(MODULES_FILE.read_text(encoding='utf-8'))
+            if old==data:
+                return
+        except (OSError,ValueError):
+            pass
+    fd, name=tempfile.mkstemp(prefix='.origami-modules-',dir=str(MODULES_FILE.parent))
+    try:
+        os.fchmod(fd,0o600)
+        with os.fdopen(fd,'w',encoding='utf-8') as output:
+            json.dump(data,output,separators=(',',':'))
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(name,MODULES_FILE)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def module_report(agent_id):
+    """Report applied configuration and local worker liveness, not DR readiness."""
+    base={'standard':'ready','proxmox':'disabled','pra':'disabled'}
+    revision=0
+    if MODULES_FILE.is_file() and not MODULES_FILE.is_symlink():
+        try:
+            policy=json.loads(MODULES_FILE.read_text(encoding='utf-8'))
+            if policy.get('agent_id')==agent_id:
+                revision=int(policy['revision'])
+                base['proxmox']='configured' if policy['modules']['proxmox'] else 'disabled'
+                if policy['modules']['pra']:
+                    base['pra']='not_installed'
+                    try:
+                        health=json.loads(PRA_HEALTH.read_text(encoding='utf-8'))
+                        if (time.time()-float(health['timestamp'])<=50 and
+                                health['revision']==revision and
+                                health['status']=='passive' and
+                                health.get('promotion_permitted') is False):
+                            base['pra']='passive'
+                        elif time.time()-float(health['timestamp'])>50:
+                            base['pra']='stale'
+                    except (OSError,ValueError,TypeError,KeyError):
+                        pass
+        except (OSError,ValueError,TypeError,KeyError):
+            revision=0
+            base['proxmox']='error'
+            base['pra']='error'
+    return {'modules_applied_revision':revision,'modules_status':base}
+
+
 def main():
     cfg = read_config()
     if not cfg.get('token'):
@@ -110,8 +184,10 @@ def main():
             cpu=round(max(0,min(1000,100*(now_cpu-previous_cpu)/elapsed)),2)
             previous_cpu,previous_wall=now_cpu,now_wall
             body={'hostname':socket.gethostname(),'version':VERSION,
-                  'cpu_percent':cpu,'memory_mb':process_memory_mb()}
+                  'cpu_percent':cpu,'memory_mb':process_memory_mb(),
+                  **module_report(cfg['agent_id'])}
             response=request(cfg,'/api/agent/poll',body,True)
+            apply_modules(response,cfg['agent_id'])
             task=response.get('task')
             if task:
                 try:

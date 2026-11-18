@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules
 
 
 @asynccontextmanager
@@ -113,10 +113,20 @@ def logout(request: Request, response: Response):
 def list_agents(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
-        rows=con.execute('SELECT id,name,platform,group_name,hostname,version,enrolled,revoked,last_seen,cpu_percent,memory_mb,uninstalled_at,created_at FROM agents ORDER BY id DESC').fetchall()
+        rows=con.execute('SELECT id,name,platform,group_name,hostname,version,enrolled,revoked,last_seen,cpu_percent,memory_mb,uninstalled_at,modules_json,modules_revision,modules_applied_revision,modules_reported_json,created_at FROM agents ORDER BY id DESC').fetchall()
     cutoff=agents.utc_plus(-90)
-    return {'items':[dict(r,status=('uninstalled' if r['uninstalled_at'] else 'revoked' if r['revoked'] else 'pending' if not r['enrolled'] else
-        'online' if r['last_seen'] and r['last_seen']>=cutoff else 'offline')) for r in rows]}
+    return {'items':[agent_modules.describe(dict(r,status=('uninstalled' if r['uninstalled_at'] else 'revoked' if r['revoked'] else 'pending' if not r['enrolled'] else
+        'online' if r['last_seen'] and r['last_seen']>=cutoff else 'offline'))) for r in rows]}
+
+
+@app.put('/api/agents/{agent_id}/modules')
+def configure_agent_modules(agent_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    result=agent_modules.set_modules(agent_id,payload)
+    db.audit(user['username'],'agent.modules.configure',agent_id,
+             'revision='+str(result['revision'])+' roles='+','.join(
+                 k for k,v in result['modules'].items() if v))
+    return result
 
 
 @app.post('/api/agents/enrollments')

@@ -145,7 +145,7 @@ def test_poll_metrics_are_validated_and_returned(monkeypatch):
         assert agents.poll(agent,{
             'hostname':'node-ci','version':'0.3.1',
             'cpu_percent':1.23,'memory_mb':37.4
-        })=={'task':None}
+        })['task'] is None
         with db.session() as con:
             row=con.execute('SELECT cpu_percent,memory_mb FROM agents WHERE id=?',(aid,)).fetchone()
         assert row['cpu_percent']==1.23 and row['memory_mb']==37.4

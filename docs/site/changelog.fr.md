@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.16-rc1 — 17 novembre 2026
+
+- **Agent unique modulaire :** chaque agent conserve son identité, son token et son installation, avec modules administrables **Standard** (toujours actif), **Proxmox** (association aux clusters déclarés, requêtes API aujourd'hui côté console) et **PRA passif** (Linux uniquement). Les modules sont activables dans **Agents → Configurer modules**, avec contrôle du site et des clusters associés, version de politique et état réellement accusé réception.
+- **Linux :** l'installation SSH existante déploie un seul paquet contenant le moteur standard `agent.py` et le superviseur PRA `pra_worker.py` en deux services systemd isolés ; le superviseur PRA conserve une politique locale et un heartbeat **même si la console tombe**. **Il ne réplique aucune VM, ne commande pas Proxmox, et ne déclenche pas de bascule** : ni témoin indépendant ni fencing opérationnels. Limites supplémentaires du superviseur : 64 Mio et 10 % d'un CPU.
+- **Windows :** l'agent unique accepte les modules Standard et Proxmox en métadonnées ; module PRA autonome non disponible sur Windows. Les versions 0.3.2 Linux/Windows accusent réception des changements de configuration ; les agents anciens continuent leur fonctionnement standard sans activation cachée.
+- **Sécurité / contrôle :** stockage en base du module désiré et du dernier module réellement appliqué, changements validés côté serveur et auditables, aucune clé API Proxmox transmise à l'agent ; politique PRA strictement non autorisante (fencing, témoin, réplication et promotion à false). L'activation PRA est refusée sans site principal/secours Linux associé à un cluster.
+- **Cycle de vie :** désinstallation SSH supprime les deux services Linux et leurs fichiers ; les anciens agents devront être explicitement réinstallés / mis à jour pour posséder le superviseur PRA. La mise à jour signée à chaud et l'agent PRA réellement opérationnel restent à développer.
+
 ## 0.3.15-rc1 — 17 novembre 2026
 
 - **Vue d'ensemble :** trois onglets *Tâches & exécutions*, *Agents actifs* et *DC Proxmox / PRA*. Totaux et historiques existants ; états des agents (en ligne, hors ligne, révoqué, désinstallé), CPU/RAM du processus quand l'agent les remonte ; clusters et sites PRA associés. Les retards de synchronisation PRA restent « non disponibles » tant qu'aucun moteur réel n'est implémenté.

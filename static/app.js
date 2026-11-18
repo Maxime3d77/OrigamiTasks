@@ -280,25 +280,31 @@ function agentsPage(){
  if(!roleAdmin())return title('Agents','Administration uniquement.');
  const cards=(state.agents||[]).map(agent=>{
   const action=agent.uninstalled_at?''
-   :'<button class="btn tiny danger" data-action="agent-uninstall" data-id="'+agent.id+'">Désinstaller via SSH</button>'
+   :'<button class="btn tiny primary" data-action="agent-modules" data-id="'+agent.id+'">Configurer modules</button>'
+    +'<button class="btn tiny danger" data-action="agent-uninstall" data-id="'+agent.id+'">Désinstaller via SSH</button>'
      +(agent.revoked?'':'<button class="btn tiny" data-action="agent-revoke" data-id="'+agent.id+'">Révoquer le jeton</button>');
   return '<tr><td class="name-cell">'+e(agent.name)+'<div class="muted tinytext">'+e(agent.hostname||'Non enrôlé')+'</div></td>'
     +'<td>'+e(agent.platform)+' · '+e(agent.version||'Version inconnue')+'</td>'
     +'<td>'+e(agent.group_name)+'</td><td>'+labelStatus(agent.status)+'</td>'
+    +'<td><span class="chip">Standard</span>'
+    +(agent.modules?.proxmox?'<span class="chip tag">Proxmox</span>':'')
+    +(agent.modules?.pra?'<span class="chip tag">PRA passif</span>':'')
+    +'<div class="muted tinytext">'+(agent.modules_in_sync?'Appliqué · révision '+e(agent.modules_revision):'En attente / agent ancien ou hors ligne')+'</div>'
+    +(agent.modules_status?.pra?'<small class="hint">PRA local : '+e(agent.modules_status.pra)+'</small>':'')+'</td>'
     +'<td>'+(Number.isFinite(agent.cpu_percent)?e(agent.cpu_percent.toFixed(1))+' %':'—')+'</td>'
     +'<td>'+(Number.isFinite(agent.memory_mb)?e(agent.memory_mb.toFixed(1))+' Mio':'—')+'</td>'
     +'<td>'+dt(agent.last_seen)+'</td>'
     +'<td class="agent-action-buttons">'+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
  }).join('');
- return title('Agents Linux et Windows','État, consommation et gestion du cycle de vie des agents standards.',
+ return title('Agents Linux et Windows','Une seule installation, modules Standard / Proxmox / PRA passif selon le site.',
   '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button>'
   +'<button class="btn primary" data-action="agent-deploy-form">⇣ Déployer sur un serveur</button>'
   +'<button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')
   +'<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2>'
   +'<span class="hint">'+state.agents.length+' agent(s)</span></div>'
   +'<div class="table-wrap"><table><thead><tr><th>Nom / hôte</th><th>OS / version</th><th>Groupe</th>'
-  +'<th>État</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
-  +'<tbody>'+(cards||'<tr><td colspan="8">Aucun agent installé.</td></tr>')+'</tbody></table></div></div>'
+  +'<th>État</th><th>Modules & synchronisation</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
+  +'<tbody>'+(cards||'<tr><td colspan="9">Aucun agent installé.</td></tr>')+'</tbody></table></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2>'
   +'<button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button></div>'
   +'<div id="agentBatchList">'+agentBatchPanel()+'</div></div>'
@@ -308,6 +314,38 @@ function agentsPage(){
   +' les métriques affichées concernent uniquement le processus agent. Les agents existants ne sont pas modifiés automatiquement.'
   +' Les agents Windows actuels fonctionnent sous SYSTEM : leur durcissement doit être renforcé avant une généralisation sur les serveurs critiques.</div>';
 }
+function openAgentModulesForm(agentId){
+ const a=(state.agents||[]).find(x=>x.id===Number(agentId));
+ if(!a)return toast('Agent introuvable',false);
+ if(a.revoked||a.uninstalled_at)return toast('Agent révoqué ou désinstallé',false);
+ const site=(state.drSites||[]).find(x=>(x.agents||[]).some(y=>y.id===a.id));
+ const siteLine=site?e(site.name)+' · '+e(site.role)+' · '+(site.datacenters||[]).length+' cluster(s)'
+                    :'Aucun site rattaché — associer cet agent dans DC Proxmox → Sites PRA';
+ const canPRA=a.platform==='linux';
+ const module=(key,label,desc,on,disabled=false)=>
+   '<label class="agent-module-choice"><input type="checkbox" name="'+key+'" '+(on?'checked ':'')+(disabled?'disabled ':'')+'>'
+   +'<span><strong>'+label+'</strong><small>'+desc+'</small></span></label>';
+ const m=a.modules||{standard:true,proxmox:false,pra:false};
+ const form='<form id="agentModulesForm" data-id="'+a.id+'">'
+  +'<div class="notice">Un seul agent installé par machine. Les modules sont attribués par la console puis appliqués au prochain contact HTTPS de l’agent.'
+  +' Un agent ancien ou hors ligne reste en attente ; ce formulaire ne lance aucune VM.</div>'
+  +'<p><b>Agent :</b> '+e(a.name)+' · '+e(a.platform)+' · '+e(a.hostname||'—')+'</p>'
+  +'<p><b>Site :</b> '+siteLine+'</p>'
+  +'<div class="agent-module-choices">'
+  +module('standard','Standard','Workflows et inventaire système (toujours nécessaire)',true,true)
+  +module('proxmox','Proxmox','Association au site et aux clusters ; appels API Proxmox toujours exécutés par la console',m.proxmox)
+  +module('pra','PRA — service passif indépendant','Linux uniquement : surveillance locale sans réplication, fencing ni bascule de VM',m.pra,!canPRA)
+  +'</div>'
+  +'<div class="notice"><b>État réel :</b> '
+  +e(a.modules_in_sync?'Configuration appliquée':'Configuration pas encore confirmée')
+  +' · révision souhaitée '+e(a.modules_revision)
+  +' · version appliquée '+e(a.modules_applied_revision)
+  +' · service PRA : '+e(a.modules_status?.pra||'Non remonté')+'</div>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer les modules</button>'
+  +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal('Modules de '+e(a.name),form,'',true);
+}
+
 function openAgentUninstallForm(id){
  const a=(state.agents||[]).find(item=>item.id===Number(id));
  if(!a)return toast('Agent introuvable',false);
@@ -1462,7 +1500,8 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   const lines=new Set([...area.value.split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean),...targets]);
   area.value=[...lines].join('\n');
   toast(targets.length+' serveur(s) ajoutés');return
- }if(a==='agent-uninstall'){openAgentUninstallForm(id);return}
+ }if(a==='agent-modules'){openAgentModulesForm(id);return}
+ if(a==='agent-uninstall'){openAgentUninstallForm(id);return}
  if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='dr-site-new'){openDRSiteForm();return}
  if(a==='dr-site-edit'){openDRSiteForm(id);return}
  if(a==='dr-site-delete'){
@@ -1512,6 +1551,20 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   hydrateAdmins();return
  }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='agentModulesForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id);
+  const body={standard:true,proxmox:f.has('proxmox'),pra:f.has('pra')};
+  const btn=ev.target.querySelector('[type="submit"]');
+  if(btn)btn.disabled=true;
+  try{
+   const result=await api('/agents/'+id+'/modules','PUT',body);
+   closeModal();toast('Modules enregistrés · révision '+result.revision+' ; attente du prochain heartbeat');
+   await refresh();
+  }catch(ex){toast(ex.message,false);if(btn)btn.disabled=false}
+  return;
+ }
+
  if(ev.target.id==='agentUninstallForm'){
   ev.preventDefault();
   const f=new FormData(ev.target),agentId=Number(ev.target.dataset.id);
