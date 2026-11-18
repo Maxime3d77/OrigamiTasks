@@ -105,10 +105,31 @@ def preflight(agent_ids,credential_id):
                 result["stage"]="permissions"
                 # No remote changes: validate rights and installation only.
                 if agent["platform"]=="linux":
-                    cmd="sh -c 'test -f /opt/origamitasks-agent/config.json && { test \"$(id -u)\" -eq 0 || sudo -n true; }'"
-                    _,stdout,_=client.exec_command(cmd,timeout=20)
-                    if stdout.channel.recv_exit_status()!=0:
-                        raise UpdateError("permissions : agent absent ou élévation sudo -n refusée")
+                    # Agent install directory is 0700 and owned by the
+                    # origamitasks-agent system user. An ordinary SSH identity
+                    # cannot test config.json before gaining privileges.
+                    # Check root/sudo first; inspect the private file only
+                    # *inside* the elevated command.
+                    check=(
+                        "import json,sys;"
+                        "c=json.load(open('/opt/origamitasks-agent/config.json'));"
+                        "sys.exit(0 if c.get('agent_id')=="+str(agent["id"])+" else 43)"
+                    )
+                    probe="python3 -c "+shlex.quote(check)
+                    command=(
+                        'if [ "$(id -u)" -eq 0 ]; then '
+                        'exec sh -c '+shlex.quote(probe)+'; '
+                        'else exec sudo -n sh -c '+shlex.quote(probe)+'; fi'
+                    )
+                    _,stdout,_=client.exec_command("sh -c "+shlex.quote(command),timeout=20)
+                    code=stdout.channel.recv_exit_status()
+                    if code!=0:
+                        if code==43:
+                            raise UpdateError("agent_identity : identifiant sur le serveur différent de celui enregistré")
+                        raise UpdateError(
+                            "permissions : test privilégié refusé (sudo -n) ou "
+                            "config.json inaccessible/absent ; vérifier sudo et l'agent local"
+                        )
                 result["status"]="ok"
                 result["stage"]="ready"
             finally:
