@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates, pra_restore
 
 
 @asynccontextmanager
@@ -684,6 +684,43 @@ def get_protected_vm_pbs_backup(vm_id:int,job_id:int,request:Request):
     try:
         return pra_pbs.status(vm_id,job_id)
     except pra_pbs.PBSBackupError as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/pbs/restore-options')
+def dr_pbs_restore_options(vm_id:int,backup_job_id:int,target_pbs_storage:str,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_restore.options(vm_id,backup_job_id,target_pbs_storage)
+    except (pra_restore.RestoreError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/pbs/restore')
+def dr_pbs_restore(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'backup_job_id','target_pbs_storage','archive','approved'}:
+        raise HTTPException(422,'Paramètres de restauration et confirmation requis')
+    try:
+        return pra_restore.start_restore(vm_id,payload['backup_job_id'],
+                    payload['target_pbs_storage'],payload['archive'],
+                    payload['approved'],user['username'])
+    except (pra_restore.RestoreError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/pbs/restores')
+def dr_pbs_restores(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    return pra_restore.list_restores(vm_id)
+
+
+@app.get('/api/dr/vms/{vm_id}/pbs/restores/{job_id}')
+def dr_pbs_restore_status(vm_id:int,job_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_restore.restore_status(vm_id,job_id)
+    except (pra_restore.RestoreError,dr_protected_vms.ProtectedVMError) as exc:
         raise HTTPException(409,str(exc)) from None
 
 
