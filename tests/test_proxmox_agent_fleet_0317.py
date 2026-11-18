@@ -104,9 +104,16 @@ def test_cluster_group_preview_and_agent_batch_fail_closed(monkeypatch):
             found=client.get('/api/ssh/inventory').json()
             ssh_group=next(x for x in found['groups'] if x['id']==group_id)
             assert ssh_group['server_count']==2
-            invalid_edit=client.put('/api/ssh/groups/'+str(group_id),headers=headers,
-                                    json={'name':'Tampered SSH group'})
-            assert invalid_edit.status_code==422
+            renamed=client.put('/api/ssh/groups/'+str(group_id),headers=headers,
+                               json={'name':'SD production renommé','description':'Découverte automatique'})
+            assert renamed.status_code==200,renamed.text
+            current=client.get('/api/ssh/inventory').json()
+            edited=next(x for x in current['groups'] if x['id']==group_id)
+            assert edited['name']=='SD production renommé'
+            assert edited['server_count']==2 and edited['managed_proxmox'] is True
+            refused=client.put('/api/ssh/groups/'+str(group_id),headers=headers,
+                               json={'name':'Autre','servers':[]})
+            assert refused.status_code==422
             source=client.post('/api/dr/sites',headers=headers,json={
                 'name':'SD fleet ci 0317','role':'primary',
                 'storage_profile':'iscsi_lvm',
