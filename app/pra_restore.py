@@ -146,7 +146,7 @@ def start_restore(vm_id, backup_job_id, target_pbs_storage, archive, approved, a
         upid=_pve(dc,cred,"/api2/json/nodes/"+quote(vm["target_node"])+"/qemu",method="POST",
                    data={"vmid":str(vm["target_vmid"]),"archive":archive,
                          "storage":vm["target_storage"],"start":"0","unique":"1",
-                         "onboot":"0","ha-managed":"0"})
+                         "onboot":"0","ha-managed":"0","name":vm["replica_name"]})
         if not isinstance(upid,str) or not upid.startswith("UPID:"):
             raise RestoreError("La restauration n'a pas retourné d'identifiant de tâche Proxmox")
     except httpx.HTTPStatusError:
