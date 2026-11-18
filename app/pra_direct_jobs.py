@@ -383,8 +383,15 @@ def _execute(job,vm,source,target):
         code=channel.recv_exit_status()
         text_out=stdout.decode("utf8","replace")
         if code:
-            raise PRAJobError("Transfert distant en échec (code "+str(code)+
+            exc=PRAJobError("Transfert distant en échec (code "+str(code)+
                                ") ; vérifier la VM secours avant nouvelle tentative")
+            # A failed generation may already have created a NEW candidate.
+            # Keep its VMID for manual inspection, never remove it silently.
+            if job["kind"]=="hot_differential":
+                candidates=re.findall(r"ORIGAMI_HOT_CANDIDATE vmid=(\d+)",stdout.decode("utf8","replace"))
+                if len(candidates)==1:
+                    exc.candidate_vmid=int(candidates[0])
+            raise exc
         marker=("Seed complete" if job["kind"]=="seed" else "ORIGAMI_HOT_GENERATION_READY")
         if marker not in text_out:
             raise PRAJobError("Transfert terminé sans confirmation explicite")
