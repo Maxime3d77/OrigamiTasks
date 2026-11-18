@@ -591,7 +591,7 @@ function protectedVMsPage(){
  const tableRows=current.map(vm=>{
   const last=vm.last_check||{};
   return '<tr><td><b>'+e(vm.source_name||'VM #'+vm.source_vmid)+'</b>'
-   +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
+   +'<div class="muted tinytext">Protection #'+e(vm.id)+' · VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
    +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
    +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
    +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
