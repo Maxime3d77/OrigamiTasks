@@ -58,8 +58,10 @@ def queue(vm_id,source_cred_id,target_cred_id,scratch_path,approved,actor):
     with db.session() as con:
         con.execute("BEGIN IMMEDIATE")
         if con.execute(
-            "SELECT 1 FROM pra_hot_jobs WHERE protected_vm_id=? "
-            "AND status IN ('queued','running','uncertain')",(vm_id,)
+            "SELECT 1 FROM pra_hot_jobs j WHERE j.protected_vm_id=? "
+            "AND (j.status IN ('queued','running') OR "
+            "(j.status='uncertain' AND NOT EXISTS "
+            "(SELECT 1 FROM pra_hot_resolutions r WHERE r.job_id=j.id)))",(vm_id,)
         ).fetchone():
             raise HotPRAError("Génération en cours ou incertaine, contrôle manuel préalable")
         if con.execute(
@@ -91,9 +93,11 @@ def history(vm_id):
     dr_protected_vms._one(vm_id)
     with db.session() as con:
         rows=con.execute(
-            "SELECT id,status,base_vmid,candidate_vmid,disk_count,scanned_bytes,"
-            "transferred_bytes,error,created_at,started_at,finished_at "
-            "FROM pra_hot_jobs WHERE protected_vm_id=? ORDER BY id DESC LIMIT 50",
+            "SELECT j.id,j.status,j.base_vmid,j.candidate_vmid,j.disk_count,j.scanned_bytes,"
+            "j.transferred_bytes,j.error,j.created_at,j.started_at,j.finished_at,"
+            "r.checked_at AS resolved_at FROM pra_hot_jobs j "
+            "LEFT JOIN pra_hot_resolutions r ON r.job_id=j.id "
+            "WHERE j.protected_vm_id=? ORDER BY j.id DESC LIMIT 50",
             (vm_id,)
         ).fetchall()
     return {"items":[dict(row) for row in rows],"source_always_running":True}
@@ -198,3 +202,54 @@ def start():
     if WORKER is None or not WORKER.is_alive():
         WORKER=threading.Thread(target=loop,name="pra-hot-worker",daemon=True)
         WORKER.start()
+
+
+
+def resolve_uncertain(vm_id,job_id,approved,actor):
+    """Release an unknown job ONLY after destination collision checks.
+
+    Remote clones are never deleted here. An operator first deletes any
+    incomplete candidate and verifies nothing in AU uses its VMID.
+    """
+    if approved is not True:
+        raise HotPRAError("Confirmation explicite requise")
+    vm=dr_protected_vms._one(vm_id)
+    with db.session() as con:
+        row=con.execute(
+            "SELECT * FROM pra_hot_jobs WHERE id=? AND protected_vm_id=?",
+            (job_id,vm_id)
+        ).fetchone()
+        if not row or row["status"]!="uncertain":
+            raise HotPRAError("Seule une génération incertaine peut être libérée")
+    dc=integrations.configured_datacenter(vm["target_dc_id"])
+    token=credential(dc["credential_id"])
+    auth=dict(token,ca_cert=dc.get("ca_cert") or token.get("ca_cert") or "",
+              skip_tls_verification=bool(dc.get("skip_tls_verification",False)))
+    items=integrations.discover_datacenter(dc,auth,20)
+    all_vms=[x for x in items if x.get("type")=="qemu"]
+    if row["candidate_vmid"] and any(x.get("vmid")==row["candidate_vmid"] for x in all_vms):
+        raise HotPRAError("Candidate AU toujours présente : retirer manuellement le clone incomplet")
+    with db.session() as con:
+        known={x["candidate_vmid"] for x in con.execute(
+            "SELECT candidate_vmid FROM pra_hot_jobs "
+            "WHERE protected_vm_id=? AND status='success'",(vm_id,)
+        )}
+    # Prevent clearing ambiguous incomplete clones even if their IDs were
+    # lost during a controller crash, based on the predictable candidate name.
+    prefix="REP-"+str(vm_id)+"-G"
+    untracked=[x for x in all_vms if str(x.get("name") or "").startswith(prefix)
+               and x.get("vmid") not in known]
+    if untracked:
+        raise HotPRAError(
+            "Clone(s) AU non vérifié(s) toujours présent(s) : "
+            +", ".join(str(x.get("vmid")) for x in untracked[:5])
+        )
+    with db.session() as con:
+        con.execute(
+            "INSERT OR IGNORE INTO pra_hot_resolutions(job_id,actor,checked_at) "
+            "VALUES(?,?,?)",(job_id,actor,db.now())
+        )
+    db.audit(actor,"pra.hot.uncertain.resolved",vm_id,
+             "job="+str(job_id)+" ; aucune VM supprimée par OrigamiTasks")
+    return {"resolved":True,"remote_deleted":False,
+            "note":"Seul le verrou de suivi est libéré ; historique incertain conservé"}
