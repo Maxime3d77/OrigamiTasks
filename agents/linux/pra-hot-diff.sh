@@ -35,7 +35,7 @@ remote(){
   if [[ $dstuser != root ]]; then printf -v cmd 'sudo -n sh -c %q' "$cmd"; fi
   ssh ""${sshopts[@]}"" "$target" "$cmd"
 }
-guard="set -eu; test -f /etc/pve/nodes/\$(hostname -s)/qemu-server/$base.conf; test \\"\$(qm status '$base')\\" = 'status: stopped'; if ha-manager config 2>/dev/null | grep -Eq '^vm:$base([[:space:]]|$)'; then exit 44; fi; rsync --help | grep -q -- '--write-devices'"
+guard="set -eu; test -f /etc/pve/nodes/\$(hostname -s)/qemu-server/$base.conf; test \"\$(qm status '$base')\" = 'status: stopped'; if ha-manager config 2>/dev/null | grep -Eq '^vm:$base([[:space:]]|$)'; then exit 44; fi; rsync --help | grep -q -- '--write-devices'"
 remote "$guard" || die 'AU base must be stopped, node-local, no HA, rsync-compatible'
 if qm config "$sid" | grep -Eq '^(efidisk|tpmstate|unused|hostpci|usb|ide[0-9]+: .*cloudinit)'; then
  die 'Special disks need dedicated adapter'
@@ -71,20 +71,20 @@ for slot in $slots; do
 done
 candidate=$(remote "pvesh get /cluster/nextid --output-format=json" | tr -d '"[:space:]')
 [[ $candidate =~ ^[1-9][0-9]{1,8}$ && $candidate != "$base" ]] || die 'Invalid candidate VMID'
-remote "set -eu; test \\"\$(qm status '$base')\\" = 'status: stopped'; ! qm config '$candidate' >/dev/null 2>&1; qm clone '$base' '$candidate' --full 1 --storage '$storage' --name 'REP-$protection-G$candidate'; qm set '$candidate' --onboot 0; test \\"\$(qm status '$candidate')\\" = 'status: stopped'" || die 'Unable to clone offline candidate'
+remote "set -eu; test \"\$(qm status '$base')\" = 'status: stopped'; ! qm config '$candidate' >/dev/null 2>&1; qm clone '$base' '$candidate' --full 1 --storage '$storage' --name 'REP-$protection-G$candidate'; qm set '$candidate' --onboot 0; test \"\$(qm status '$candidate')\" = 'status: stopped'" || die 'Unable to clone offline candidate'
 echo "ORIGAMI_HOT_CANDIDATE vmid=$candidate"
 scanned=0; sent=0; count=0
 for slot in $slots; do
  running
  remote "$guard" || die 'Base VM changed state'
- remote "test \\"\$(qm status '$candidate')\\" = 'status: stopped'" || die 'Candidate was started'
+ remote "test \"\$(qm status '$candidate')\" = 'status: stopped'" || die 'Candidate was started'
  raw="$unpacked/disk-drive-$slot.raw"
  vol=$(remote "qm config '$candidate' | sed -n 's/^$slot: \([^,]*\).*/\1/p'")
  [[ $vol =~ ^[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+$ ]] || die 'Candidate volume invalid'
  dev=$(remote "pvesm path '$vol'")
  [[ $dev =~ ^/dev/[A-Za-z0-9_./-]+$ ]] || die 'Candidate not block-backed'
  size=$(stat -c %s "$raw")
- remote "test -b '$dev'; test \\"\$(blockdev --getsize64 '$dev')\\" = '$size'" || die 'Disk size mismatch'
+ remote "test -b '$dev'; test \"\$(blockdev --getsize64 '$dev')\" = '$size'" || die 'Disk size mismatch'
  options=(--checksum --no-whole-file --inplace --write-devices --block-size=65536 --stats)
  if [[ $dstuser != root ]]; then options+=(--rsync-path='sudo -n rsync'); fi
  logfile="$work/$slot.log"
@@ -94,10 +94,10 @@ for slot in $slots; do
  local_hash=$(sha256sum "$raw" | cut -d' ' -f1)
  remote_hash=$(remote "sha256sum '$dev' | cut -d' ' -f1")
  [[ $local_hash == "$remote_hash" ]] || die "Disk checksum mismatch: $slot"
- remote "test \\"\$(qm status '$candidate')\\" = 'status: stopped'" || die 'Candidate started during verification'
+ remote "test \"\$(qm status '$candidate')\" = 'status: stopped'" || die 'Candidate started during verification'
  scanned=$((scanned+size));sent=$((sent+bytes));count=$((count+1))
  echo "ORIGAMI_HOT_DISK_VERIFIED slot=$slot bytes=$size transferred=$bytes"
 done
 running
-remote "test \\"\$(qm status '$candidate')\\" = 'status: stopped'" || die 'Candidate no longer stopped'
+remote "test \"\$(qm status '$candidate')\" = 'status: stopped'" || die 'Candidate no longer stopped'
 echo "ORIGAMI_HOT_GENERATION_READY candidate_vmid=$candidate disks=$count scanned_bytes=$scanned transferred_bytes=$sent"
