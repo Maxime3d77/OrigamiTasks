@@ -172,6 +172,27 @@ def list_batches():
     return {'items': groups}
 
 
+def cleanup_completed(*, keep=20, older_than_days=30):
+    """Remove only completed batch details; audit entries remain intact."""
+    if type(keep) is not int or not 0 <= keep <= 100 or type(older_than_days) is not int or not 1 <= older_than_days <= 365:
+        raise DeploymentError("Politique de rétention invalide")
+    from datetime import datetime, timedelta, timezone
+    cutoff=(datetime.now(timezone.utc)-timedelta(days=older_than_days)).strftime("%Y-%m-%dT%H:%M:%S")
+    with db.session() as con:
+        con.execute("BEGIN IMMEDIATE")
+        completed=con.execute(
+            "SELECT id, finished_at FROM agent_deploy_batches "
+            "WHERE status IN ('success','completed_with_errors','interrupted') "
+            "AND NOT EXISTS (SELECT 1 FROM agent_deploy_targets t WHERE t.batch_id=agent_deploy_batches.id AND t.status IN ('queued','running')) "
+            "ORDER BY id DESC"
+        ).fetchall()
+        old=[row["id"] for n,row in enumerate(completed)
+             if n>=keep or (row["finished_at"] and row["finished_at"][:19]<cutoff)]
+        for batch_id in old:
+            con.execute("DELETE FROM agent_deploy_targets WHERE batch_id=?",(batch_id,))
+            con.execute("DELETE FROM agent_deploy_batches WHERE id=?",(batch_id,))
+    return {"removed":len(old),"remaining":len(completed)-len(old)}
+
 def process_one():
     with db.session() as con:
         # Serialize the claim across any duplicate worker thread or process.
