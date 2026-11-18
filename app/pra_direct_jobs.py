@@ -89,8 +89,6 @@ def _validate(vm_id,kind,source_ssh_id,target_ssh_id):
         raise PRAJobError("Choisir deux identités SSH existantes du coffre-fort")
     if source["fqdn"]==target["fqdn"]:
         raise PRAJobError("Source et secours sur le même nœud")
-    if target["port"]!=22 and kind=="seed":
-        raise PRAJobError("Copie initiale : port SSH cible 22 requis par ce pilote")
     return vm,node,source,target,agent
 
 
@@ -162,7 +160,7 @@ try:
  env=os.environ.copy()
  env["PRA_PINNED_KNOWN_HOSTS"]="/proc/self/fd/"+str(h)
  if data["kind"]=="seed":
-  args.extend([data["target_user"],"/proc/self/fd/"+str(k)])
+  args.extend([data["target_user"],"/proc/self/fd/"+str(k),str(data["target_port"])])
  else:
   args.insert(4,"/proc/self/fd/"+str(k))
   args.append(data["target_user"])
@@ -263,7 +261,8 @@ def _execute(job,vm,source,target):
                   "--confirm-offline",str(target["port"]),str(vm["id"])]
         package={
             "kind":job["kind"],"args":args,
-            "key":target_key,"known_hosts":pinned,"target_user":target_user
+            "key":target_key,"known_hosts":pinned,"target_user":target_user,
+            "target_port":target["port"]
         }
         # Script text contains no secret. The key and pinned host record are
         # provided exclusively on the encrypted SSH stdin, never on argv.
