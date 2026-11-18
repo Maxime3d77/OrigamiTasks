@@ -119,3 +119,18 @@ Prérequis : serveur cible présent **sans ambiguïté** dans l'inventaire SSH, 
 La procédure copie uniquement le script de l'agent (et le superviseur PRA passif sous Linux), sauvegarde les fichiers précédents avec le suffixe `.origami-backup` et redémarre le service Linux ou la tâche Windows. Elle **conserve l'agent_id, le token et les fichiers config.json/modules.json**, sans réinitialiser les sites PRA. La confirmation de version ne prouve pas que le module PRA exécute une réplication réelle.
 
 **Sécurité :** aucune relance automatique après incident. Une coupure SSH peut laisser une mise à jour incertaine ; contrôler le service distant et les sauvegardes locales avant de relancer. Faire un test sur un agent non critique avant un lot de serveurs Proxmox.
+
+### Diagnostiquer un échec de mise à jour
+
+Les étapes d'échec ont désormais des codes lisibles dans le tableau :
+`ssh_host_key` (empreinte non approuvée), `ssh_auth` (connexion ou authentification),
+`sftp` / `sftp_upload` (transfert), `ssh_execute` (commande interrompue),
+`remote_install` (commande distante refusée, sudo/systemd/identité),
+`remote_confirm` (résultat ambigu). Aucun mot de passe ni sortie brute distante n'est affiché.
+
+Sur un agent Linux, en lecture seule :
+```bash
+systemctl status origamitasks-agent.service origamitasks-agent-pra.service --no-pager
+journalctl -u origamitasks-agent.service -n 30 --no-pager
+python3 -c "import ast; p=ast.parse(open('/opt/origamitasks-agent/agent.py').read()); print(next(n.value.value for n in p.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='VERSION' for t in n.targets)))"
+```
