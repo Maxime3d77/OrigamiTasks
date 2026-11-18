@@ -261,6 +261,12 @@ CREATE TABLE IF NOT EXISTS pra_hot_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_pra_hot_job_vm ON pra_hot_jobs(protected_vm_id,id);
 CREATE INDEX IF NOT EXISTS idx_pra_hot_job_queue ON pra_hot_jobs(status,id);
+CREATE TABLE IF NOT EXISTS pra_hot_resolutions (
+ job_id INTEGER PRIMARY KEY REFERENCES pra_hot_jobs(id) ON DELETE RESTRICT,
+ actor TEXT NOT NULL,
+ checked_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pra_hot_preflights (
  protected_vm_id INTEGER PRIMARY KEY REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
  checked_at TEXT NOT NULL,
