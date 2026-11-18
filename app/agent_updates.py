@@ -75,6 +75,52 @@ def queue(agent_ids,credential_id,approved,actor):
     db.audit(actor,"agent.update.queue",",".join(map(str,agent_ids)),str(len(ids))+" updates")
     return {"ids":ids,"queued":len(ids)}
 
+def preflight(agent_ids,credential_id):
+    """Read-only check of the selected vault SSH identity and remote prerequisites."""
+    if not isinstance(agent_ids,list) or not 1<=len(agent_ids)<=20 or any(type(x) is not int or x<=0 for x in agent_ids):
+        raise UpdateError("Sélection de 1 à 20 agents valide requise")
+    if type(credential_id) is not int or credential_id<=0:
+        raise UpdateError("Choisir une identité SSH du coffre-fort")
+    from .executor import _ssh, credential
+    with db.session() as con:
+        row=con.execute("SELECT kind FROM credentials WHERE id=?",(credential_id,)).fetchone()
+        if not row or row["kind"]!="ssh":
+            raise UpdateError("Identité SSH non disponible")
+        targets=[target(con,x) for x in agent_ids]
+    results=[]
+    for agent,host in targets:
+        result={"agent_id":agent["id"],"host":host["fqdn"],"status":"failed","stage":""}
+        try:
+            if host_keys.inspect(host["fqdn"],host["port"]).get("status")!="trusted":
+                raise UpdateError("ssh_host_key : clé publique serveur non approuvée")
+            result["stage"]="ssh_auth"
+            client,_=_ssh(None,{"host":host["fqdn"],"port":host["port"]},credential(credential_id),25)
+            try:
+                result["stage"]="sftp"
+                sftp=client.open_sftp()
+                try:
+                    sftp.normalize(".")
+                finally:
+                    sftp.close()
+                result["stage"]="permissions"
+                # No remote changes: validate rights and installation only.
+                if agent["platform"]=="linux":
+                    cmd="sh -c 'test -f /opt/origamitasks-agent/config.json && { test \"$(id -u)\" -eq 0 || sudo -n true; }'"
+                    _,stdout,_=client.exec_command(cmd,timeout=20)
+                    if stdout.channel.recv_exit_status()!=0:
+                        raise UpdateError("permissions : agent absent ou élévation sudo -n refusée")
+                result["status"]="ok"
+                result["stage"]="ready"
+            finally:
+                client.close()
+        except UpdateError as exc:
+            result["detail"]=str(exc)[:180]
+        except Exception:
+            result["detail"]=result["stage"]+" : vérification impossible (détails distants masqués)"
+        results.append(result)
+    return {"items":results}
+
+
 def jobs():
     with db.session() as con:
         rows=con.execute("SELECT id,agent_id,host,platform,from_version,target_version,status,error,created_at,finished_at "
