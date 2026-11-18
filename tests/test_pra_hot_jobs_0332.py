@@ -78,6 +78,33 @@ def test_hot_generation_lifecycle_mocked(monkeypatch):
             assert vm["ready_hot_replica"]["candidate_vmid"]==900221
             assert vm["failover_available"] is False
             assert client.delete(f"/api/dr/vms/{vmid}",headers=headers).status_code!=200
+            # An interrupted next generation remains UNCERTAIN; its candidate
+            # never becomes the current verified AU standby.
+            def interrupted(job,vm,source,target):
+                err=pra_direct_jobs.PRAJobError("Lien SSH interrompu")
+                err.candidate_vmid=900222
+                raise err
+            monkeypatch.setattr(pra_direct_jobs,"_execute",interrupted)
+            again=client.post(path,json={"source_credential_id":creds[0],
+                "target_credential_id":creds[1],"scratch_path":"/mnt/pra-scratch",
+                "approved":True},headers=headers)
+            assert again.status_code==200,again.text
+            assert pra_hot_jobs.process_one() is True
+            history=client.get(path,headers=headers).json()["items"]
+            assert history[0]["status"]=="uncertain"
+            assert history[0]["candidate_vmid"]==900222
+            assert client.post(path,json={"source_credential_id":creds[0],
+                "target_credential_id":creds[1],"scratch_path":"/mnt/pra-scratch",
+                "approved":True},headers=headers).status_code==409
+            monkeypatch.setattr(integrations,"configured_datacenter",
+                                lambda dc_id:{"credential_id":creds[0]})
+            monkeypatch.setattr(pra_hot_jobs,"credential",lambda cred_id:{})
+            monkeypatch.setattr(integrations,"discover_datacenter",
+                                lambda dc,auth,timeout:[])
+            resolved=client.post(path+"/"+str(history[0]["id"])+"/resolve",
+                                 json={"approved":True},headers=headers)
+            assert resolved.status_code==200,resolved.text
+            assert resolved.json()["remote_deleted"] is False
         finally:
             if vmid is not None:
                 with db.session() as con:
