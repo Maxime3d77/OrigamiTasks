@@ -192,6 +192,15 @@ def agent_deploy_batch_status(request:Request):
     return agent_deployments.list_batches()
 
 
+@app.post('/api/agents/deploy/batches/cleanup')
+def agent_deploy_batch_cleanup(request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    result=agent_deployments.cleanup_completed(keep=20,older_than_days=30)
+    db.audit(user['username'],'agent.deploy.batch.cleanup','history',
+             str(result['removed'])+' lots terminés purgés')
+    return result
+
+
 @app.post('/api/agents/{agent_id}/revoke')
 def revoke_agent(agent_id:int,request:Request):
     user=security.require(request,role='admin',mutate=True)
