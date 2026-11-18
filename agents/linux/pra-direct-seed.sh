@@ -4,21 +4,22 @@
 # Does not update a pre-existing VM or implement incremental deltas.
 set -Eeuo pipefail
 umask 077
-if [[ $# -lt 5 || $# -gt 7 ]]; then
+if [[ $# -lt 5 || $# -gt 8 ]]; then
   echo 'Usage: pra-direct-seed.sh SOURCE_VMID TARGET_HOST TARGET_VMID TARGET_STORAGE --confirm [TARGET_USER] [SSH_PRIVATE_KEY_PATH]' >&2
   exit 2
 fi
 vmid=$1; targethost=$2; targetvmid=$3; storage=$4; confirm=$5
-user=${6:-root}; key=${7:-}
+user=${6:-root}; key=${7:-}; port=${8:-22}
 [[ $confirm == --confirm ]] || { echo 'Confirmation required' >&2; exit 2; }
 [[ $EUID -eq 0 ]] || { echo 'Run as root on source Proxmox node' >&2; exit 2; }
 [[ $vmid =~ ^[1-9][0-9]{1,8}$ && $targetvmid =~ ^[1-9][0-9]{1,8}$ ]] || exit 2
 [[ $targethost =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$ ]] || exit 2
 [[ $storage =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$ ]] || exit 2
 [[ $user =~ ^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$ ]] || exit 2
+[[ $port =~ ^[0-9]{1,5}$ ]] && ((10#$port>=1 && 10#$port<=65535)) || exit 2
 [[ -f "/etc/pve/nodes/$(hostname -s)/qemu-server/${vmid}.conf" ]] || { echo 'VM must be local to the source Proxmox node' >&2; exit 3; }
 qm config "$vmid" >/dev/null || { echo 'Source VM cannot be read' >&2; exit 3; }
-sshargs=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 -o ForwardAgent=no)
+sshargs=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 -o ForwardAgent=no)
 if [[ -n $key ]]; then
   if [[ "$key" == /proc/self/fd/* ]]; then
     [[ "$key" =~ ^/proc/self/fd/[0-9]+$ && -r "$key" ]] || exit 3
