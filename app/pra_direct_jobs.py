@@ -500,6 +500,11 @@ def release_after_manual_clone_removal(vm_id,approved,actor):
     if approved is not True:
         raise PRAJobError("Validation explicite requise")
     vm=dr_protected_vms._one(vm_id)
+    with db.session() as con:
+        if con.execute("SELECT 1 FROM pra_hot_jobs WHERE protected_vm_id=? LIMIT 1",
+                       (vm_id,)).fetchone():
+            raise PRAJobError("Générations à chaud associées : "
+                              "ne pas libérer la copie initiale du PRA")
     from .executor import credential
     dc=integrations.configured_datacenter(vm["target_dc_id"])
     secret=credential(dc["credential_id"])
