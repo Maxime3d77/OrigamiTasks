@@ -616,6 +616,11 @@ function protectedVMsPage(){
    +'<td>'+labelStatus(vm.replication_status)
    +'<div class="muted tinytext">Transfert : '+(vm.direct_job?e(vm.direct_job.kind)+' · '+labelStatus(vm.direct_job.status):'jamais demandé')+'</div>'
    +'<div class="muted tinytext">Dernière copie complète : '+(vm.last_direct_seed?dt(vm.last_direct_seed):'jamais')+'</div>'
+   +'<div class="muted tinytext">Prétest QMP à chaud : '+(vm.hot_preflight
+      ?(vm.hot_preflight.source_running?'SD allumée':'SD non confirmée')
+       +' · '+(vm.hot_preflight.external_provider_api?'API externe détectée':'API externe absente')
+       +' · '+dt(vm.hot_preflight.checked_at)
+      :'jamais effectué')+'</div>'
    +'<div class="muted tinytext">Ancien delta à froid : '+(vm.incremental_sync?e(vm.incremental_sync.status)
      +' · '+e(vm.incremental_sync.disks_done)+'/'+e(vm.incremental_sync.disks_total)+' disques'
      :'jamais exécuté')+'</div>'
