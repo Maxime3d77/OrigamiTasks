@@ -51,16 +51,22 @@ def report(vmid):
         execute("qmp_capabilities",1)
         result["qmp_available"]=True
         blocks=execute("query-block",2)
-        result["disks"]=[{"device":str(x.get("device",""))[:100],
-                          "inserted":bool(x.get("inserted")),
-                          "dirty_bitmaps":[{
-                              "name":str(b.get("name",""))[:100],
-                              "recording":bool(b.get("recording")),
-                              "busy":bool(b.get("busy")),
-                              "persistent":bool(b.get("persistent")),
-                              "inconsistent":bool(b.get("inconsistent"))
-                          } for b in (x.get("inserted") or {}).get("dirty-bitmaps",[]) if isinstance(b,dict)]}
-                         for x in blocks if isinstance(x,dict)]
+        def summarize_block(x):
+            inserted=x.get("inserted")
+            metadata=inserted if isinstance(inserted,dict) else {}
+            dirty=metadata.get("dirty-bitmaps") or []
+            return {
+                "device":str(x.get("device",""))[:100],
+                "inserted":bool(inserted),
+                "dirty_bitmaps":[{
+                    "name":str(b.get("name",""))[:100],
+                    "recording":bool(b.get("recording")),
+                    "busy":bool(b.get("busy")),
+                    "persistent":bool(b.get("persistent")),
+                    "inconsistent":bool(b.get("inconsistent")),
+                } for b in dirty if isinstance(b,dict)]
+            }
+        result["disks"]=[summarize_block(x) for x in blocks if isinstance(x,dict)]
         # Query only command metadata. In particular DO NOT execute
         # block-dirty-bitmap-add or blockdev-backup against a production VM.
         commands=execute("query-commands",3)
