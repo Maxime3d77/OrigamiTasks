@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.29-rc1 — Per-VM status and offline incremental replication
+
+- Per protected VM: latest sync state, recent successful run, completed disks, scanned bytes, bytes sent, duration and error history.
+- Direct offline block-device differential sync using rsync over SSH, no PBS or new .env flag. Existing destination volume is reused and never replaced.
+- Authenticated reporting uses the already-enrolled source Linux agent identity and validates its current cluster-node affiliation.
+- Limitation: both guests must be stopped during sync. No live dirty bitmap engine, scheduled GUI execution, HA fencing or failover.
+
+
 ## 0.3.28 — direct source-to-destination pilot
 
 - Adds `scripts/pra-direct-seed.sh`: real initial QEMU disk copy using `vzdump | SSH | qmrestore`, without PBS or a new `.env` flag.
