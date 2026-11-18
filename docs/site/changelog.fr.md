@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.29-rc1 — Suivi par VM et incrémental à froid
+
+- Historique et dernière synchronisation par VM protégée : état, disques, durée, octets lus, octets envoyés et erreurs.
+- Nouveau pilote de synchronisation différentielle directe sur volumes LVM existants, via rsync bloc-à-bloc et SSH, sans PBS ni nouvelle variable .env.
+- Rapports remontés à OrigamiTasks via le jeton de l'agent Linux déjà enrôlé, vérification du site et de l'hôte actuel de la VM.
+- Restriction : VM source et secours arrêtées pendant l'opération. Pas de synchro à chaud, de planification depuis l'interface, de bascule ni de fencing.
+
+
 ## 0.3.28 — pilote copie directe SD/AU
 
 - Ajout de `scripts/pra-direct-seed.sh` : première copie **réelle** de disques QEMU d'un hôte Proxmox à un autre par flux `vzdump | SSH | qmrestore`, sans PBS ni nouveau paramètre `.env`.
