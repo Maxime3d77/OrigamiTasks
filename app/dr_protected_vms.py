@@ -263,9 +263,18 @@ def list_vms(plan_id=None):
             item["last_check"]=json.loads(item.pop("last_check_json") or "{}")
         except (TypeError,ValueError):
             item["last_check"]={}
-        item["replication_status"]="not_configured"
-        item["last_successful_sync"]=None
-        item["replica_verified"]=False
+        with db.session() as inspect:
+            last=inspect.execute(
+                "SELECT status,finished_at FROM pra_pbs_restores "
+                "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+        item["replication_status"]=(
+            "restored_offline" if last and last["status"]=="completed"
+            else last["status"] if last else "not_configured"
+        )
+        item["last_successful_sync"]=last["finished_at"] if last and last["status"]=="completed" else None
+        # Requires independent fencing before a VM can ever be deemed ready to fail over.
+        item["replica_verified"]=bool(last and last["status"]=="completed")
         item["failover_available"]=False
         result.append(item)
     return result
@@ -296,6 +305,15 @@ def delete(vm_id):
         ).fetchone()
         if pending:
             raise ProtectedVMError("Sauvegarde PBS active ou indéterminée : contrôler la tâche avant suppression")
+        existing=con.execute(
+            "SELECT id FROM pra_pbs_restores WHERE protected_vm_id=?",(vm_id,)
+        ).fetchone()
+        if existing:
+            raise ProtectedVMError(
+                "Protection associée à une restauration PRA : retrait interdit "
+                "pour éviter de déverrouiller un clone non vérifié. "
+                "Contrôler et retirer la VM secours via une procédure de maintenance."
+            )
         con.execute("DELETE FROM dr_protected_vms WHERE id=?",(vm_id,))
     return {"ok":True,"vm_config_removed":True,
             "vm_deleted":False,"disks_deleted":False}
