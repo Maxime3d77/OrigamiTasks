@@ -315,6 +315,24 @@ def list_vms(plan_id=None):
                 "WHERE protected_vm_id=?",(item["id"],)
             ).fetchone()
         item["hot_preflight"]=dict(checked) if checked else None
+        with db.session() as gener:
+            latest=gener.execute(
+                "SELECT id,status,base_vmid,candidate_vmid,disk_count,"
+                "scanned_bytes,transferred_bytes,created_at,finished_at,error "
+                "FROM pra_hot_jobs WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",
+                (item["id"],)
+            ).fetchone()
+            ready=gener.execute(
+                "SELECT candidate_vmid,finished_at FROM pra_hot_jobs "
+                "WHERE protected_vm_id=? AND status='success' ORDER BY id DESC LIMIT 1",
+                (item["id"],)
+            ).fetchone()
+        item["hot_generation"]=dict(latest) if latest else None
+        item["ready_hot_replica"]=dict(ready) if ready else None
+        if ready and not (latest and latest["status"]=="uncertain"):
+            item["replication_status"]="hot_generation_offline_verified"
+        # A successful byte-for-byte clone is NOT a complete fencing witness.
+        item["failover_available"]=False
         result.append(item)
     return result
 
@@ -344,6 +362,10 @@ def delete(vm_id):
         ).fetchone()
         if pending:
             raise ProtectedVMError("Sauvegarde PBS active ou indéterminée : contrôler la tâche avant suppression")
+        if con.execute(
+            "SELECT 1 FROM pra_hot_jobs WHERE protected_vm_id=?",(vm_id,)
+        ).fetchone():
+            raise ProtectedVMError("Historique de génération PRA à chaud lié à la VM : retrait bloqué")
         if con.execute(
             "SELECT 1 FROM pra_direct_jobs WHERE protected_vm_id=?",(vm_id,)
         ).fetchone():
