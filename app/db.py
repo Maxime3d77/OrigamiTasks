@@ -222,6 +222,26 @@ CREATE TABLE IF NOT EXISTS pra_direct_sync_runs (
  last_report_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pra_direct_sync_vm ON pra_direct_sync_runs(protected_vm_id,id);
+CREATE TABLE IF NOT EXISTS pra_direct_jobs (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE RESTRICT,
+ kind TEXT NOT NULL CHECK(kind IN ('seed','offline_incremental')),
+ source_node TEXT NOT NULL,
+ source_host TEXT NOT NULL,
+ target_host TEXT NOT NULL,
+ source_credential_id INTEGER NOT NULL,
+ target_credential_id INTEGER NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('queued','running','success','failed','uncertain')),
+ error TEXT NOT NULL DEFAULT '',
+ actor TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ started_at TEXT,
+ finished_at TEXT,
+ elapsed_seconds INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_pra_direct_jobs_vm ON pra_direct_jobs(protected_vm_id,id);
+CREATE INDEX IF NOT EXISTS idx_pra_direct_jobs_queue ON pra_direct_jobs(status,id);
+
 
 
 
