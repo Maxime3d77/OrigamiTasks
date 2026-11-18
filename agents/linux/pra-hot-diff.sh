@@ -20,7 +20,10 @@ scratch=$6; protection=$7; dstuser=$8; key=$9; port=${10}
 [[ $scratch =~ ^/[A-Za-z0-9_./-]+$ && $scratch != / && -d $scratch && ! -L $scratch ]] || die 'Dedicated scratch directory required'
 [[ $(findmnt -T "$scratch" -n -o TARGET) != / ]] || die 'Scratch filesystem cannot be root filesystem'
 [[ -f /etc/pve/nodes/$(hostname -s)/qemu-server/$sid.conf ]] || die 'Run on current owner node'
-running(){ [[ $(qm status "$sid") == 'status: running' ]] || die 'Source SD must remain running'; }
+running(){
+ [[ -f /etc/pve/nodes/$(hostname -s)/qemu-server/$sid.conf ]] || die 'Source migrated to another node'
+ [[ $(qm status "$sid") == 'status: running' ]] || die 'Source SD must remain running'
+}
 running
 for bin in vzdump vma rsync ssh qm pvesm blockdev sha256sum flock; do command -v "$bin" >/dev/null || die "Missing $bin"; done
 rsync --help | grep -q -- '--write-devices' || die 'Rsync --write-devices unavailable'
@@ -42,6 +45,8 @@ if qm config "$sid" | grep -Eq '^(efidisk|tpmstate|unused|hostpci|usb|ide[0-9]+:
 fi
 slots=$(qm config "$sid" | awk -F ': ' '/^(scsi|virtio|sata|ide)[0-9]+: /{print $1}' | sort)
 [[ -n $slots ]] || die 'No supported disks'
+base_slots=$(remote "qm config '$base' | awk -F ': ' '/^(scsi|virtio|sata|ide)[0-9]+: /{print \\$1}' | sort")
+[[ "$slots" == "$base_slots" ]] || die 'Disk topology changed since last verified generation'
 need=0
 for slot in $slots; do
  vol=$(qm config "$sid" | sed -n "s/^$slot: \([^,]*\).*/\1/p")
