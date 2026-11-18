@@ -35,7 +35,7 @@ reporter="$script_dir/pra-sync-report.py"
 run_uuid=$(cat /proc/sys/kernel/random/uuid)
 done_success=false
 report(){
- python3 "$reporter" "$protection" "$run_uuid" "$1" "$total_disks" "$count" "$scanned" "$sent" "$(($(date +%s)-started))" "$2"
+ python3 "$reporter" "$protection" "$sid" "$did" "$run_uuid" "$1" "$total_disks" "$count" "$scanned" "$sent" "$(($(date +%s)-started))" "$2"
 }
 cleanup(){
  rc=$?
