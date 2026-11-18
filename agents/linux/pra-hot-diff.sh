@@ -59,6 +59,12 @@ done
 available=$(df -B1 --output=avail "$scratch" | tail -1 | tr -d ' ')
 [[ $available =~ ^[0-9]+$ ]] || die 'Cannot check scratch size'
 ((available >= need + need/10)) || die 'Insufficient scratch free space for complete snapshot'
+# Never launch a new full-clone generation without enough measured capacity
+# on the AU Proxmox image storage. pvesm status reports available KiB.
+target_free_kib=$(remote "pvesm status | awk -v s='$storage' '\$1==s && \$3==\"active\" {print \$6}'")
+[[ $target_free_kib =~ ^[0-9]+$ ]] || die 'Target storage free capacity cannot be verified'
+target_free_bytes=$((target_free_kib*1024))
+((target_free_bytes >= need + need/10)) || die 'Insufficient AU storage for a full candidate clone'
 work=$(mktemp -d "$scratch/origami-$sid-XXXXXXXX")
 unpacked="$work/unpacked"
 cleanup(){
