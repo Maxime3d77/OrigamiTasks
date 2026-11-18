@@ -83,8 +83,12 @@ def jobs():
 
 def _remote(job):
     from .executor import _ssh,credential
-    if host_keys.inspect(job["host"],job["port"]).get("status")!="trusted":
-        raise UpdateError("ssh_host_key : clé d'hôte inconnue ou modifiée")
+    try:
+        trusted=host_keys.inspect(job["host"],job["port"])
+    except Exception:
+        raise UpdateError("ssh_host_key : vérification de la clé publique du serveur impossible") from None
+    if trusted.get("status")!="trusted":
+        raise UpdateError("ssh_host_key : clé publique du serveur non approuvée ou modifiée")
     try:
         client,_=_ssh(None,{"host":job["host"],"port":job["port"]},credential(job["credential_id"]),120)
     except Exception:
@@ -103,7 +107,7 @@ def _remote(job):
             for name in names:
                 src=ROOT/("windows" if job["platform"]=="windows" else "linux")/name
                 try:
-                    with sftp.file(stage+"_"+name,"xb") as f:
+                    with sftp.file(stage+"_"+name,"wb") as f:
                         f.write(src.read_bytes())
                     if job["platform"]=="linux":
                         sftp.chmod(stage+"_"+name,0o600)
