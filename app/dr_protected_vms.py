@@ -17,7 +17,7 @@ from . import db, dr_sites, integrations
 
 STRATEGIES = {
     "planning_only": "Étude / simulation uniquement",
-    "offline_copy": "Copie à froid (transport à développer)",
+    "offline_copy": "Copie directe + incrémental à froid (arrêt requis)",
     "pbs_backup_restore": "Sauvegarde PBS + restauration (à intégrer)",
     "storage_array_replication": "Réplication baie / LUN (à qualifier)",
 }
