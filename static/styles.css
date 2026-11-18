@@ -232,3 +232,16 @@
 .proxmox-tls-option .field.checkbox input{flex:0 0 17px;margin:2px 0 0}
 .proxmox-tls-option .hint{display:block;line-height:1.55;margin:0}
 @media(max-width:520px){.proxmox-toolbar .btn{width:100%}.proxmox-grid{grid-template-columns:minmax(0,1fr)}}
+
+
+/* 0.3.13 Proxmox discovery: responsive table search, type filter, sorting and paging. */
+.proxmox-discovery-tools{display:grid;grid-template-columns:minmax(230px,2fr) repeat(3,minmax(130px,1fr));gap:12px;align-items:end;margin:12px 0 15px}
+.proxmox-discovery-tools .field{min-width:0}
+.proxmox-discovery-counts{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.proxmox-discovery-table{min-width:720px}
+.proxmox-discovery-table th,.proxmox-discovery-table td{padding:11px 12px}
+.proxmox-discovery-table td strong{overflow-wrap:anywhere}
+.proxmox-discovery-pager{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+.proxmox-discovery-pager .tool-row{margin:0}
+@media(max-width:980px){.proxmox-discovery-tools{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:580px){.proxmox-discovery-tools{grid-template-columns:minmax(0,1fr)}.proxmox-discovery-pager{align-items:flex-start;flex-direction:column}}
