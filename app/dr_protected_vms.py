@@ -290,6 +290,12 @@ def delete(vm_id):
         row=con.execute("SELECT id FROM dr_protected_vms WHERE id=?",(vm_id,)).fetchone()
         if not row:
             raise ProtectedVMError("Protection VM introuvable")
+        pending=con.execute(
+            "SELECT 1 FROM pra_pbs_backups WHERE protected_vm_id=? "
+            "AND status IN ('starting','submitted','running','uncertain')",(vm_id,)
+        ).fetchone()
+        if pending:
+            raise ProtectedVMError("Sauvegarde PBS active ou indéterminée : contrôler la tâche avant suppression")
         con.execute("DELETE FROM dr_protected_vms WHERE id=?",(vm_id,))
     return {"ok":True,"vm_config_removed":True,
             "vm_deleted":False,"disks_deleted":False}
