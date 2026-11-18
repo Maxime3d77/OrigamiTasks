@@ -240,11 +240,13 @@ function sshGroupForm(groupId=null){
  const group=(state.sshInventory.groups||[]).find(g=>g.id===groupId);
  const servers=group?(state.sshInventory.servers||[]).filter(s=>group.server_ids.includes(s.id)):[];
  const lines=servers.map(x=>x.fqdn+(x.port!==22?':'+x.port:'')).join('\n');
- const body='<form id="sshGroupForm" data-id="'+(group?.id||'')+'">'
+ const body='<form id="sshGroupForm" data-id="'+(group?.id||'')+'" data-managed="'+(group?.managed_proxmox?'1':'0')+'">'
   +'<div class="form-grid">'+field('Nom du groupe','name',group?.name||'')
   +field('Description','description',group?.description||'')+'</div>'
-  +'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="serveur-a.example.org&#10;serveur-b.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>'
-  +'<small class="hint">Ajouter ou retirer des lignes modifie l’appartenance au groupe. Les serveurs retirés restent dans l’inventaire. Port 22 par défaut, préciser :2222 si nécessaire. Max. 250 serveurs.</small></div>'
+  +(group?.managed_proxmox
+   ?'<div class="notice">Groupe géré par découverte Proxmox : nom et description modifiables. Les membres sont synchronisés depuis le cluster, sans être modifiés ici.</div>'
+   :'<div class="field"><span>Liste des FQDN (un par ligne)</span><textarea name="servers" rows="9" placeholder="serveur-a.example.org&#10;serveur-b.example.org&#10;server-custom.infra.example.org:2222">'+e(lines)+'</textarea>')
+  +(group?.managed_proxmox?'':'<small class="hint">Ajouter ou retirer des lignes modifie l’appartenance au groupe. Les serveurs retirés restent dans l’inventaire. Port 22 par défaut, préciser :2222 si nécessaire. Max. 250 serveurs.</small></div>')
   +'<div class="tool-row"><button class="btn primary" type="submit">'+(group?'Enregistrer le groupe':'Créer le groupe')+'</button>'
   +'<button class="btn" data-action="layer-close" data-layer="sshInventoryLayer" type="button">Annuler</button></div></form>';
  openLayer('sshInventoryLayer',group?'Modifier le groupe SSH':'Créer un groupe SSH',body);
@@ -306,7 +308,7 @@ function agentsPage(){
   return '<tr><td class="name-cell">'+e(agent.name)+'<div class="muted tinytext">'+e(agent.hostname||'Non enrôlé')+'</div></td>'
     +'<td>'+e(agent.platform)+' · '+e(agent.version||'Version inconnue')+'</td>'
     +'<td>'+e(agent.group_name)+'</td><td>'+labelStatus(agent.status)+'</td>'
-    +'<td><span class="chip">Standard</span>'
+    +'<td><span class="hint">Base intégrée</span>'
     +(agent.platform==='linux'&&agent.modules?.proxmox?'<span class="chip tag">Proxmox</span>':'')
     +(agent.platform==='linux'&&agent.modules?.pra?'<span class="chip tag">PRA préparatoire</span>':'')
     +'<div class="muted tinytext">'+(agent.modules_in_sync?'Appliqué · révision '+e(agent.modules_revision):'En attente / agent ancien ou hors ligne')+'</div>'
@@ -328,7 +330,7 @@ function agentsPage(){
   +'<th>État</th><th>Modules & synchronisation</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
   +'<tbody>'+(cards||'<tr><td colspan="9">Aucun agent installé.</td></tr>')+'</tbody></table></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2>'
-  +'<button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button></div>'
+  +'<button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button><button class="btn tiny danger" data-action="agent-batch-clean">Nettoyer les lots terminés</button></div>'
   +'<div id="agentBatchList">'+agentBatchPanel()+'</div></div>'
   +'<div class="notice"><b>Révoquer ≠ Désinstaller.</b> La révocation invalide le token sans retirer le programme sur le serveur.'
   +' La désinstallation vérifie la cible et le fichier d’identité de l’agent, supprime uniquement les éléments OrigamiTasks puis révoque son token.'
@@ -354,7 +356,7 @@ function openAgentModulesForm(agentId){
   +'<p><b>Agent :</b> '+e(a.name)+' · '+e(a.platform)+' · '+e(a.hostname||'—')+'</p>'
   +'<p><b>Site :</b> '+siteLine+'</p>'
   +'<div class="agent-module-choices">'
-  +module('standard','Standard','Workflows et inventaire système (toujours nécessaire)',true,true)
+  +'<div class="notice">Base Standard intégrée à tous les agents ; aucune activation séparée nécessaire.</div>'
   +(canInfra?module('proxmox','Proxmox','Association au site et aux clusters ; API Proxmox toujours côté console',m.proxmox)
     +module('pra','PRA — préparation passive','Surveillance locale uniquement : aucune réplication ni bascule VM',m.pra)
     :'<div class="notice">Agent Windows : uniquement le module Standard pour étendre les actions des workflows (scripts PowerShell, processus et services). Aucun rôle Proxmox ou PRA.</div>')
@@ -562,6 +564,7 @@ function protectedVMsPage(){
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
+   +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
@@ -574,8 +577,9 @@ function protectedVMsPage(){
    '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
    +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
   +'<div class="notice dr-safety-notice"><b>Protection encore préparatoire :</b> une entrée REP_ est un nom réservé dans OrigamiTasks, '
-  +'pas une VM réellement créée. Aucun moteur de copie iSCSI/LVM, PBS ou Pure n’a encore été activé ; '
-  +'pas de synchronisation réelle, de démarrage ni de bascule. Les tests sont des vérifications en lecture seule.</div>'
+  +'pas une VM réellement créée. Le mode PBS peut déclencher une sauvegarde réelle approuvée, si configuré ; '
+  +'cela ne restaure pas de VM sur le cluster cible et ne constitue ni une réplication temps réel ni une bascule. '
+  +'Les tests de reprise restent des simulations en lecture seule.</div>'
   +'<div class="stats-grid dr-vm-stat-grid">'
   +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Protections déclaratives</div></div>'
   +'<div class="stat-card"><span class="label">Préparations actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Aucune copie lancée</div></div>'
@@ -635,12 +639,14 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
  const engines=[['planning_only','Préparation / simulation uniquement'],
    ['offline_copy','Copie à froid (transport à développer)'],
-   ['pbs_backup_restore','PBS backup + restore (à intégrer)'],
+   ['pbs_backup_restore','PBS : sauvegarde réelle manuelle (restauration à intégrer)'],
    ['storage_array_replication','Réplication de baie/LUN (à valider)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
   +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Aucune copie ni VM REP_ ne sera créée lors de l’enregistrement. '
   +'Le stockage cible doit accepter des images VM ; un VG iSCSI/LVM peut contenir plusieurs disques sur une même LUN.</div>'
-  +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)+'</p>'
+  +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)
+  +' · '+e(r.source_vm_total??r.vms.length)+' VM QEMU visibles'
+  +' · '+e(r.source_lxc_excluded??0)+' conteneur(s) LXC exclus. Si des VM manquent, contrôler les ACL du token Proxmox sur le cluster.</p>'
   +'<div class="form-grid">'
   +selectField('VM source (choix manuel)','source_vmid',
     r.vms.map(v=>[v.vmid,v.vmid+' — '+v.name+' · '+v.node+' ['+v.status+']']),src.vmid)
@@ -1809,7 +1815,40 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}
  if(a==='agent-deploy-bulk-form'){agentBulkDeployForm();return}
+ if(a==='dr-vm-pbs-backup'){
+  const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
+  if(!vm||vm.engine!=='pbs_backup_restore')return toast('Sélectionner la stratégie PBS sur la protection',false);
+  const storage=prompt('Nom du stockage PBS configuré sur le cluster SOURCE (ex. pbs-backup) :');
+  if(!storage)return;
+  if(!confirm('Déclencher une vraie sauvegarde PVE vers '+storage+' pour la VM '+vm.source_vmid+' ? Cela consomme des ressources, mais ne démarre ni n’arrête les VM.'))return;
+  try{
+   const x=await api('/dr/vms/'+id+'/pbs/backup','POST',{storage,approved:true});
+   modal('Sauvegarde PBS soumise','<div class="notice">Tâche Proxmox soumise : '+e(x.upid)+'. Le résultat n’est pas encore vérifié et aucune VM de secours n’a été créée.</div>',
+    '<button class="btn primary" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+x.job_id+'">Vérifier le résultat</button>',true);
+  }catch(ex){toast(ex.message,false)}
+  return;
+ }
+ if(a==='dr-vm-pbs-status'){
+  try{
+   const x=await api('/dr/vms/'+id+'/pbs/backups/'+Number(b.dataset.job));
+   modal('État de sauvegarde PBS','<div class="notice">État : '+e(x.status)+' · sortie : '+e(x.exitstatus||'en cours')+
+     '. Sauvegarde terminée : '+(x.backup_verified?'oui':'non')+
+     '. VM secours restaurée : non.</div>',
+    '<button class="btn primary" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+e(b.dataset.job)+'">Actualiser le statut</button>',true);
+  }catch(ex){toast(ex.message,false)}
+  return;
+ }
  if(a==='agent-batch-refresh'){await refresh();return}
+ if(a==='agent-batch-clean'){
+  if(!confirm('Supprimer les anciens lots terminés ? Les lots actifs et le journal d’audit seront conservés.'))return;
+  try{
+   const result=await api('/agents/deploy/batches/cleanup','POST',{});
+   state.agentDeployBatches=(await api('/agents/deploy/batches')).items;
+   const panel=document.getElementById('agentBatchList');if(panel)panel.innerHTML=agentBatchPanel();
+   toast(result.removed+' lot(s) terminés nettoyé(s)');
+  }catch(ex){toast(ex.message,false)}
+  return;
+ }
  if(a==='agent-bulk-add-group'){
   const sel=document.getElementById('agentBulkInventoryGroup');
   const group=(state.sshInventory.groups||[]).find(g=>String(g.id)===sel?.value);
@@ -2125,8 +2164,8 @@ async function handleSubmit(ev){
   ev.preventDefault();
   const f=new FormData(ev.target),id=Number(ev.target.dataset.id),name=String(f.get('name')||'').trim();
   if(!name)return toast('Renseigner un nom de groupe',false);
-  const payload={name,description:String(f.get('description')||'').trim(),
-                 servers:String(f.get('servers')||'').split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean)};
+  const payload={name,description:String(f.get('description')||'').trim()};
+  if(ev.target.dataset.managed!=='1')payload.servers=String(f.get('servers')||'').split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean);
   try{
    await api(id?'/ssh/groups/'+id:'/ssh/groups',id?'PUT':'POST',payload);
    closeLayer('sshInventoryLayer');toast('Groupe SSH enregistré');await refresh();

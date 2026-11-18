@@ -6,7 +6,7 @@
 
 **OrigamiTasks** is an open-source, self-hosted Linux workflow scheduler and automation control plane with an editable web UI, a credential vault with full per-protocol diagnostics (including opt-in real SMTP test messages), LDAP role mapping, and remote integrations. Inspired by the **workflow concepts** of VisualCron, it is an independent implementation, not a compatible VisualCron clone.
 
-> **Pre-production v0.3.21-rc1.** Production deployment requires integration/security review. **Not all VisualCron features are implemented**; signed native agent binaries and cross-cluster real-time replication are not available yet.
+> **Pre-production v0.3.22 staging.** Production deployment requires integration/security review. SSH group rename, agent cleanup and the explicitly approved **source-side PBS backup test** are included. **No inter-cluster VM restoration, real-time delta streaming, host-level fencing or automatic failover is implemented.** See [PBS pilot (EN)](docs/site/pra-pbs-pilot.md) / [Pilote PBS (FR)](docs/site/pra-pbs-pilot.fr.md).
 
 ![OrigamiTasks dark dashboard](docs/screenshots/dashboard-dark.png)
 

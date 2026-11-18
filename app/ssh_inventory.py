@@ -84,9 +84,11 @@ def inventory():
         links=[dict(x) for x in con.execute(
             "SELECT server_id,group_id FROM ssh_server_group_members"
         )]
+        managed={int(x["group_id"]) for x in con.execute("SELECT group_id FROM proxmox_ssh_groups")}
     for server in servers:
         server["group_ids"]=sorted(x["group_id"] for x in links if x["server_id"]==server["id"])
     for group in groups:
+        group["managed_proxmox"]=group["id"] in managed
         group["server_ids"]=sorted(x["server_id"] for x in links if x["group_id"]==group["id"])
         group["server_count"]=len(group["server_ids"])
     return {"servers":servers,"groups":groups}
@@ -136,8 +138,10 @@ def update_group(group_id,payload):
     with db.session() as con:
         if not con.execute("SELECT 1 FROM ssh_server_groups WHERE id=?",(group_id,)).fetchone():
             raise InventoryError("Groupe de serveurs introuvable")
-        if con.execute("SELECT 1 FROM proxmox_ssh_groups WHERE group_id=?",(group_id,)).fetchone():
-            raise InventoryError("Groupe géré par Proxmox : le synchroniser depuis la fiche du cluster")
+        managed=con.execute("SELECT 1 FROM proxmox_ssh_groups WHERE group_id=?",(group_id,)).fetchone()
+        # Proxmox owns node membership, not the group's user-facing name.
+        if managed and "servers" in payload:
+            raise InventoryError("Groupe Proxmox : membres synchronisés automatiquement, renommage autorisé")
         if con.execute("SELECT 1 FROM ssh_server_groups WHERE lower(name)=lower(?) AND id<>?",
                        (name,group_id)).fetchone():
             raise InventoryError("Un autre groupe porte ce nom")

@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs
 
 
 @asynccontextmanager
@@ -190,6 +190,15 @@ def batch_deploy_agents(payload:dict[str,Any],request:Request):
 def agent_deploy_batch_status(request:Request):
     security.require(request,role='admin')
     return agent_deployments.list_batches()
+
+
+@app.post('/api/agents/deploy/batches/cleanup')
+def agent_deploy_batch_cleanup(request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    result=agent_deployments.cleanup_completed(keep=20,older_than_days=30)
+    db.audit(user['username'],'agent.deploy.batch.cleanup','history',
+             str(result['removed'])+' lots terminés purgés')
+    return result
 
 
 @app.post('/api/agents/{agent_id}/revoke')
@@ -624,6 +633,27 @@ def replicate_protected_vm_not_available(vm_id:int,request:Request):
     raise HTTPException(409,
         'Réplication réelle indisponible : définir et valider un transport '
         'cohérent (baie/PBS), la gestion du stockage et le fencing avant copie.')
+
+
+@app.post('/api/dr/vms/{vm_id}/pbs/backup')
+def start_protected_vm_pbs_backup(vm_id:int, payload:dict[str,Any], request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'storage','approved'}:
+        raise HTTPException(422,'Stockage PBS et approbation explicite requis')
+    try:
+        return pra_pbs.start_backup(vm_id,payload.get('storage'),payload.get('approved'),
+                                    user['username'])
+    except pra_pbs.PBSBackupError as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/pbs/backups/{job_id}')
+def get_protected_vm_pbs_backup(vm_id:int,job_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_pbs.status(vm_id,job_id)
+    except pra_pbs.PBSBackupError as exc:
+        raise HTTPException(409,str(exc)) from None
 
 
 @app.get('/api/dr/plans')
