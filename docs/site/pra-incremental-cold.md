@@ -1,5 +1,7 @@
 # v0.3.29 — Offline incremental sync and per-VM monitoring
 
+> **WARNING v0.3.31: the offline PRA pilot is DISABLED. The primary SD VM must stay running. The older instructions below are historical reference only and no longer executable.**
+
 The Protected VMs panel now displays the latest incremental sync state, last successful timestamp, processed disks, scanned bytes, actual rsync bytes sent, duration and errors. Incremental history shows 30 records per VM.
 
 The scripts/pra-incremental-cold.sh pilot uses rsync with --copy-devices --write-devices --checksum --no-whole-file --inplace over direct SSH between two independently iSCSI-backed Proxmox nodes. An initial direct seed and matching existing LVM disk volumes are required. Only changed blocks are transferred, but the full devices are scanned.
