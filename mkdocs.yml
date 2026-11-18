@@ -19,6 +19,7 @@ nav:
   - Offline incremental and per-VM tracking: pra-incremental-cold.md
   - Integrated Linux PRA agent: pra-agent-integrated.md
   - Live PRA QMP compatibility: pra-hot-replication.md
+  - Live direct differential (staging): pra-hot-differential.md
   - Agents: agents.md
   - Operations & Upgrades: operations.md
   - Security: security.md
@@ -74,6 +75,7 @@ plugins:
             Offline incremental and per-VM tracking: Incrémental à froid et suivi par VM
             Integrated Linux PRA agent: Module PRA intégré à l'agent
             Live PRA QMP compatibility: Prétest PRA à chaud QMP
+            Live direct differential (staging): Différentiel direct à chaud (recette)
             Agents: Agents
             Operations & Upgrades: Exploitation et mises à jour
             Security: Sécurité
