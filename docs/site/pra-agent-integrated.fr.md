@@ -11,7 +11,7 @@ Aucune commande scp ni nouvelle variable .env n'est nécessaire. Ne pas placer u
 1. Dans la console, ajouter le cluster SD et le cluster AU, chacun avec son inventaire Proxmox et les nœuds associés à des serveurs SSH (association cluster ↔ nœud ↔ FQDN).
 2. Associer les agents Linux du site SD au site PRA principal ; installer et mettre à jour l'agent du nœud qui héberge la VM source en version **0.3.30**. Activer le module PRA dans sa configuration.
 3. Créer la VM protégée avec moteur **Copie directe + incrémental à froid**. Choisir le VMID source, un VMID libre pour AU, le nœud AU et le stockage de disques cible.
-4. Dans les actions de la VM, cliquer **Copie initiale directe**, sélectionner une identité SSH du coffre pour joindre le nœud SD (root ou utilisateur avec sudo -n) et une pour joindre AU (root dans ce pilote), confirmer.
+4. Dans les actions de la VM, cliquer **Copie initiale directe**, sélectionner une identité SSH du coffre pour joindre le nœud SD (root ou utilisateur avec sudo -n) et une pour joindre AU (root ou utilisateur autorisé par sudo -n), confirmer.
 5. Lorsque la copie est terminée et vérifiée éteinte, on peut réaliser un nouveau point à froid par **Synchronisation incrémentale à froid**. **Arrêter la source ET le secours** et supprimer leur participation HA avant ce test. Ils doivent rester arrêtés tout le long.
 6. Consulter **Journal des transferts**, le statut dans la fiche VM et **Suivi incrémental** pour les métriques détaillées des disques.
 
