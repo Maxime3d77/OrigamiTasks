@@ -136,8 +136,10 @@ def update_group(group_id,payload):
     with db.session() as con:
         if not con.execute("SELECT 1 FROM ssh_server_groups WHERE id=?",(group_id,)).fetchone():
             raise InventoryError("Groupe de serveurs introuvable")
-        if con.execute("SELECT 1 FROM proxmox_ssh_groups WHERE group_id=?",(group_id,)).fetchone():
-            raise InventoryError("Groupe géré par Proxmox : le synchroniser depuis la fiche du cluster")
+        managed=con.execute("SELECT 1 FROM proxmox_ssh_groups WHERE group_id=?",(group_id,)).fetchone()
+        # Proxmox owns node membership, not the group's user-facing name.
+        if managed and "servers" in payload:
+            raise InventoryError("Groupe Proxmox : membres synchronisés automatiquement, renommage autorisé")
         if con.execute("SELECT 1 FROM ssh_server_groups WHERE lower(name)=lower(?) AND id<>?",
                        (name,group_id)).fetchone():
             raise InventoryError("Un autre groupe porte ce nom")
