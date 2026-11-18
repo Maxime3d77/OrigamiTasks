@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.23-rc1 — 2026-11-18
+
+- **Single agent update** button for an agent reporting an older known version.
+- **Bulk update outdated online agents** with explicit admin approval, SSH vault credential, serial job processing, per-host statuses and fresh version heartbeat confirmation.
+- **Identity preservation**: keep agent `config.json`, token, `modules.json`, registered ID and PRA site relationships; update only the executable script and passive Linux PRA worker.
+- **Safety**: known pinned SSH host, unambiguous inventory matching, `.origami-backup` files, best-effort executable rollback after failed restart, no automatic retry.
+- **Limitations**: upgrading the agent does not implement cross-cluster delta replication or enforce Proxmox host-level fencing.
+
+
 ## 0.3.21-rc1 — 2026-11-17
 
 - **Protected DR VMs**: dedicated admin page and shortcut from every DR group. Manually choose a discovered source QEMU VM, unoccupied target VMID, target cluster/node/image storage, desired frequency and planned transfer engine (planning, cold offline copy, PBS, array replication). Saving only creates a **protection plan record** with proposed `REP_<vm-name>`—**no target VM or disk is created**. Enforce one source VM / one target VMID per cluster and prohibit cross-environment PP/production mappings.

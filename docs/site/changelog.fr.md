@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.23-rc1 — 18 novembre 2026
+
+- **Mise à jour d'agents à l'unité** : bouton « Mettre à jour » pour un agent dont la version connue est plus ancienne que celle intégrée à la console.
+- **Mise à jour de tous les agents obsolètes en ligne** : lot SSH administrateur avec confirmation et une identité SSH du coffre ; exécution séquentielle, statut par agent et confirmation après heartbeat à la nouvelle version.
+- **Préservation de l'identité et du PRA** : conserver `config.json`, `modules.json`, jeton, association de site et ID de l'agent ; remplacement uniquement du script de l'agent et du superviseur PRA passif Linux.
+- **Protection des opérations** : hôte identifié dans l'inventaire et clé SSH vérifiée, copies de sauvegarde locales `.origami-backup`, tentative de restauration des exécutables en cas d'échec de redémarrage, pas de relance automatique.
+- **Limitation** : la mise à jour des agents ne rend pas opérationnels le fencing Proxmox ni la réplication de VM inter-clusters.
+
+
 ## 0.3.21-rc1 — 17 novembre 2026
 
 - **VM protégées PRA** : écran dédié dans l'administration et raccourci depuis chaque groupe PRA. Sélection **manuelle** d'une VM QEMU découverte sur le cluster principal ; saisie du VMID cible libre, nœud et stockage cible Proxmox, fréquence souhaitée et stratégie envisagée (étude, copie à froid, PBS ou baie). Enregistrement d'une **fiche de protection**, avec nom candidat `REP_<nom-vm>`, sans créer de VM ni copier de disques. Une protection par VM source et par VMID cible pour éviter les collisions. Les clusters de PP et Production ne peuvent pas être croisés.

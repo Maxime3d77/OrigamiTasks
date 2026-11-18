@@ -243,6 +243,17 @@ CREATE TABLE IF NOT EXISTS agent_deploy_targets (
  created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_agent_deploy_queue ON agent_deploy_targets(status,id);
+CREATE TABLE IF NOT EXISTS agent_update_jobs (
+ id INTEGER PRIMARY KEY,
+ agent_id INTEGER NOT NULL REFERENCES agents(id),
+ host TEXT NOT NULL, port INTEGER NOT NULL,
+ platform TEXT NOT NULL,
+ from_version TEXT NOT NULL, target_version TEXT NOT NULL,
+ credential_id INTEGER NOT NULL, status TEXT NOT NULL,
+ actor TEXT NOT NULL, error TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL, finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_update_queue ON agent_update_jobs(status,id);
 CREATE TABLE IF NOT EXISTS agent_tasks (
  id INTEGER PRIMARY KEY, agent_id INTEGER NOT NULL REFERENCES agents(id),
  run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
