@@ -4,6 +4,7 @@ This is a real PVE/PBS snapshot BACKUP, not cross-cluster replication, restore,
 witness fencing, hot-standby, or automatic failover. No VM start/stop is issued.
 """
 import re
+import httpx
 from urllib.parse import quote
 from . import config, db, dr_protected_vms, integrations
 
@@ -71,6 +72,13 @@ def start_backup(vm_id, storage, approved, actor):
         )
         if not isinstance(upid,str) or not upid.startswith("UPID:"):
             raise PBSBackupError("Proxmox n'a pas renvoyé d'identifiant de tâche valide")
+    except httpx.HTTPStatusError:
+        # An explicit PVE rejection is retryable after correcting the cause.
+        # Do not expose potentially sensitive remote response text.
+        with db.session() as con:
+            con.execute("UPDATE pra_pbs_backups SET status='failed',finished_at=? WHERE id=?",
+                        (db.now(),job))
+        raise PBSBackupError("Proxmox a refusé la sauvegarde PBS : vérifier stockage, droits et état de la VM") from None
     except Exception:
         with db.session() as con:
             con.execute("UPDATE pra_pbs_backups SET status='uncertain' WHERE id=?",(job,))
