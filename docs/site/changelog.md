@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.28 — direct source-to-destination pilot
+
+- Adds `scripts/pra-direct-seed.sh`: real initial QEMU disk copy using `vzdump | SSH | qmrestore`, without PBS or a new `.env` flag.
+- CLI staging only; source requires a preauthorized technical key to reach the destination. No source stop, remote overwrite or automatic guest start.
+- Does **not** implement incremental delta sync, vault/UI integration, failover or host fencing.
+
+
 ## 0.3.27-rc1 — 2026-11-18
 
 - **First actual VM data copy between independent Proxmox clusters** through PBS: restores an explicitly selected available backup onto destination cluster-local image storage. Target VM is created stopped, without overwriting or failover.
