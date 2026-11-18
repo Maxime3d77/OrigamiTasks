@@ -6,7 +6,7 @@ The Linux agent 0.3.30 now bundles the full-seed, offline differential and authe
 
 1. Register both independent Proxmox clusters, map cluster nodes to SSH inventory hosts, assign the current source-node Linux agent to the primary PRA site, and update it to 0.3.30.
 2. Create a protected VM using the **Direct copy + offline incremental** engine with a free standby VMID, selected standby node and target image storage.
-3. Click **Direct initial seed**. Select the controller-vault SSH identity for the SD source node (root or sudo -n), and the vault identity for the AU target node (root for this pilot). Confirm.
+3. Click **Direct initial seed**. Select the controller-vault SSH identity for the SD source node (root or sudo -n), and the vault identity for the AU target node (root or noninteractive sudo). Confirm.
 4. Review the target VM in Proxmox. It is created stopped with new MACs and no autostart, without PBS or shared SAN.
 5. For subsequent OFFLINE updates, STOP BOTH VMs and remove them from HA first, then click **Offline incremental synchronization**. The script checks source owner, standby state, block volume topology and sizes, and transfers only changed rsync blocks.
 6. Use the VM's transfer history and incremental history for each job's status, duration, scanned bytes, sent bytes and errors.
