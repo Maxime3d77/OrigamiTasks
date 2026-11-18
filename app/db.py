@@ -185,6 +185,15 @@ CREATE TABLE IF NOT EXISTS dr_vm_tests (
  created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dr_vm_tests_vm ON dr_vm_tests(protected_vm_id,id);
+CREATE TABLE IF NOT EXISTS pra_pbs_backups (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE RESTRICT,
+ storage TEXT NOT NULL, node TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('starting','submitted','running','uncertain','completed','failed')),
+ upid TEXT,actor TEXT NOT NULL,created_at TEXT NOT NULL,finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pra_pbs_backup_vm ON pra_pbs_backups(protected_vm_id,id);
+
 CREATE TABLE IF NOT EXISTS runs (
  id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
  job_name TEXT NOT NULL, steps_snapshot TEXT NOT NULL, variables_json TEXT NOT NULL DEFAULT '{}',
