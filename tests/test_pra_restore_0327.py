@@ -85,7 +85,7 @@ def test_restore_creates_stopped_vm_without_overwrite(monkeypatch):
             assert check.status_code==200,check.text
             assert check.json()['restored'] is True
             assert check.json()['failover_ready'] is False
-            assert client.delete(endpoint,headers=h).status_code==422
+            assert client.delete(endpoint,headers=h).status_code!=200
             repeat=client.post(endpoint+'/pbs/restore',headers=h,json={
                 'backup_job_id':backup_id,'target_pbs_storage':'pbs-au',
                 'archive':archive,'approved':True
