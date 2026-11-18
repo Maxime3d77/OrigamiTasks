@@ -753,7 +753,7 @@ function openDirectPRAJobForm(id,kind){
   +'<p>VM '+e(vm.source_vmid)+' → '+e(vm.target_vmid)+' · '+e(vm.source_dc_name)+' → '+e(vm.target_dc_name)+'</p>'
   +'<div class="form-grid">'
   +selectField('Identité SSH du nœud SD (root ou sudo -n)','source_credential_id',options,'')
-  +selectField('Identité SSH du nœud AU (root)','target_credential_id',options,'')
+  +selectField('Identité SSH du nœud AU (root ou sudo -n)','target_credential_id',options,'')
   +'</div><p class="hint">Les identités sont sélectionnées dans le coffre OrigamiTasks. '
   +'L’agent embarque les scripts PRA automatiquement après sa mise à jour en v0.3.30. '
   +'Le transfert est direct entre les nœuds, la clé cible est transmise en mémoire seulement. '
