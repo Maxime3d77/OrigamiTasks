@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates
 
 
 @asynccontextmanager
@@ -25,10 +25,12 @@ async def lifespan(app):
     engine.start()
     scheduler.start()
     agent_deployments.start()
+    agent_updates.start()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
     agent_deployments.STOP.set()
+    agent_updates.STOP.set()
 
 
 app = FastAPI(title='OrigamiTasks', version=config.APP_VERSION, docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -199,6 +201,24 @@ def agent_deploy_batch_cleanup(request:Request):
     db.audit(user['username'],'agent.deploy.batch.cleanup','history',
              str(result['removed'])+' lots terminés purgés')
     return result
+
+
+@app.get('/api/agents/updates')
+def list_agent_updates(request:Request):
+    security.require(request,role='admin')
+    return agent_updates.jobs()
+
+
+@app.post('/api/agents/updates')
+def queue_agent_updates(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'agent_ids','credential_id','approved'}:
+        raise HTTPException(422,'Sélection, identité SSH et confirmation obligatoires')
+    try:
+        return agent_updates.queue(payload['agent_ids'],payload['credential_id'],
+                                   payload['approved'],user['username'])
+    except agent_updates.UpdateError as exc:
+        raise HTTPException(422,str(exc)) from None
 
 
 @app.post('/api/agents/{agent_id}/revoke')
