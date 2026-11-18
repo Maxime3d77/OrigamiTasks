@@ -33,3 +33,18 @@ L'API de tâches OrigamiTasks refuse désormais **start/reboot sur un VMID cible
 - Tester sur VM sacrifiable : migration intra-cluster pendant sauvegarde, coupure réseau, stockage inaccessible, témoin perdu, bascule et failback contrôlés. Aucune bascule automatique sans preuve de fencing.
 
 Voir [architecture du PRA](https://github.com/Maxime3d77/OrigamiTasks/blob/feat/dr-protected-vms-simulations-0.3.21/docs/ARCHITECTURE-PRA-INTERSITES.fr.md).
+
+## Restauration réelle d'une copie sur le cluster de secours (0.3.27)
+
+La nouvelle action **Restaurer sur site de secours** utilise l'API Proxmox `POST /nodes/{node}/qemu` avec `archive`, `vmid`, `storage`, `start=0`, `onboot=0`, `ha-managed=0` et `unique=1`. Elle crée les disques et la configuration d'une VM arrêtée sur le cluster cible, **sans écraser une VM préexistante**. OrigamiTasks contrôle le job UPID, la présence d'une VM QEMU arrêtée et le paramètre onboot désactivé avant d'afficher la réussite.
+
+**Précondition obligatoire :** les clusters source et cible doivent pouvoir consulter le **même snapshot PBS** : soit même serveur/datastore PBS configuré sur les deux clusters, soit PBS distant synchronisé avec la même sauvegarde disponible. Aucun routage iSCSI intersite n'est nécessaire ; les transferts se font via PBS et l'API réseau Proxmox.
+
+Procédure pour une VM sacrifiable :
+1. Vérifier le stockage PBS accessible aux deux clusters et les ACL `Datastore.Backup` / `Datastore.Read` et droits de restauration Proxmox.
+2. Ajouter la protection avec moteur PBS, VMID cible libre, nœud cible et stockage images local à AU PP.
+3. **Sauvegarder sur PBS**, puis **Vérifier le résultat** jusqu'à `completed/OK`. Noter l'identifiant numérique du job.
+4. **Restaurer sur site de secours**, entrer l'identifiant du job et le nom du PBS sur le cluster cible. Sélectionner explicitement le snapshot source correspondant, confirmer l'écriture.
+5. Utiliser **Vérifier le résultat** jusqu'à `completed`. Sur le cluster de secours, contrôler `qm status <VMID>`, `qm config <VMID>`, et `pvesm status`.
+
+**Limitations de sécurité :** ne PAS démarrer la VM source et la copie simultanément sur un réseau connecté. L'action restaure une seule génération de sauvegarde et ne met pas à jour automatiquement une copie déjà créée. Aucune synchronisation continue, bascule automatique, témoin indépendant ou fencing côté hyperviseur ne sont fournis. Ne pas utiliser ce pilote comme plan PRA production.
