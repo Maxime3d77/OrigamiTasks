@@ -755,6 +755,15 @@ def direct_vm_sync_history(vm_id:int,request:Request):
         raise HTTPException(404,str(exc)) from None
 
 
+@app.get('/api/dr/vms/{vm_id}/hot-preflight')
+def vm_hot_preflight(vm_id:int,source_credential_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_direct_jobs.hot_preflight(vm_id,source_credential_id)
+    except (pra_direct_jobs.PRAJobError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
 @app.get('/api/dr/vms/{vm_id}/direct-jobs')
 def direct_vm_jobs(vm_id:int,request:Request):
     security.require(request,role='admin')
