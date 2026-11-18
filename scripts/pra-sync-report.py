@@ -17,7 +17,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def main():
-    if len(sys.argv)!=10:
+    if len(sys.argv)!=12:
         raise ValueError("Usage: report.py PROTECTION RUN_UUID STATUS TOTAL DONE SCANNED TRANSFERRED ELAPSED ERROR")
     protection,job,status,total,done,scanned,transferred,elapsed,error=sys.argv[1:]
     config=Path("/opt/origamitasks-agent/config.json")
