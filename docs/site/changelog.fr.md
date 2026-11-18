@@ -1,5 +1,12 @@
 # Historique des modifications
 
+## 0.3.28 — pilote copie directe SD/AU
+
+- Ajout de `scripts/pra-direct-seed.sh` : première copie **réelle** de disques QEMU d'un hôte Proxmox à un autre par flux `vzdump | SSH | qmrestore`, sans PBS ni nouveau paramètre `.env`.
+- Réservé à la recette CLI, avec SSH technique préautorisé depuis la source vers la cible. Aucun démarrage automatique, écrasement ni arrêt de la VM source.
+- Ce pilote ne fournit **pas** la synchronisation delta, l'intégration au coffre/UI, le failover ou le fencing.
+
+
 ## 0.3.27-rc1 — 18 novembre 2026
 
 - **Première copie réelle de VM entre clusters Proxmox** : restauration depuis un snapshot PBS visible sur le cluster cible avec copie des disques vers le stockage de destination. Création du VMID cible éteint, sans remplacement et sans bascule.
