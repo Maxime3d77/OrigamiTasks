@@ -779,6 +779,19 @@ def start_direct_vm_job(vm_id:int,payload:dict[str,Any],request:Request):
         raise HTTPException(409,str(exc)) from None
 
 
+@app.post('/api/dr/vms/{vm_id}/direct-release')
+def release_direct_vm_tracking(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'}:
+        raise HTTPException(422,'Confirmation explicite requise')
+    try:
+        return pra_direct_jobs.release_after_manual_clone_removal(
+            vm_id,payload['approved'],user['username']
+        )
+    except (pra_direct_jobs.PRAJobError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
 @app.get('/api/dr/plans')
 def get_dr_plans(request:Request):
     security.require(request,role='admin')
