@@ -35,7 +35,7 @@ reporter="$script_dir/pra-sync-report.py"
 run_uuid=$(cat /proc/sys/kernel/random/uuid)
 done_success=false
 report(){
- python3 "$reporter" "$protection" "$run_uuid" "$1" "$total_disks" "$count" "$scanned" "$(($(date +%s)-started))" "$2"
+ python3 "$reporter" "$protection" "$run_uuid" "$1" "$total_disks" "$count" "$scanned" "$sent" "$(($(date +%s)-started))" "$2"
 }
 cleanup(){
  rc=$?
@@ -49,7 +49,7 @@ trap cleanup EXIT
 printf '%s\n' "$source_slots" > "$tmp"
 exec 9>"/run/lock/origami-pra-cold-$sid.lock"
 flock -n 9 || die 'Sync already running on source node'
-started=$(date +%s); count=0; scanned=0
+started=$(date +%s); count=0; scanned=0; sent=0
 total_disks=$(wc -l < "$tmp")
 report_started=false
 report running '' || die 'Tracking report refused: verify agent site and current source node'
@@ -68,14 +68,18 @@ while IFS= read -r slot; do
   size=$(blockdev --getsize64 "$srcdev")
   remote "test -b '$dstdev' && test \"\$(blockdev --getsize64 '$dstdev')\" = '$size'" || die 'Block size mismatch'
   echo "OFFLINE incremental synchronization: $slot ($size bytes)"
+  disk_log=$(mktemp)
   rsync --checksum --no-whole-file --copy-devices --write-devices \
     --inplace --block-size=65536 --stats \
     -e "ssh -i $key -p $port -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes" \
-    "$srcdev" "$target:$dstdev"
+    "$srcdev" "$target:$dstdev" | tee "$disk_log"
+  sent_this=$(awk '/^Total bytes sent:/ {gsub(/,/,"",$4);print $4}' "$disk_log" | tail -1)
+  rm -f "$disk_log"
+  [[ $sent_this =~ ^[0-9]+$ ]] || die 'Rsync did not report network bytes'
   source_guard; remote "$target_guard" || die 'A VM changed state during transfer'
-  count=$((count+1)); scanned=$((scanned+size))
+  count=$((count+1)); scanned=$((scanned+size)); sent=$((sent+sent_this))
   report running '' || die 'Progress report refused'
 done < "$tmp"
 report success '' || die 'Final status report refused'
 done_success=true
-echo "ORIGAMI_INCREMENTAL_COLD_OK vmid=$sid target_vmid=$did disks=$count scanned_bytes=$scanned elapsed_seconds=$(($(date +%s)-started))"
+echo "ORIGAMI_INCREMENTAL_COLD_OK vmid=$sid target_vmid=$did disks=$count scanned_bytes=$scanned transferred_bytes=$sent elapsed_seconds=$(($(date +%s)-started))"
