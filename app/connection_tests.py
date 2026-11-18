@@ -167,28 +167,25 @@ def ssh(values, options=None):
     client.load_system_host_keys()
     if config.KNOWN_HOSTS.is_file():
         client.load_host_keys(str(config.KNOWN_HOSTS))
-    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    from .ssh_keys import configured_host_key_policy, SSHUnknownHostKey
+    client.set_missing_host_key_policy(configured_host_key_policy())
     params = dict(hostname=host, port=_port(values.get("port"), 22), username=user,
                   timeout=TIMEOUT, auth_timeout=TIMEOUT, banner_timeout=TIMEOUT,
                   look_for_keys=False, allow_agent=False)
     if values.get("private_key"):
-        for cls in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey):
-            try:
-                params["pkey"] = cls.from_private_key(
-                    io.StringIO(values["private_key"]),
-                    password=values.get("passphrase") or None
-                )
-                break
-            except (paramiko.SSHException, ValueError):
-                continue
-        if "pkey" not in params:
-            raise ConnectionTestError("Clé privée SSH invalide ou phrase secrète incorrecte")
+        from .ssh_keys import load_private_key, SSHKeyError
+        try:
+            params["pkey"]=load_private_key(
+                values["private_key"],values.get("passphrase")
+            )
+        except SSHKeyError as exc:
+            raise ConnectionTestError(str(exc)) from None
     else:
         params["password"] = values["password"]
     try:
         client.connect(**params)
         checks = [check("Connectivité TCP", "Connexion établie"),
-                  check("Clé de l'hôte", "Empreinte vérifiée dans known_hosts"),
+                  check("Clé de l'hôte", "Nouvelle clé automatiquement enregistrée dans known_hosts" if getattr(client, "_origami_added_host_key", False) else "Clé reconnue dans known_hosts"),
                   check("Authentification", "Compte SSH accepté")]
         if _bool(options, "check_sftp"):
             sftp = client.open_sftp()
@@ -208,13 +205,15 @@ def ssh(values, options=None):
                 raise ConnectionTestError("SSH : whoami a échoué ou dépassé le délai")
             checks.append(check("Commande distante", "whoami terminé sans modification"))
         return ok("ssh", "Clé d’hôte et authentification SSH vérifiées.", checks)
+    except SSHUnknownHostKey as exc:
+        raise ConnectionTestError(str(exc)) from None
     except paramiko.BadHostKeyException:
         raise ConnectionTestError("SSH : empreinte d'hôte différente de la clé approuvée") from None
     except paramiko.AuthenticationException:
         raise ConnectionTestError("SSH : authentification refusée par le serveur") from None
     except paramiko.SSHException:
         raise ConnectionTestError(
-            "SSH : protocole/clé d'hôte non validé. Vérifier known_hosts et l'algorithme de clé."
+            "SSH : échec de négociation du protocole SSH ou algorithmes incompatibles. Clé d'hôte inconnue et empreinte différente sont signalées séparément."
         ) from None
     except (OSError, TimeoutError, EOFError):
         raise ConnectionTestError("SSH : hôte injoignable, sous-système indisponible ou délai dépassé") from None
@@ -273,7 +272,7 @@ def ftp(values, options=None):
 def ldap(values, options=None):
     """Bind and optional scoped user/group lookups; never write LDAP objects."""
     options = options or {}
-    from ldap3 import Server, Connection, Tls, BASE, SUBTREE
+    from ldap3 import Server, Connection, Tls, BASE, SUBTREE, NONE
     from ldap3.utils.conv import escape_filter_chars
     uri = str(values.get("uri") or "")
     parsed = urlsplit(uri)
@@ -288,18 +287,21 @@ def ldap(values, options=None):
     if not username or not password:
         raise ConnectionTestError("LDAP : DN et mot de passe de liaison obligatoires")
     try:
-        ca_cert = ldap_settings.current().get("ca_cert") or None
-        server = Server(uri, tls=Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=ca_cert),
-                        connect_timeout=TIMEOUT)
+        settings=ldap_settings.current()
+        server = Server(uri, tls=ldap_settings.tls_for(settings,uri=uri),
+                        connect_timeout=TIMEOUT, get_info=NONE)
         conn = Connection(server, user=username, password=password,
-                          receive_timeout=TIMEOUT, auto_bind=not starttls)
+                          receive_timeout=TIMEOUT, auto_bind=not starttls,
+                          check_names=False)
         try:
             if starttls:
                 conn.open()
                 if not conn.start_tls() or not conn.bind():
                     raise ConnectionTestError("LDAP : négociation STARTTLS ou bind refusé")
             base = values.get("base_dn") or ""
-            checks = [check("TLS / certificat", "Connexion chiffrée validée"),
+            checks = [warning("TLS / certificat", "Transport chiffré, mais certificat NON vérifié (exception dangereuse)")
+                      if settings.get('skip_cert_verification')
+                      else check("TLS / certificat", "Certificat et transport TLS validés"),
                       check("Authentification", "Bind du compte de service accepté")]
             if base:
                 if not conn.search(base, "(objectClass=*)", BASE, attributes=["objectClass"],
@@ -408,14 +410,16 @@ def matrix(values, options=None, credential_id=None):
 def proxmox(values, options=None):
     """Read-only token, node inventory and optional named-node status."""
     options = options or {}
-    base = _allowed_origin(values.get("url"), config.PROXMOX_ALLOWED_HOSTS)
+    base = integrations.authorized_origin(values.get("url"), config.PROXMOX_ALLOWED_HOSTS, admin_proxmox=True)
     try:
         data = integrations.proxmox_request(
             base, values, "/api2/json/access/permissions", timeout=TIMEOUT
         )
         if not isinstance(data, dict):
             raise ConnectionTestError("Proxmox : réponse de permissions inattendue")
-        checks = [check("HTTPS", "Certificat API vérifié"),
+        insecure=values.get('skip_tls_verification') is True
+        checks = [warning("HTTPS / TLS", "Vérification du certificat désactivée pour cette connexion Proxmox uniquement. Réactiver dès que possible.")
+                  if insecure else check("HTTPS / TLS", "Certificat et nom d'hôte API vérifiés"),
                   check("Token API", "Requête authentifiée de permissions acceptée")]
         if _bool(options, "check_nodes"):
             nodes = integrations.proxmox_request(base, values, "/api2/json/nodes",
@@ -438,9 +442,47 @@ def proxmox(values, options=None):
                   checks)
     except ConnectionTestError:
         raise
-    except (httpx.HTTPError, integrations.IntegrationError, ValueError, KeyError, TypeError) as exc:
+    except integrations.IntegrationError as exc:
+        raise ConnectionTestError("Proxmox : "+str(exc)) from None
+    except httpx.HTTPStatusError as exc:
+        status=exc.response.status_code
+        if status==401:
+            detail="HTTP 401 — token API ou secret refusé"
+        elif status==403:
+            detail="HTTP 403 — token accepté mais permissions insuffisantes pour cet appel"
+        else:
+            detail="HTTP "+str(status)+" — erreur API Proxmox"
+        raise ConnectionTestError("Proxmox : "+detail) from None
+    except httpx.ConnectError as exc:
+        # httpx groups certificate validation and transport errors under ConnectError.
+        # Inspect only the *types* of the underlying failures: never surface
+        # exception repr/URLs which might contain secrets.
+        causes=[]
+        current=exc
+        for _ in range(8):
+            if current is None or any(current is previous for previous in causes):
+                break
+            causes.append(current)
+            current=current.__cause__ or current.__context__
+        if any(isinstance(cause, ssl.SSLCertVerificationError) for cause in causes):
+            raise ConnectionTestError(
+                "Proxmox : certificat TLS non approuvé ou FQDN différent. "
+                "Importer la CA Proxmox, ou activer temporairement "
+                "« Ignorer la vérification TLS » dans la fiche du serveur/cluster."
+            ) from None
+        if any(isinstance(cause, ssl.SSLError) for cause in causes):
+            raise ConnectionTestError(
+                "Proxmox : échec de négociation TLS (protocole ou certificat serveur)."
+            ) from None
         raise ConnectionTestError(
-            "Proxmox : refus API/TLS ou token invalide ("+type(exc).__name__+")"
+            "Proxmox : impossible d'établir la connexion (DNS, port 8006, pare-feu ou refus TCP). "
+            "Le contournement TLS ne corrige pas les problèmes réseau."
+        ) from None
+    except httpx.TimeoutException:
+        raise ConnectionTestError("Proxmox : délai dépassé lors de la connexion à l'API") from None
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise ConnectionTestError(
+            "Proxmox : réponse API inattendue ("+type(exc).__name__+")"
         ) from None
 
 

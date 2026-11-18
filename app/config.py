@@ -18,10 +18,12 @@ LDAP_VIEWER_GROUP = os.getenv('LDAP_VIEWER_GROUP', 'origamitasks-viewers')
 LDAP_USER_ATTRIBUTE = os.getenv('LDAP_USER_ATTRIBUTE', 'sAMAccountName')
 LDAP_STARTTLS = os.getenv('LDAP_STARTTLS', 'false').lower() == 'true'
 LDAP_CA_CERT = os.getenv('LDAP_CA_CERT', '')
+# Explicit, high-risk exception, independently gated on the host.
+ALLOW_INSECURE_LDAP_TLS = os.getenv('ALLOW_INSECURE_LDAP_TLS', 'false').lower() == 'true'
 LDAP_GROUP_BASE_DN = os.getenv('LDAP_GROUP_BASE_DN', LDAP_BASE_DN)
 LDAP_NESTED_GROUPS = os.getenv('LDAP_NESTED_GROUPS', 'false').lower() == 'true'
 GIT_BRANCH = os.getenv('GIT_BRANCH', 'main')
-APP_VERSION = '0.3.3-rc2'
+APP_VERSION = '0.3.23-rc1'
 SESSION_HOURS = int(os.getenv('SESSION_HOURS', '12'))
 WORKERS = int(os.getenv('ORIGAMI_EXECUTOR_WORKERS', '2'))
 ALLOW_LOCAL_EXECUTION = os.getenv('ALLOW_LOCAL_EXECUTION', 'false').lower() == 'true'
@@ -29,6 +31,7 @@ MAX_LOG_BYTES = int(os.getenv('MAX_LOG_BYTES', '40000'))
 MAX_STEP_SECONDS = int(os.getenv('MAX_STEP_SECONDS', '1800'))
 TRANSFER_ROOT = DATA / 'transfers'
 KNOWN_HOSTS = Path(os.getenv('SSH_KNOWN_HOSTS', str(DATA / 'known_hosts')))
+SSH_HOST_KEY_POLICY = os.getenv('SSH_HOST_KEY_POLICY', 'accept-new').strip().lower()
 
 # Restricted outbound API integrations: comma-separated exact hostnames or host:port
 CONNECTION_TEST_ALLOWED_HOSTS = os.getenv("CONNECTION_TEST_ALLOWED_HOSTS", "")

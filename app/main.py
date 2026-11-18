@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates
 
 
 @asynccontextmanager
@@ -24,9 +24,13 @@ async def lifespan(app):
     security.initialize_admin()
     engine.start()
     scheduler.start()
+    agent_deployments.start()
+    agent_updates.start()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
+    agent_deployments.STOP.set()
+    agent_updates.STOP.set()
 
 
 app = FastAPI(title='OrigamiTasks', version=config.APP_VERSION, docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -107,14 +111,39 @@ def logout(request: Request, response: Response):
 
 
 # Administration endpoints require session + CSRF; agent endpoints are bearer-only.
+@app.get('/api/admin/agent-settings')
+def read_agent_settings(request:Request):
+    security.require(request,role='admin')
+    return agent_settings.current()
+
+
+@app.put('/api/admin/agent-settings')
+def save_agent_settings(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    value=agent_settings.update(payload)
+    db.audit(user['username'],'agents.controller-url.update','agents',
+             'URL HTTPS de contact des agents modifiée')
+    return value
+
+
 @app.get('/api/agents')
 def list_agents(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
-        rows=con.execute('SELECT id,name,platform,group_name,hostname,version,enrolled,revoked,last_seen,created_at FROM agents ORDER BY id DESC').fetchall()
+        rows=con.execute('SELECT id,name,platform,group_name,hostname,version,enrolled,revoked,last_seen,cpu_percent,memory_mb,uninstalled_at,installed_controller_url,modules_json,modules_revision,modules_applied_revision,modules_reported_json,created_at FROM agents ORDER BY id DESC').fetchall()
     cutoff=agents.utc_plus(-90)
-    return {'items':[dict(r,status=('revoked' if r['revoked'] else 'pending' if not r['enrolled'] else
-        'online' if r['last_seen'] and r['last_seen']>=cutoff else 'offline')) for r in rows]}
+    return {'items':[agent_modules.describe(dict(r,status=('uninstalled' if r['uninstalled_at'] else 'revoked' if r['revoked'] else 'pending' if not r['enrolled'] else
+        'online' if r['last_seen'] and r['last_seen']>=cutoff else 'offline'))) for r in rows]}
+
+
+@app.put('/api/agents/{agent_id}/modules')
+def configure_agent_modules(agent_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    result=agent_modules.set_modules(agent_id,payload)
+    db.audit(user['username'],'agent.modules.configure',agent_id,
+             'revision='+str(result['revision'])+' roles='+','.join(
+                 k for k,v in result['modules'].items() if v))
+    return result
 
 
 @app.post('/api/agents/enrollments')
@@ -129,6 +158,12 @@ def create_agent_enrollment(payload:dict[str,Any], request:Request):
 @app.post('/api/agents/deploy')
 def deploy_agent(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
+    if payload.get('credential_id'):
+        with db.session() as con:
+            credential_kind=con.execute("SELECT kind FROM credentials WHERE id=?",
+                (payload['credential_id'],)).fetchone()
+        if not credential_kind or credential_kind['kind']!='ssh':
+            raise HTTPException(422,'Une identité SSH du coffre est obligatoire')
     try:
         result=agents.deploy(payload)
     except HTTPException:
@@ -140,12 +175,72 @@ def deploy_agent(payload:dict[str,Any],request:Request):
     return result
 
 
+
+@app.post('/api/agents/deploy/batch')
+def batch_deploy_agents(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=agent_deployments.queue(payload,user['username'])
+    except (agent_deployments.DeploymentError,ssh_inventory.InventoryError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'agent.deploy.batch',result['batch_id'],
+             str(result['total'])+' serveur(s)')
+    return result
+
+
+@app.get('/api/agents/deploy/batches')
+def agent_deploy_batch_status(request:Request):
+    security.require(request,role='admin')
+    return agent_deployments.list_batches()
+
+
+@app.post('/api/agents/deploy/batches/cleanup')
+def agent_deploy_batch_cleanup(request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    result=agent_deployments.cleanup_completed(keep=20,older_than_days=30)
+    db.audit(user['username'],'agent.deploy.batch.cleanup','history',
+             str(result['removed'])+' lots terminés purgés')
+    return result
+
+
+@app.get('/api/agents/updates')
+def list_agent_updates(request:Request):
+    security.require(request,role='admin')
+    return agent_updates.jobs()
+
+
+@app.post('/api/agents/updates')
+def queue_agent_updates(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'agent_ids','credential_id','approved'}:
+        raise HTTPException(422,'Sélection, identité SSH et confirmation obligatoires')
+    try:
+        return agent_updates.queue(payload['agent_ids'],payload['credential_id'],
+                                   payload['approved'],user['username'])
+    except agent_updates.UpdateError as exc:
+        raise HTTPException(422,str(exc)) from None
+
+
 @app.post('/api/agents/{agent_id}/revoke')
 def revoke_agent(agent_id:int,request:Request):
     user=security.require(request,role='admin',mutate=True)
     agents.revoke(agent_id)
     db.audit(user['username'],'agent.revoke',agent_id)
     return {'ok':True}
+
+
+@app.post('/api/agents/{agent_id}/uninstall')
+def uninstall_agent(agent_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    # Preserve an audit trail even when SSH or the host identity check fails.
+    db.audit(user['username'],'agent.uninstall.attempt',agent_id,'SSH host removal requested')
+    try:
+        result=agent_uninstall.uninstall(agent_id,payload)
+    except agent_uninstall.AgentUninstallError as exc:
+        db.audit(user['username'],'agent.uninstall.failed',agent_id,type(exc).__name__)
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'agent.uninstall.success',agent_id,'Retiré par SSH et jeton révoqué')
+    return result
 
 
 @app.post('/api/agent/enroll')
@@ -185,6 +280,37 @@ def validate_job(payload):
             raise HTTPException(422,'Type d’étape inconnu')
         if not isinstance(step.get('config'),dict) or len(json.dumps(step['config']))>50_000:
             raise HTTPException(422,'Configuration d’étape invalide')
+        connection_mode=step['config'].get('connection_mode')
+        if connection_mode is not None:
+            if connection_mode not in ('manual','vault'):
+                raise HTTPException(422,'Mode de connexion invalide')
+            typ=step.get('type')
+            kind={'email':'smtp','http':'api','ssh':'ssh','sftp':'ssh',
+                  'ansible':'ssh','ftp':'ftp','matrix':'matrix','directory':'ldap'}.get(typ)
+            if not kind:
+                raise HTTPException(422,'Mode coffre/manuel non applicable à cette tâche')
+            cid=step['config'].get('credential_id')
+            need_cred=(connection_mode=='vault' and typ not in ('directory',)) or (
+                typ in ('ssh','sftp','ansible','matrix'))
+            if need_cred and not cid:
+                raise HTTPException(422,'Sélectionner un identifiant '+kind.upper()+' du coffre')
+            if cid:
+                with db.session() as check_con:
+                    cred=check_con.execute("SELECT kind FROM credentials WHERE id=?",(cid,)).fetchone()
+                if not cred or cred['kind']!=kind:
+                    raise HTTPException(422,'Le compte sélectionné doit être une connexion '+kind.upper())
+            if connection_mode=='vault' and typ in ('ssh','sftp','ansible') and not step['config'].get('ssh_server_id'):
+                raise HTTPException(422,'Sélectionner un serveur SSH de l’inventaire')
+            if connection_mode=='manual' and typ=='email':
+                if not step['config'].get('host') or not step['config'].get('from'):
+                    raise HTTPException(422,'SMTP manuel : serveur et expéditeur obligatoires')
+            if connection_mode=='manual' and typ=='http' and not step['config'].get('url'):
+                raise HTTPException(422,'API manuelle : URL obligatoire')
+        if step.get('type') in ('ssh','sftp','ansible') and step['config'].get('ssh_server_id'):
+            try:
+                ssh_inventory.server(step['config']['ssh_server_id'])
+            except ssh_inventory.InventoryError as exc:
+                raise HTTPException(422,str(exc)) from None
         if not 1 <= len(str(step.get('name',''))) <= 120:
             raise HTTPException(422,'Nom d’étape invalide')
         if int(step.get('retries',0)) not in range(0,6):
@@ -204,6 +330,33 @@ def validate_job(payload):
         next_run = scheduler.check_schedule(schedule) if payload.get('enabled',True) else None
     except (ValueError,KeyError) as exc:
         raise HTTPException(422,'Planification: '+str(exc))
+    notice=payload.get('notification_json',{})
+    if not isinstance(notice,dict) or set(notice)-{'enabled','credential_id','recipients','on_success','on_failure'}:
+        raise HTTPException(422,'Configuration des notifications invalide')
+    if notice.get('enabled'):
+        if type(notice.get('on_success',False)) is not bool or type(notice.get('on_failure',False)) is not bool:
+            raise HTTPException(422,'Choix du statut à notifier invalide')
+        if not (notice.get('on_success') or notice.get('on_failure')):
+            raise HTTPException(422,'Sélectionner réussite et/ou échec pour les notifications')
+        recipients=str(notice.get('recipients') or '').strip()
+        emails=[v.strip() for v in recipients.split(',')]
+        if not 1<=len(emails)<=5 or any(
+            not re.fullmatch(r'[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}', email)
+            for email in emails
+        ):
+            raise HTTPException(422,'Notifications : 1 à 5 adresses e-mail valides, séparées par des virgules')
+        try:
+            smtp_id=int(notice.get('credential_id'))
+        except (TypeError,ValueError):
+            raise HTTPException(422,'Notifications : choisir une connexion SMTP du coffre') from None
+        with db.session() as test_con:
+            smtp=test_con.execute('SELECT kind FROM credentials WHERE id=?',(smtp_id,)).fetchone()
+        if not smtp or smtp['kind']!='smtp':
+            raise HTTPException(422,'Notifications : connexion SMTP introuvable')
+        notice={'enabled':True,'credential_id':smtp_id,'recipients':','.join(emails),
+                'on_success':notice['on_success'],'on_failure':notice['on_failure']}
+    else:
+        notice={}
     folder=folder_path(payload.get('folder','Général'))
     return {
         'name':name,
@@ -213,6 +366,7 @@ def validate_job(payload):
         'acl_json':json.dumps({k:[str(g).strip().lower()[:120] for g in acl.get(k,[]) if str(g).strip()] for k in ('view','run','edit')},ensure_ascii=False),
         'steps_json':json.dumps(steps,ensure_ascii=False),
         'schedule_json':json.dumps(schedule,ensure_ascii=False),
+        'notification_json':json.dumps(notice,ensure_ascii=False),
         'enabled':int(bool(payload.get('enabled',True))),
         'next_run_at':next_run,
     }
@@ -221,7 +375,7 @@ def validate_job(payload):
 def get_job(con,job_id):
     row=con.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
     if not row: raise HTTPException(404,'Workflow introuvable')
-    return db.obj(row,'tags_json','acl_json','steps_json','schedule_json')
+    return db.obj(row,'tags_json','acl_json','steps_json','schedule_json','notification_json')
 
 
 @app.get('/api/catalog')
@@ -246,35 +400,377 @@ def task_catalog(request: Request):
     ],'roadmap_document':'docs/FEATURE-CATALOG.md'}
 
 
+@app.get('/api/proxmox/cas')
+def list_proxmox_cas(request: Request):
+    security.require(request,role='admin')
+    return {'items':proxmox_cas.list_public()}
+
+
+@app.post('/api/proxmox/cas')
+def upload_proxmox_ca(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)-{'pem_text','der_base64'}:
+        raise HTTPException(422,'Certificat CA Proxmox : données invalides')
+    try:
+        result=proxmox_cas.import_public(
+            pem_text=payload.get('pem_text'),der_base64=payload.get('der_base64')
+        )
+    except proxmox_cas.ProxmoxCAError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'proxmox.ca.import',result['id'],str(result['certificate_count'])+' CA')
+    return result
+
+
 @app.get('/api/datacenters')
 def list_datacenters(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
-        rows=con.execute('SELECT id,name,url,credential_id,created_at FROM datacenters ORDER BY name').fetchall()
+        rows=con.execute(
+            'SELECT id,name,url,credential_id,kind,ca_cert,skip_tls_verification,created_at FROM datacenters ORDER BY name'
+        ).fetchall()
     return {'items':[dict(row) for row in rows]}
+
+
+def _datacenter_fields(payload, con, *, existing=None):
+    name=str(payload.get('name','')).strip()
+    kind=str(payload.get('kind',existing['kind'] if existing else 'cluster'))
+    if not 1<=len(name)<=100 or kind not in ('cluster','node'):
+        raise HTTPException(422,'Nom (1 à 100 caractères) ou type de cible Proxmox invalide')
+    try:
+        origin=integrations.authorized_origin(
+            payload.get('url'),config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True
+        )
+    except integrations.IntegrationError as exc:
+        raise HTTPException(422,str(exc)) from None
+    skip_tls=payload.get('skip_tls_verification',False)
+    if type(skip_tls) is not bool:
+        raise HTTPException(422,'Ignorer la vérification TLS : valeur booléenne attendue')
+    ca_id=payload.get('ca_cert','')
+    if not isinstance(ca_id,str):
+        raise HTTPException(422,'Identifiant de CA Proxmox invalide')
+    if ca_id:
+        try:
+            proxmox_cas.filename(ca_id)
+        except proxmox_cas.ProxmoxCAError as exc:
+            raise HTTPException(422,str(exc)) from None
+    username=payload.get('token_username')
+    token=payload.get('token_secret')
+    if username is not None or token is not None:
+        username=str(username or '').strip()
+        token=str(token or '')
+        if (not re.fullmatch(r'[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+![a-zA-Z0-9_.-]+',username)
+                or not 8<=len(token)<=1024 or '\n' in token or '\r' in token):
+            raise HTTPException(
+                422,'Token Proxmox : renseigner user@realm!tokenname et son secret (8 à 1024 caractères)'
+            )
+        payload_credentials=connections.normalize('proxmox',{
+            'url':origin,'username':username,'token':token,'ca_cert':ca_id,
+            'skip_tls_verification':skip_tls
+        },is_new=True)
+        # The credentials remain in the encrypted vault; never return the secret.
+        vault_name='Proxmox - '+name[:80]+' - '+secrets.token_hex(4)
+        cursor=con.execute(
+            'INSERT INTO credentials (name,kind,encrypted_payload,created_at,updated_at) VALUES (?,?,?,?,?)',
+            (vault_name,'proxmox',security.encrypt(payload_credentials),db.now(),db.now())
+        )
+        credential_id=cursor.lastrowid
+    else:
+        try:
+            credential_id=int(payload.get('credential_id',existing['credential_id'] if existing else None))
+        except (TypeError,ValueError):
+            raise HTTPException(422,'Choisir un token du coffre ou saisir un nouveau token') from None
+        row=con.execute('SELECT kind,encrypted_payload FROM credentials WHERE id=?',(credential_id,)).fetchone()
+        if not row or row['kind'] not in ('proxmox','api'):
+            raise HTTPException(422,'Connexion Proxmox du coffre introuvable')
+        values=security.decrypt(row['encrypted_payload'])
+        saved_url=values.get('url') or values.get('base_url')
+        if not saved_url:
+            raise HTTPException(422,'Le profil du token doit contenir une URL HTTPS Proxmox')
+        try:
+            saved=integrations.authorized_origin(saved_url,config.PROXMOX_ALLOWED_HOSTS,
+                                                  admin_proxmox=True)
+        except integrations.IntegrationError as exc:
+            raise HTTPException(422,str(exc)) from None
+        if saved.lower().rstrip('/') != origin.lower().rstrip('/'):
+            raise HTTPException(422,
+                'L’URL du datacenter et celle du token du coffre doivent correspondre. '
+                'Choisir un autre token ou en créer un pour ce serveur.')
+    return name,kind,origin,credential_id,ca_id,skip_tls
 
 
 @app.post('/api/datacenters')
 def add_datacenter(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
-    name=str(payload.get('name','')).strip()
-    if not 1<=len(name)<=100: raise HTTPException(422,'Nom du datacenter invalide')
-    try:
-        origin=integrations.authorized_origin(payload.get('url'),config.PROXMOX_ALLOWED_HOSTS)
-        credential_id=int(payload.get('credential_id'))
-    except (integrations.IntegrationError,ValueError,TypeError) as exc:
-        raise HTTPException(422,str(exc))
     with db.session() as con:
-        credential_exists=con.execute('SELECT 1 FROM credentials WHERE id=?',(credential_id,)).fetchone()
-        if not credential_exists: raise HTTPException(422,'Credential introuvable')
+        name,kind,origin,credential_id,ca_id,skip_tls=_datacenter_fields(payload,con)
         try:
-            cur=con.execute('INSERT INTO datacenters(name,url,credential_id,created_at) VALUES (?,?,?,?)',
-                            (name,origin,credential_id,db.now()))
-        except __import__('sqlite3').IntegrityError:
-            raise HTTPException(409,'Datacenter déjà enregistré')
+            cur=con.execute(
+                'INSERT INTO datacenters(name,url,credential_id,kind,ca_cert,skip_tls_verification,created_at) '
+                'VALUES (?,?,?,?,?,?,?)',
+                (name,origin,credential_id,kind,ca_id,int(skip_tls),db.now())
+            )
+        except db.sqlite3.IntegrityError:
+            raise HTTPException(409,'Nom de datacenter déjà enregistré') from None
         dc_id=cur.lastrowid
-    db.audit(user['username'],'datacenter.create',dc_id,name)
+    db.audit(user['username'],'datacenter.create',dc_id,name+' ('+kind+')')
     return {'id':dc_id}
+
+
+@app.put('/api/datacenters/{dc_id}')
+def edit_datacenter(dc_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    with db.session() as con:
+        old=con.execute('SELECT * FROM datacenters WHERE id=?',(dc_id,)).fetchone()
+        if not old:
+            raise HTTPException(404,'Serveur/cluster Proxmox introuvable')
+        name,kind,origin,credential_id,ca_id,skip_tls=_datacenter_fields(payload,con,existing=old)
+        try:
+            con.execute('UPDATE datacenters SET name=?,url=?,credential_id=?,kind=?,ca_cert=?,skip_tls_verification=? WHERE id=?',
+                        (name,origin,credential_id,kind,ca_id,int(skip_tls),dc_id))
+        except db.sqlite3.IntegrityError:
+            raise HTTPException(409,'Nom de datacenter déjà enregistré') from None
+    db.audit(user['username'],'datacenter.update',dc_id,name+' ('+kind+')')
+    return {'ok':True,'id':dc_id}
+
+
+@app.get('/api/datacenters/{dc_id}/test')
+def test_datacenter(dc_id:int,request:Request):
+    security.require(request,role='admin')
+    dc=integrations.configured_datacenter(dc_id)
+    values=engine.executor.credential(dc['credential_id'])
+    values=dict(values,url=dc['url'])
+    if dc.get('ca_cert'):
+        values['ca_cert']=dc['ca_cert']
+    values['skip_tls_verification']=bool(dc.get('skip_tls_verification',False))
+    try:
+        return connection_tests.proxmox(values,options={'check_nodes':True})
+    except (connection_tests.ConnectionTestError,integrations.IntegrationError,
+            proxmox_cas.ProxmoxCAError) as exc:
+        raise HTTPException(422,str(exc)) from None
+
+
+@app.get('/api/dr/vms')
+def list_protected_vms(request:Request,plan_id:int|None=None):
+    security.require(request,role='admin')
+    return {'items':dr_protected_vms.list_vms(plan_id)}
+
+
+@app.get('/api/dr/vms/options')
+def protected_vm_options(request:Request,plan_id:int,source_dc_id:int,target_dc_id:int):
+    security.require(request,role='admin')
+    try:
+        return dr_protected_vms.options(plan_id,source_dc_id,target_dc_id)
+    except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Découverte source ou destination indisponible : vérifier API et TLS') from None
+
+
+@app.post('/api/dr/vms')
+def create_protected_vm(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=dr_protected_vms.save(payload,user['username'])
+    except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Préparation VM impossible : vérifier les deux API Proxmox') from None
+    db.audit(user['username'],'dr.vm.plan.create',result['id'],
+             'Configuration seulement ; aucune copie ou VM créée')
+    return result
+
+
+@app.put('/api/dr/vms/{vm_id}')
+def update_protected_vm(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=dr_protected_vms.save(payload,user['username'],vm_id)
+    except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Mise à jour impossible : vérifier API et stockage') from None
+    db.audit(user['username'],'dr.vm.plan.update',vm_id,
+             'Configuration seulement ; aucun disque modifié')
+    return result
+
+
+@app.post('/api/dr/vms/{vm_id}/state')
+def change_protected_vm_state(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        if not isinstance(payload,dict) or set(payload)!={'state'}:
+            raise dr_protected_vms.ProtectedVMError('État invalide')
+        result=dr_protected_vms.set_state(vm_id,payload['state'])
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.vm.plan.state',vm_id,result['state'])
+    return result
+
+
+@app.delete('/api/dr/vms/{vm_id}')
+def remove_protected_vm(vm_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=dr_protected_vms.delete(vm_id)
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+    db.audit(user['username'],'dr.vm.plan.delete',vm_id,
+             'Configuration supprimée ; aucun disque ni VM supprimé')
+    return result
+
+
+@app.get('/api/dr/vms/{vm_id}/tests')
+def protected_vm_test_history(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':dr_protected_vms.history(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/simulate')
+def simulate_protected_vm(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'scenario'}:
+        raise HTTPException(422,'Scénario invalide')
+    try:
+        result=dr_protected_vms.run_readonly_test(vm_id,payload.get('scenario'),
+                                                   user['username'])
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.vm.simulate',vm_id,
+             str(payload['scenario'])+' : BLOCKED, aucune action infrastructure')
+    return result
+
+
+@app.post('/api/dr/vms/{vm_id}/replicate')
+def replicate_protected_vm_not_available(vm_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    # Explicitly fail closed: no API or SSH requests are made for copying.
+    dr_protected_vms.history(vm_id,limit=1)
+    db.audit(user['username'],'dr.vm.replication.blocked',vm_id,
+             'Moteur iSCSI/LVM/PBS non validé ; aucune copie lancée')
+    raise HTTPException(409,
+        'Réplication réelle indisponible : définir et valider un transport '
+        'cohérent (baie/PBS), la gestion du stockage et le fencing avant copie.')
+
+
+@app.post('/api/dr/vms/{vm_id}/pbs/backup')
+def start_protected_vm_pbs_backup(vm_id:int, payload:dict[str,Any], request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'storage','approved'}:
+        raise HTTPException(422,'Stockage PBS et approbation explicite requis')
+    try:
+        return pra_pbs.start_backup(vm_id,payload.get('storage'),payload.get('approved'),
+                                    user['username'])
+    except pra_pbs.PBSBackupError as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/pbs/backups/{job_id}')
+def get_protected_vm_pbs_backup(vm_id:int,job_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_pbs.status(vm_id,job_id)
+    except pra_pbs.PBSBackupError as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/plans')
+def get_dr_plans(request:Request):
+    security.require(request,role='admin')
+    return {'items':dr_plans.list_plans()}
+
+
+@app.post('/api/dr/plans')
+def create_dr_plan(request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        plan_id=dr_plans.save(payload)
+    except dr_plans.DRPlanError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.plan.create',plan_id,'Groupe PRA créé')
+    return {'id':plan_id}
+
+
+@app.put('/api/dr/plans/{plan_id}')
+def update_dr_plan(plan_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        dr_plans.save(payload,plan_id)
+    except dr_plans.DRPlanError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.plan.update',plan_id,'Groupe PRA modifié : '+str(payload.get('name',''))[:80])
+    plan=next((x for x in dr_plans.list_plans() if x['id']==plan_id),None)
+    return {'ok':True,'plan':plan}
+
+
+@app.delete('/api/dr/plans/{plan_id}')
+def delete_dr_plan(plan_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        name=dr_plans.delete(plan_id)
+    except dr_plans.DRPlanError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.plan.delete',plan_id,name)
+    return {'ok':True}
+
+
+@app.get('/api/dr/sites')
+def get_dr_sites(request:Request):
+    security.require(request,role='admin')
+    return {'items':dr_sites.list_sites()}
+
+
+@app.post('/api/dr/sites')
+def post_dr_site(request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        site_id=dr_sites.save_site(payload)
+    except dr_sites.DRSiteError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.site.create',site_id,'Enregistrement du site / lecture seule')
+    return {'id':site_id}
+
+
+@app.put('/api/dr/sites/{site_id}')
+def put_dr_site(site_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        dr_sites.save_site(payload,site_id)
+    except dr_sites.DRSiteError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.site.update',site_id,'Mise à jour des associations')
+    return {'ok':True}
+
+
+@app.delete('/api/dr/sites/{site_id}')
+def delete_dr_site(site_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        name=dr_sites.delete_site(site_id)
+    except dr_sites.DRSiteError as exc:
+        raise HTTPException(404,str(exc)) from None
+    db.audit(user['username'],'dr.site.delete',site_id,name)
+    return {'ok':True}
+
+
+@app.post('/api/dr/simulate')
+def simulate_dr_failure(request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=dr_sites.simulate(payload,user['username'])
+    except dr_sites.DRSiteError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'dr.simulation',result['simulation_id'],
+             result['scenario']+' : '+result['decision']+' (AUCUNE ACTION SUR INFRASTRUCTURE)')
+    return result
+
+
+@app.get('/api/dr/simulations')
+def list_dr_simulations(request:Request):
+    security.require(request,role='admin')
+    return {'items':dr_sites.history()}
 
 
 @app.get('/api/datacenters/{dc_id}/discover')
@@ -289,6 +785,41 @@ def discover_datacenter(dc_id:int,request:Request):
     except Exception as exc:
         raise HTTPException(502,'Proxmox API indisponible : '+type(exc).__name__)
     return {'datacenter':dc['name'],'resources':result}
+
+
+@app.get('/api/datacenters/{dc_id}/agent-nodes')
+def preview_cluster_agent_nodes(dc_id:int,request:Request,domain_suffix:str=''):
+    security.require(request,role='admin')
+    try:
+        return proxmox_fleet.preview(dc_id,domain_suffix)
+    except (proxmox_fleet.FleetError,integrations.IntegrationError) as exc:
+        raise HTTPException(422,str(exc)) from None
+
+
+@app.post('/api/datacenters/{dc_id}/ssh-group')
+def sync_proxmox_ssh_group(dc_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=proxmox_fleet.sync_group(dc_id,payload)
+    except (proxmox_fleet.FleetError,integrations.IntegrationError,
+            db.sqlite3.IntegrityError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'proxmox.ssh-group.sync',dc_id,
+             'groupe='+str(result['group_id'])+' noeuds='+str(result['count']))
+    return result
+
+
+@app.post('/api/datacenters/{dc_id}/agents/deploy')
+def deploy_proxmox_cluster_agents(dc_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        result=proxmox_fleet.deploy(dc_id,payload,user['username'])
+    except (proxmox_fleet.FleetError,integrations.IntegrationError,
+            ssh_inventory.InventoryError) as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'proxmox.agent-batch.queued',dc_id,
+             'lot='+str(result['batch_id'])+' noeuds='+str(result['total']))
+    return result
 
 
 @app.get('/api/datacenters/{dc_id}/vms/{vmid}/dr-assessment')
@@ -344,7 +875,7 @@ def list_folders(request:Request):
     user=security.require(request)
     with db.session() as con:
         rows=con.execute('SELECT * FROM jobs').fetchall()
-        allowed=[db.obj(row,'tags_json','acl_json','steps_json','schedule_json') for row in rows]
+        allowed=[db.obj(row,'tags_json','acl_json','steps_json','schedule_json','notification_json') for row in rows]
         allowed=[job for job in allowed if security.can_job(user,job,'view')]
         if user['role']=='admin':
             paths=known_folders(con)
@@ -423,7 +954,7 @@ def get_admin_ldap(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
         saved=con.execute('SELECT 1 FROM ldap_settings WHERE id=1').fetchone() is not None
-    return dict(ldap_settings.public(), source='administration' if saved else '.env')
+    return dict(ldap_settings.public(), source='administration' if saved else '.env', insecure_tls_allowed=config.ALLOW_INSECURE_LDAP_TLS)
 
 
 @app.put('/api/admin/ldap')
@@ -436,6 +967,21 @@ def put_admin_ldap(payload:dict[str,Any],request:Request):
     ldap_settings.save(values)
     db.audit(user['username'],'ldap.settings.update','ldap','configuration protégée')
     return ldap_settings.public(values)
+
+
+@app.post('/api/admin/ldap/ca')
+def upload_ldap_ca(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        if set(payload)-{'pem','der_base64'}:
+            raise ldap_settings.LDAPSettingsError('Champs du certificat CA non reconnus')
+        result=ldap_settings.import_ca(pem_text=payload.get('pem'),
+                                       der_base64=payload.get('der_base64'))
+    except ldap_settings.LDAPSettingsError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ldap.ca.import',result['fingerprint_sha256'][:16],
+             str(result['certificate_count'])+' certificat(s) publics')
+    return result
 
 
 @app.post('/api/admin/ldap/test')
@@ -463,13 +1009,13 @@ def lookup_directory_groups(request:Request,q:str=''):
     settings=ldap_settings.current()
     if settings['enabled'] and settings['uri'] and settings['group_base_dn']:
         try:
-            from ldap3 import Server, Connection, SUBTREE, Tls
+            from ldap3 import Server, Connection, SUBTREE, NONE
             from ldap3.utils.conv import escape_filter_chars
             if not (settings['uri'].startswith('ldaps://') or settings['starttls']):
                 raise ValueError('LDAPS ou STARTTLS obligatoire')
-            server=Server(settings['uri'],tls=Tls(validate=ssl.CERT_REQUIRED,ca_certs_file=settings['ca_cert'] or None),connect_timeout=6)
+            server=Server(settings['uri'],tls=ldap_settings.tls_for(settings),connect_timeout=6,get_info=NONE)
             conn=Connection(server,user=settings['bind_dn'],password=settings['bind_password'],
-                            auto_bind=not settings['starttls'],receive_timeout=8)
+                            auto_bind=not settings['starttls'],receive_timeout=8,check_names=False)
             if settings['starttls']:
                 conn.open()
                 if not conn.start_tls() or not conn.bind(): raise ValueError('Bind LDAP refusé')
@@ -493,7 +1039,7 @@ def list_jobs(request: Request):
     user=security.require(request)
     with db.session() as con:
         rows=con.execute('SELECT * FROM jobs ORDER BY updated_at DESC,id DESC').fetchall()
-    jobs=[db.obj(row,'tags_json','acl_json','steps_json','schedule_json') for row in rows]
+    jobs=[db.obj(row,'tags_json','acl_json','steps_json','schedule_json','notification_json') for row in rows]
     return {'items':[dict(j,permissions={'view':True,'run':security.can_job(user,j,'run'),'edit':security.can_job(user,j,'edit')}) for j in jobs if security.can_job(user,j,'view')]}
 
 
@@ -511,8 +1057,8 @@ def create_job(payload: dict[str,Any], request: Request):
     user=security.require(request,role='admin',mutate=True)
     fields=validate_job(payload)
     with db.session() as con:
-        cur=con.execute('INSERT INTO jobs (name,description,folder,tags_json,acl_json,steps_json,schedule_json,enabled,next_run_at,created_by,created_at,updated_at) '
-                        'VALUES (:name,:description,:folder,:tags_json,:acl_json,:steps_json,:schedule_json,:enabled,:next_run_at,:created_by,:created_at,:updated_at)',
+        cur=con.execute('INSERT INTO jobs (name,description,folder,tags_json,acl_json,steps_json,schedule_json,notification_json,enabled,next_run_at,created_by,created_at,updated_at) '
+                        'VALUES (:name,:description,:folder,:tags_json,:acl_json,:steps_json,:schedule_json,:notification_json,:enabled,:next_run_at,:created_by,:created_at,:updated_at)',
                         dict(fields,created_by=user['username'],created_at=db.now(),updated_at=db.now()))
         id_=cur.lastrowid
     db.audit(user['username'],'job.create',id_,fields['name'])
@@ -531,12 +1077,13 @@ def update_job(job_id: int,payload:dict[str,Any],request: Request):
             if any(s.get('type') in ('proxmox','agent','directory') for s in old['steps_json']+payload['steps_json']):
                 raise HTTPException(403,'Seul un administrateur peut modifier les étapes Proxmox')
             fields['acl_json']=json.dumps(old['acl_json'],ensure_ascii=False)
+            fields['notification_json']=json.dumps(old.get('notification_json') or {},ensure_ascii=False)
             existing_creds={step['id']:str(step.get('config',{}).get('credential_id') or '') for step in old['steps_json']}
             for step in payload['steps_json']:
                 current=str(step.get('config',{}).get('credential_id') or '')
                 if current != existing_creds.get(step['id'],''):
                     raise HTTPException(403,'Seul un administrateur peut attribuer ou changer un identifiant de coffre')
-        con.execute('UPDATE jobs SET name=:name,description=:description,folder=:folder,tags_json=:tags_json,acl_json=:acl_json,steps_json=:steps_json,schedule_json=:schedule_json,enabled=:enabled,next_run_at=:next_run_at,updated_at=:updated_at WHERE id=:id',
+        con.execute('UPDATE jobs SET name=:name,description=:description,folder=:folder,tags_json=:tags_json,acl_json=:acl_json,steps_json=:steps_json,schedule_json=:schedule_json,notification_json=:notification_json,enabled=:enabled,next_run_at=:next_run_at,updated_at=:updated_at WHERE id=:id',
                     dict(fields,id=job_id,updated_at=db.now()))
     db.audit(user['username'],'job.update',job_id,fields['name'])
     return {'ok':True}
@@ -625,7 +1172,7 @@ def list_runs(request:Request):
     user=security.require(request)
     with db.session() as con:
         jobs={r['id']:db.obj(r,'acl_json') for r in con.execute('SELECT id,acl_json FROM jobs')}
-        rows=con.execute('SELECT id,job_id,job_name,status,trigger,requested_by,queued_at,started_at,finished_at,error FROM runs ORDER BY id DESC LIMIT 200').fetchall()
+        rows=con.execute('SELECT id,job_id,job_name,status,trigger,requested_by,queued_at,started_at,finished_at,error,notification_status,notification_error FROM runs ORDER BY id DESC LIMIT 200').fetchall()
     return {'items':[dict(r) for r in rows if user['role']=='admin' or (r['job_id'] in jobs and security.can_job(user,jobs[r['job_id']],'view'))]}
 
 
@@ -633,7 +1180,7 @@ def list_runs(request:Request):
 def read_run(run_id:int,request:Request):
     user=security.require(request)
     with db.session() as con:
-        run=con.execute('SELECT id,job_id,job_name,status,trigger,requested_by,queued_at,started_at,finished_at,error FROM runs WHERE id=?',(run_id,)).fetchone()
+        run=con.execute('SELECT id,job_id,job_name,status,trigger,requested_by,queued_at,started_at,finished_at,error,notification_status,notification_error FROM runs WHERE id=?',(run_id,)).fetchone()
         if not run: raise HTTPException(404,'Exécution introuvable')
         job=con.execute('SELECT id,acl_json FROM jobs WHERE id=?',(run['job_id'],)).fetchone()
         if user['role']!='admin' and (not job or not security.can_job(user,db.obj(job,'acl_json'),'view')):
@@ -654,6 +1201,113 @@ def summary(request:Request):
             'running':sum(x['status'] in ('running','queued') for x in records),
             'success':sum(x['status']=='success' for x in records[:100]),
             'failed':sum(x['status'] in ('failed','interrupted') for x in records[:100])}
+
+
+
+# SSH inventory is separate from the encrypted login/key vault.
+# Manual host-key onboarding: admin-only, no private credentials sent.
+@app.post('/api/ssh/host-key/inspect')
+def inspect_ssh_host_key(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if set(payload)-{'host','port'}:
+        raise HTTPException(422,'Paramètres SSH inconnus')
+    try:
+        result=host_keys.inspect(payload.get('host'),payload.get('port',22))
+    except host_keys.HostKeyError as exc:
+        db.audit(user['username'],'ssh.hostkey.inspect.failed','ssh','lecture seule')
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.hostkey.inspect',result['host'],'empreinte publique consultée')
+    return result
+
+
+@app.post('/api/ssh/host-key/approve')
+def approve_ssh_host_key(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if set(payload)-{'host','port','fingerprint','verified_out_of_band'}:
+        raise HTTPException(422,'Paramètres de confiance SSH inconnus')
+    db.audit(user['username'],'ssh.hostkey.approve.attempt','ssh','confirmation requise')
+    try:
+        result=host_keys.approve(
+            payload.get('host'),payload.get('port',22),
+            payload.get('fingerprint'),payload.get('verified_out_of_band',False))
+    except host_keys.HostKeyError as exc:
+        db.audit(user['username'],'ssh.hostkey.approve.failed','ssh','empreinte non approuvée')
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.hostkey.approve',result['host'],
+             'empreinte publique '+result['fingerprint'])
+    return result
+
+
+@app.get('/api/ssh/inventory')
+def get_ssh_inventory(request:Request):
+    security.require(request,role='admin')
+    return ssh_inventory.inventory()
+
+
+@app.post('/api/ssh/groups')
+def add_ssh_group(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        gid=ssh_inventory.create_group(payload)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.group.create',gid,str(payload.get('name',''))[:80])
+    return {'id':gid}
+
+
+@app.put('/api/ssh/groups/{group_id}')
+def edit_ssh_group(group_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        ssh_inventory.update_group(group_id,payload)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.group.update',group_id,str(payload.get('name',''))[:80])
+    return {'ok':True}
+
+
+@app.delete('/api/ssh/groups/{group_id}')
+def remove_ssh_group(group_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        ssh_inventory.delete_group(group_id)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(404,str(exc)) from None
+    db.audit(user['username'],'ssh.group.delete',group_id,'Serveurs conservés')
+    return {'ok':True}
+
+
+@app.post('/api/ssh/servers')
+def add_ssh_server(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        sid=ssh_inventory.create_server(payload)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.server.create',sid,str(payload.get('fqdn',''))[:150])
+    return {'id':sid}
+
+
+@app.put('/api/ssh/servers/{server_id}')
+def edit_ssh_server(server_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        ssh_inventory.update_server(server_id,payload)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'ssh.server.update',server_id,'Configuration serveur')
+    return {'ok':True}
+
+
+@app.delete('/api/ssh/servers/{server_id}')
+def remove_ssh_server(server_id:int,request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    try:
+        ssh_inventory.delete_server(server_id)
+    except ssh_inventory.InventoryError as exc:
+        raise HTTPException(409,str(exc)) from None
+    db.audit(user['username'],'ssh.server.delete',server_id,'Entrée retirée de l’inventaire')
+    return {'ok':True}
 
 
 @app.get('/api/credentials')
@@ -743,8 +1397,35 @@ def test_credential(credential_id:int,request:Request,payload:dict[str,Any]|None
         db.audit(user['username'],'vault.test.send.attempt',credential_id,row['kind'])
     started=time.monotonic()
     try:
-        result=connection_tests.run(row['kind'],security.decrypt(row['encrypted_payload']),
+        values=security.decrypt(row['encrypted_payload'])
+        if row['kind']=='ssh':
+            # An SSH identity is reusable: test against a one-off FQDN without
+            # persisting that host in the vault or server inventory.
+            target_id=options.get('server_id')
+            manual_host=options.get('manual_host')
+            manual_port=options.get('manual_port')
+            if target_id is not None and (manual_host is not None or manual_port is not None):
+                raise connection_tests.ConnectionTestError('Choisir une cible SSH : inventaire ou FQDN manuel, pas les deux')
+            if manual_host is not None or manual_port is not None:
+                if not isinstance(manual_host,str):
+                    raise connection_tests.ConnectionTestError('Saisir un FQDN SSH pour le test manuel')
+                if manual_port is None:
+                    manual_port=22
+                if not isinstance(manual_port,(int,str)) or isinstance(manual_port,bool):
+                    raise connection_tests.ConnectionTestError('Port SSH manuel invalide')
+                values.update(host=ssh_inventory.fqdn(manual_host),port=ssh_inventory.port(manual_port))
+            elif target_id is not None:
+                target=ssh_inventory.server(target_id)
+                values.update(host=target['fqdn'],port=target['port'])
+            elif not values.get('host'):
+                raise connection_tests.ConnectionTestError('Saisir un FQDN SSH ou choisir un serveur de l’inventaire')
+            options={k:v for k,v in options.items()
+                     if k not in ('server_id','manual_host','manual_port')}
+        result=connection_tests.run(row['kind'],values,
                                     options=options,credential_id=credential_id)
+    except ssh_inventory.InventoryError as exc:
+        db.audit(user['username'],action+'.failed',credential_id,'ssh target')
+        raise HTTPException(422,str(exc)) from None
     except connection_tests.ConnectionTestError as exc:
         db.audit(user['username'],action+'.failed',credential_id,row['kind'])
         raise HTTPException(422,str(exc)) from None
@@ -819,14 +1500,23 @@ def updates(request:Request):
     if state.exists():
         try: info=json.loads(state.read_text())
         except (OSError,ValueError): pass
-    return {'version':config.APP_VERSION,'git_branch':config.GIT_BRANCH,'worker':info,'requests':[dict(x) for x in rows]}
+    heartbeat_path=config.DATA/'update-worker-heartbeat.json'
+    worker_online=False
+    if heartbeat_path.is_file():
+        try:
+            worker_online=0<=time.time()-heartbeat_path.stat().st_mtime<25
+        except OSError:
+            pass
+    return {'version':config.APP_VERSION,'git_branch':config.GIT_BRANCH,
+            'worker':info,'worker_online':worker_online,
+            'requests':[dict(x) for x in rows]}
 
 
 @app.post('/api/updates/request')
 def request_update(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
     action=payload.get('action')
-    if action not in ('check','apply'):
+    if action not in ('check','preflight','apply'):
         raise HTTPException(422,'Action inconnue')
     with db.session() as con:
         queued=con.execute("SELECT COUNT(*) FROM updates WHERE status IN ('queued','running')").fetchone()[0]

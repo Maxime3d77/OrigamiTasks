@@ -2,6 +2,7 @@
 import io
 import json
 import hmac
+import math
 import re
 import secrets
 import shlex
@@ -11,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from fastapi import HTTPException
-from . import config, db, security
+from . import config, db, security, agent_modules, agent_settings, agent_updates
 
 ACTIONS = {'inventory', 'script', 'processes', 'disk', 'service_status',
            'service_start', 'service_stop', 'service_restart'}
@@ -92,21 +93,36 @@ def poll(agent, body):
     version = str(body.get('version') or '')[:40]
     if hostname and not re.fullmatch(r'[A-Za-z0-9_.-]{1,120}', hostname):
         raise HTTPException(422, 'Hostname invalide')
+    cpu = body.get('cpu_percent')
+    memory = body.get('memory_mb')
+    def metric(value, maximum):
+        if value is None:
+            return None
+        if type(value) not in (int,float) or not math.isfinite(value) or not 0<=value<=maximum:
+            raise HTTPException(422, 'Métrique agent invalide')
+        return round(float(value),2)
+    cpu = metric(cpu, 1000)
+    memory = metric(memory, 262144)
     with db.session() as con:
-        con.execute('UPDATE agents SET last_seen=?, hostname=CASE WHEN ?<>\'\' THEN ? ELSE hostname END, version=? WHERE id=?',
-                    (db.now(), hostname, hostname, version, agent['id']))
+        con.execute("UPDATE agents SET last_seen=?,hostname=CASE WHEN ?<>'' THEN ? ELSE hostname END,"
+                    "version=?,cpu_percent=?,memory_mb=? WHERE id=?",
+                    (db.now(),hostname,hostname,version,cpu,memory,agent['id']))
+        agent_modules.report(agent['id'],body,con)
+        agent_updates.reconcile(agent['id'],version,con)
+        modules_bundle=agent_modules.bundle(agent['id'],con)
         task = con.execute(
             "SELECT * FROM agent_tasks WHERE agent_id=? AND status='queued' ORDER BY id LIMIT 1", (agent['id'],)).fetchone()
         if not task:
-            return {'task': None}
+            return {'task': None, **modules_bundle}
         lease = secrets.token_urlsafe(32)
         updated = con.execute(
             "UPDATE agent_tasks SET status='claimed', lease_hash=?, claimed_at=? WHERE id=? AND status='queued'",
             (security.sha(lease), db.now(), task['id'])).rowcount
         if not updated:
-            return {'task': None}
+            return {'task': None, **modules_bundle}
     return {'task': {'id':task['id'], 'lease':lease, 'action':task['action'],
-                     'payload':json.loads(task['payload_json']), 'timeout':task['timeout_seconds']}}
+                     'payload':json.loads(task['payload_json']), 'timeout':task['timeout_seconds']},
+            **modules_bundle}
 
 
 def report(agent, body):
@@ -190,18 +206,22 @@ def revoke(agent_id):
         raise HTTPException(404, 'Agent not found or already revoked')
 
 
-def deploy(body):
-    if not config.ALLOW_AGENT_REMOTE_DEPLOY:
+def deploy(body, *, cluster_authorized=False):
+    if not config.ALLOW_AGENT_REMOTE_DEPLOY and not cluster_authorized:
         raise HTTPException(403, 'Enable ALLOW_AGENT_REMOTE_DEPLOY=true to provision from the UI')
     if body.get('approved') is not True:
         raise HTTPException(422, 'Explicit installation confirmation required')
     try:
-        endpoint = ensure_https(config.AGENT_SERVER_URL)
+        endpoint = agent_settings.effective_url()
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     host = str(body.get('host') or '').strip()
     allowed = {x.strip().lower() for x in config.AGENT_DEPLOY_ALLOWED_HOSTS.split(',') if x.strip()}
-    if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,253}', host) or not allowed or host.lower() not in allowed:
+    if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,253}', host):
+        raise HTTPException(422, 'FQDN de la cible SSH invalide')
+    # A cluster group is an alternate per-target authorization set only for
+    # the *internal* vetted bulk worker, never for the public deploy endpoint.
+    if not cluster_authorized and (not allowed or host.lower() not in allowed):
         raise HTTPException(403, 'Target host not in AGENT_DEPLOY_ALLOWED_HOSTS')
     try:
         port = int(body.get('port') or 22)
@@ -231,6 +251,11 @@ def deploy(body):
             source = Path(__file__).resolve().parent.parent / 'agents' / ('windows/agent.ps1' if is_windows else 'linux/agent.py')
             files = {marker+'_'+local_name: source.read_bytes(),
                      marker+'_config.json': json.dumps(config_data).encode()}
+            # One deployment bundle. Linux runs a second, isolated *passive*
+            # PRA process from the same installation directory (no VM actions).
+            if not is_windows:
+                worker=Path(__file__).resolve().parent.parent / 'agents/linux/pra_worker.py'
+                files[marker+'_pra_worker.py']=worker.read_bytes()
             for name_, data in files.items():
                 with sftp.file(base+'/'+name_, 'wb') as f:
                     f.write(data)
@@ -266,26 +291,40 @@ def deploy(body):
             command = 'powershell.exe -NoProfile -NonInteractive -EncodedCommand ' + base64.b64encode(ps.encode('utf-16le')).decode()
         else:
             stage_script = shlex.quote(base+'/'+marker+'_agent.py')
+            stage_worker = shlex.quote(base+'/'+marker+'_pra_worker.py')
             stage_config = shlex.quote(base+'/'+marker+'_config.json')
             install_script = (
                 'set -eu; command -v python3 >/dev/null; command -v systemctl >/dev/null; '
                 "id origamitasks-agent >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin origamitasks-agent; "
                 'install -d -m 700 -o origamitasks-agent -g origamitasks-agent /opt/origamitasks-agent; '
                 'install -m 500 -o origamitasks-agent -g origamitasks-agent '+stage_script+' /opt/origamitasks-agent/agent.py; '
+                'install -m 500 -o origamitasks-agent -g origamitasks-agent '+stage_worker+' /opt/origamitasks-agent/pra_worker.py; '
                 'install -m 600 -o origamitasks-agent -g origamitasks-agent '+stage_config+' /opt/origamitasks-agent/config.json; '
                 'printf "%s\\n" "[Unit]" "Description=OrigamiTasks outbound agent" "After=network-online.target" "Wants=network-online.target" '
                 '"[Service]" "Type=simple" "User=origamitasks-agent" "Group=origamitasks-agent" '
                 '"ExecStart=/usr/bin/env python3 /opt/origamitasks-agent/agent.py" "Restart=always" "RestartSec=10" '
-                '"NoNewPrivileges=true" "ProtectSystem=strict" "ProtectHome=true" "ReadWritePaths=/opt/origamitasks-agent" '
+                '"NoNewPrivileges=true" "ProtectSystem=strict" "ProtectHome=true" "ReadWritePaths=/opt/origamitasks-agent" "MemoryMax=192M" "CPUQuota=20%" "TasksMax=48" '
                 '"[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/origamitasks-agent.service; '
+                'printf "%s\\n" "[Unit]" "Description=OrigamiTasks passive PRA module" "After=network-online.target" "Wants=network-online.target" '
+                '"[Service]" "Type=simple" "User=origamitasks-agent" "Group=origamitasks-agent" '
+                '"ExecStart=/usr/bin/env python3 /opt/origamitasks-agent/pra_worker.py" "Restart=always" "RestartSec=15" '
+                '"NoNewPrivileges=true" "ProtectSystem=strict" "ProtectHome=true" "ReadWritePaths=/opt/origamitasks-agent" '
+                '"MemoryMax=64M" "CPUQuota=10%" "TasksMax=24" '
+                '"[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/origamitasks-agent-pra.service; '
                 'systemctl daemon-reload; systemctl enable --now origamitasks-agent.service; '
-                'rm -f '+stage_script+' '+stage_config
+                'systemctl enable --now origamitasks-agent-pra.service; '
+                'rm -f '+stage_script+' '+stage_config+' '+stage_worker
             )
             command = 'sh -c '+shlex.quote("if [ \"$(id -u)\" -eq 0 ]; then exec sh -c "+shlex.quote(install_script)+"; else exec sudo -n sh -c "+shlex.quote(install_script)+"; fi")
         _, stdout, stderr = client.exec_command(command, timeout=120)
         code = stdout.channel.recv_exit_status()
         if code:
             raise RuntimeError('Remote install exited with code '+str(code)+' (verify SSH privileges, PowerShell or systemd prerequisites)')
+        # Record exactly what went into this machine's config.json. Changing
+        # the control-plane URL later must not break verified remote removal.
+        with db.session() as con:
+            con.execute("UPDATE agents SET installed_controller_url=? WHERE id=?",
+                        (endpoint,result['id']))
         return {'id':result['id'], 'name':name, 'platform':platform,
                 'status':'installed_pending_enrollment'}
     except Exception:

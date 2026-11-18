@@ -36,7 +36,7 @@ def test_ssh_probe_validates_host_key_and_auth_without_command(monkeypatch):
     result=t.run("ssh", {"host":"ssh.example.org","port":2222,
                           "username":"alice","password":"test-secret"})
     assert result["ok"] and len(result["checks"]) == 3
-    assert ("pinned","RejectPolicy") in events
+    assert ("pinned","PersistentAcceptNewPolicy") in events  # automatic first-use trust; changed host keys remain blocked
     assert ("login","alice","ssh.example.org") in events
     assert "close" in events
     class Failed(FakeSSH):
@@ -143,7 +143,8 @@ def test_ldap_bind_uses_ldaps_certificate_and_base_search(monkeypatch):
     import ldap3
     events=[]
     class FakeConnection:
-        def __init__(self,server,user,password,receive_timeout,auto_bind):
+        def __init__(self,server,user,password,receive_timeout,auto_bind,check_names=False):
+            assert check_names is False
             assert auto_bind and user=="cn=read,dc=example,dc=org"
             events.append("bind")
         def search(self,base,filter,scope,attributes,size_limit):

@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS jobs (
  id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
  folder TEXT NOT NULL DEFAULT 'Général', tags_json TEXT NOT NULL DEFAULT '[]',
  acl_json TEXT NOT NULL DEFAULT '{}', steps_json TEXT NOT NULL DEFAULT '[]',
- schedule_json TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+ schedule_json TEXT NOT NULL DEFAULT '{}', notification_json TEXT NOT NULL DEFAULT '{}',
+ enabled INTEGER NOT NULL DEFAULT 1,
  next_run_at TEXT, created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS workflow_folders (
@@ -69,6 +70,10 @@ CREATE TABLE IF NOT EXISTS webhooks (
  job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
  token_hash TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_settings (
+ id INTEGER PRIMARY KEY CHECK(id=1),
+ controller_url TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ldap_settings (
  id INTEGER PRIMARY KEY CHECK(id=1), encrypted_config TEXT NOT NULL,
  updated_at TEXT NOT NULL
@@ -77,13 +82,123 @@ CREATE TABLE IF NOT EXISTS credentials (
  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, kind TEXT NOT NULL,
  encrypted_payload TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ssh_server_groups (
+ id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+ description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ssh_servers (
+ id INTEGER PRIMARY KEY, fqdn TEXT NOT NULL COLLATE NOCASE UNIQUE,
+ port INTEGER NOT NULL DEFAULT 22 CHECK(port BETWEEN 1 AND 65535),
+ label TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ssh_server_group_members (
+ group_id INTEGER NOT NULL REFERENCES ssh_server_groups(id) ON DELETE CASCADE,
+ server_id INTEGER NOT NULL REFERENCES ssh_servers(id) ON DELETE CASCADE,
+ PRIMARY KEY (group_id,server_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ssh_server_members ON ssh_server_group_members(server_id);
 CREATE TABLE IF NOT EXISTS datacenters (
  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, url TEXT NOT NULL,
- credential_id INTEGER NOT NULL REFERENCES credentials(id), created_at TEXT NOT NULL
+ credential_id INTEGER NOT NULL REFERENCES credentials(id),
+ kind TEXT NOT NULL DEFAULT 'cluster', ca_cert TEXT NOT NULL DEFAULT '',
+ skip_tls_verification INTEGER NOT NULL DEFAULT 0,
+ created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS proxmox_ssh_groups (
+ datacenter_id INTEGER PRIMARY KEY REFERENCES datacenters(id) ON DELETE CASCADE,
+ group_id INTEGER NOT NULL UNIQUE REFERENCES ssh_server_groups(id) ON DELETE CASCADE,
+ domain_suffix TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS proxmox_ssh_nodes (
+ datacenter_id INTEGER NOT NULL REFERENCES datacenters(id) ON DELETE CASCADE,
+ server_id INTEGER NOT NULL REFERENCES ssh_servers(id) ON DELETE CASCADE,
+ node_name TEXT NOT NULL,
+ PRIMARY KEY(datacenter_id,server_id),
+ UNIQUE(datacenter_id,node_name)
+);
+CREATE TABLE IF NOT EXISTS dr_plans (
+ id INTEGER PRIMARY KEY,
+ name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+ description TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dr_sites (
+ id INTEGER PRIMARY KEY,
+ plan_id INTEGER REFERENCES dr_plans(id) ON DELETE RESTRICT,
+ name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+ role TEXT NOT NULL CHECK(role IN ('primary','standby','other')),
+ storage_profile TEXT NOT NULL DEFAULT 'auto',
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dr_site_datacenters (
+ site_id INTEGER NOT NULL REFERENCES dr_sites(id) ON DELETE CASCADE,
+ datacenter_id INTEGER NOT NULL UNIQUE REFERENCES datacenters(id) ON DELETE CASCADE,
+ PRIMARY KEY(site_id,datacenter_id)
+);
+CREATE TABLE IF NOT EXISTS dr_site_agents (
+ site_id INTEGER NOT NULL REFERENCES dr_sites(id) ON DELETE CASCADE,
+ agent_id INTEGER NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+ PRIMARY KEY(site_id,agent_id)
+);
+CREATE TABLE IF NOT EXISTS dr_simulations (
+ id INTEGER PRIMARY KEY, source_site_id INTEGER REFERENCES dr_sites(id) ON DELETE SET NULL,
+ target_site_id INTEGER REFERENCES dr_sites(id) ON DELETE SET NULL,
+ scenario TEXT NOT NULL, outcome TEXT NOT NULL,
+ result_json TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dr_protected_vms (
+ id INTEGER PRIMARY KEY,
+ plan_id INTEGER NOT NULL REFERENCES dr_plans(id) ON DELETE RESTRICT,
+ source_site_id INTEGER NOT NULL REFERENCES dr_sites(id) ON DELETE RESTRICT,
+ target_site_id INTEGER NOT NULL REFERENCES dr_sites(id) ON DELETE RESTRICT,
+ source_dc_id INTEGER NOT NULL REFERENCES datacenters(id) ON DELETE RESTRICT,
+ target_dc_id INTEGER NOT NULL REFERENCES datacenters(id) ON DELETE RESTRICT,
+ source_vmid INTEGER NOT NULL,
+ source_name TEXT NOT NULL,
+ source_node TEXT NOT NULL,
+ target_vmid INTEGER NOT NULL,
+ target_node TEXT NOT NULL,
+ target_storage TEXT NOT NULL,
+ replica_name TEXT NOT NULL,
+ source_storage TEXT NOT NULL DEFAULT '',
+ engine TEXT NOT NULL DEFAULT 'planning_only',
+ interval_minutes INTEGER NOT NULL DEFAULT 60,
+ state TEXT NOT NULL DEFAULT 'planned' CHECK(state IN ('planned','paused')),
+ last_check_at TEXT,
+ last_check_json TEXT NOT NULL DEFAULT '{}',
+ created_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+ UNIQUE(source_dc_id,source_vmid),
+ UNIQUE(target_dc_id,target_vmid),
+ CHECK(source_site_id<>target_site_id),
+ CHECK(source_dc_id<>target_dc_id)
+);
+CREATE INDEX IF NOT EXISTS idx_dr_protected_vms_plan ON dr_protected_vms(plan_id);
+CREATE TABLE IF NOT EXISTS dr_vm_tests (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
+ scenario TEXT NOT NULL,
+ outcome TEXT NOT NULL,
+ report_json TEXT NOT NULL,
+ actor TEXT NOT NULL,
+ created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dr_vm_tests_vm ON dr_vm_tests(protected_vm_id,id);
+CREATE TABLE IF NOT EXISTS pra_pbs_backups (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
+ storage TEXT NOT NULL, node TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('starting','submitted','running','uncertain','completed','failed')),
+ upid TEXT,actor TEXT NOT NULL,created_at TEXT NOT NULL,finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pra_pbs_backup_vm ON pra_pbs_backups(protected_vm_id,id);
+
 CREATE TABLE IF NOT EXISTS runs (
  id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
- job_name TEXT NOT NULL, steps_snapshot TEXT NOT NULL, variables_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'queued',
+ job_name TEXT NOT NULL, steps_snapshot TEXT NOT NULL, variables_json TEXT NOT NULL DEFAULT '{}',
+ notification_json TEXT NOT NULL DEFAULT '{}', notification_status TEXT NOT NULL DEFAULT '',
+ notification_error TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued',
  trigger TEXT NOT NULL, requested_by TEXT NOT NULL, queued_at TEXT NOT NULL,
  started_at TEXT, finished_at TEXT, error TEXT NOT NULL DEFAULT ''
 );
@@ -107,8 +222,38 @@ CREATE TABLE IF NOT EXISTS agents (
  group_name TEXT NOT NULL DEFAULT 'default', hostname TEXT NOT NULL DEFAULT '',
  version TEXT NOT NULL DEFAULT '', enroll_hash TEXT, enroll_expires TEXT,
  token_hash TEXT, enrolled INTEGER NOT NULL DEFAULT 0,
- revoked INTEGER NOT NULL DEFAULT 0, last_seen TEXT, created_at TEXT NOT NULL
+ revoked INTEGER NOT NULL DEFAULT 0, last_seen TEXT,
+ cpu_percent REAL, memory_mb REAL, uninstalled_at TEXT, installed_controller_url TEXT,
+ modules_json TEXT NOT NULL DEFAULT '{"standard":true,"proxmox":false,"pra":false}',
+ modules_revision INTEGER NOT NULL DEFAULT 1,
+ modules_applied_revision INTEGER NOT NULL DEFAULT 0,
+ modules_reported_json TEXT NOT NULL DEFAULT '{}',
+ created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_deploy_batches (
+ id INTEGER PRIMARY KEY, actor TEXT NOT NULL, platform TEXT NOT NULL,
+ agent_group TEXT NOT NULL, total INTEGER NOT NULL, status TEXT NOT NULL,
+ created_at TEXT NOT NULL, finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS agent_deploy_targets (
+ id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL REFERENCES agent_deploy_batches(id),
+ host TEXT NOT NULL, port INTEGER NOT NULL, server_id INTEGER,
+ credential_id INTEGER NOT NULL, status TEXT NOT NULL,
+ agent_id INTEGER, error TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_deploy_queue ON agent_deploy_targets(status,id);
+CREATE TABLE IF NOT EXISTS agent_update_jobs (
+ id INTEGER PRIMARY KEY,
+ agent_id INTEGER NOT NULL REFERENCES agents(id),
+ host TEXT NOT NULL, port INTEGER NOT NULL,
+ platform TEXT NOT NULL,
+ from_version TEXT NOT NULL, target_version TEXT NOT NULL,
+ credential_id INTEGER NOT NULL, status TEXT NOT NULL,
+ actor TEXT NOT NULL, error TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL, finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_update_queue ON agent_update_jobs(status,id);
 CREATE TABLE IF NOT EXISTS agent_tasks (
  id INTEGER PRIMARY KEY, agent_id INTEGER NOT NULL REFERENCES agents(id),
  run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
@@ -129,6 +274,32 @@ def initialize():
     config.TRANSFER_ROOT.mkdir(parents=True, exist_ok=True)
     with session() as con:
         con.executescript(SCHEMA)
+        # Idempotent migration: preserve existing workflows and execution history.
+        for table, column, definition in (
+            ("jobs", "notification_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("runs", "notification_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("runs", "notification_status", "TEXT NOT NULL DEFAULT ''"),
+            ("runs", "notification_error", "TEXT NOT NULL DEFAULT ''"),
+            ("datacenters", "kind", "TEXT NOT NULL DEFAULT 'cluster'"),
+            ("datacenters", "ca_cert", "TEXT NOT NULL DEFAULT ''"),
+            ("datacenters", "skip_tls_verification", "INTEGER NOT NULL DEFAULT 0"),
+            ("agents", "cpu_percent", "REAL"),
+            ("agents", "memory_mb", "REAL"),
+            ("dr_sites", "plan_id", "INTEGER REFERENCES dr_plans(id) ON DELETE RESTRICT"),
+            ("agents", "uninstalled_at", "TEXT"),
+            ("agents", "installed_controller_url", "TEXT"),
+            ("agents", "modules_json", "TEXT NOT NULL DEFAULT '{\"standard\":true,\"proxmox\":false,\"pra\":false}'"),
+            ("agents", "modules_revision", "INTEGER NOT NULL DEFAULT 1"),
+            ("agents", "modules_applied_revision", "INTEGER NOT NULL DEFAULT 0"),
+            ("agents", "modules_reported_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("agent_deploy_batches", "proxmox_datacenter_id", "INTEGER"),
+            ("agent_deploy_batches", "proxmox_group_id", "INTEGER"),
+            ("agent_deploy_batches", "enable_proxmox", "INTEGER NOT NULL DEFAULT 0"),
+            ("agent_deploy_batches", "enable_pra", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
+            if column not in existing:
+                con.execute("ALTER TABLE "+table+" ADD COLUMN "+column+" "+definition)
         con.execute("INSERT OR IGNORE INTO workflow_folders (path,created_at) VALUES ('Général',?)", (now(),))
         # Never silently replay a claimed remote action after a server restart.
         con.execute("UPDATE agent_tasks SET status='interrupted', lease_hash=NULL WHERE status IN ('queued','claimed')")

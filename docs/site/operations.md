@@ -40,3 +40,13 @@ docker compose up -d
 ## Monitoring
 
 Monitor API health, container restarts, filesystem space, failed jobs, oldest queued run, LDAP connectivity, token expiration and integration availability. Export to Zabbix/Prometheus is a roadmap item; until then poll health and use central syslog for host logs.
+
+
+### GitHub releases and in-browser update dry run
+
+GitHub Actions .github/workflows/release.yml automatically publishes a **prerelease** from a vX.Y.Z-rcN tag, or a **stable release** from a vX.Y.Z tag, after verifying the version and passing Python/JavaScript and strict bilingual documentation checks. Release tags are explicitly created against reviewed commits; regular pushes publish nothing.
+
+Install the separate privileged host update worker using ops/origamitasks-updater.service, configured for /opt/OrigamiTasks. Docker access is highly privileged and must be restricted to authorized administrators. Pin GIT_ALLOWED_ORIGIN to the exact git remote get-url origin and GIT_BRANCH to the tracked deployment branch. The Updates page exposes the worker heartbeat.
+
+The « Test update (dry run) » button validates the pinned Git origin, fast-forward ancestry, Docker Compose configuration and writable data directory **without merging, installing or restarting**. This does not prove that a real upgrade will succeed or that schema migrations can be rolled back. Keep backups and perform a separate real-world test.
+

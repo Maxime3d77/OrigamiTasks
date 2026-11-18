@@ -1,6 +1,10 @@
 """Editable LDAP settings overlay: .env defaults, encrypted SQLite overrides, safe bind test."""
 import re
+import base64
+import binascii
 import ssl
+import hashlib
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -8,13 +12,121 @@ from . import config, db, security
 
 FIELDS = ('enabled', 'uri', 'starttls', 'bind_dn', 'bind_password',
           'base_dn', 'group_base_dn', 'user_attribute', 'admin_group',
-          'operator_group', 'viewer_group', 'nested_groups', 'ca_cert')
+          'operator_group', 'viewer_group', 'nested_groups', 'ca_cert', 'skip_cert_verification')
 SECRET = 'bind_password'
-BOOL = {'enabled', 'starttls', 'nested_groups'}
+BOOL = {'enabled', 'starttls', 'nested_groups', 'skip_cert_verification'}
 
 
 class LDAPSettingsError(Exception):
     pass
+
+
+def import_ca(pem_text=None, der_base64=None, *, store='ldap-cas'):
+    """Accept CA certificates from .pem or .crt/.cer files in PEM or binary DER.
+
+    The container always stores a validated public PEM CA file. Neither
+    server certificate verification nor LDAPS/STARTTLS are disabled.
+    """
+    from cryptography import x509
+    from cryptography.hazmat.primitives.serialization import Encoding
+    if (pem_text is None) == (der_base64 is None):
+        raise LDAPSettingsError("Fournir un certificat CA PEM ou DER, pas les deux")
+    if der_base64 is not None:
+        if not isinstance(der_base64,str) or len(der_base64)>175000:
+            raise LDAPSettingsError("Certificat CRT/DER invalide (128 Kio maximum)")
+        try:
+            raw=base64.b64decode(der_base64,validate=True)
+            if not 100<=len(raw)<=131072:
+                raise ValueError("invalid certificate size")
+            cert=x509.load_der_x509_certificate(raw)
+            try:
+                basic=cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+            except x509.ExtensionNotFound:
+                # Match the PEM path: legacy CA roots sometimes lack this field.
+                # OpenSSL still validates the actual LDAPS chain at connection time.
+                basic=None
+            if basic is not None and not basic.ca:
+                raise LDAPSettingsError(
+                    "Ce fichier CRT contient un certificat serveur (CA:FALSE), "
+                    "pas la CA qui l'a signé. Importer la CA émettrice."
+                )
+            pem_text=cert.public_bytes(Encoding.PEM).decode("ascii")
+        except (ValueError,binascii.Error):
+            raise LDAPSettingsError("Fichier CRT/DER invalide ou illisible") from None
+    if isinstance(pem_text, str):
+        pem_text = pem_text.lstrip('\ufeff').strip()
+    if not isinstance(pem_text,str) or not 100<=len(pem_text)<=131072:
+        raise LDAPSettingsError("Certificat CA invalide (128 Kio maximum)")
+    if 'PRIVATE KEY' in pem_text or '\x00' in pem_text:
+        raise LDAPSettingsError("Ne jamais importer une clé privée ; fournir uniquement la CA publique")
+    import re as _re
+    from cryptography import x509
+    blocks=_re.findall(r'-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----',pem_text)
+    if not 1<=len(blocks)<=10:
+        raise LDAPSettingsError("Importer de 1 à 10 certificats CA PEM")
+    # PEM exports produced by OpenSSL/PKCS#12 may include harmless textual
+    # metadata (Bag Attributes, friendlyName, subject and issuer).
+    # Do not silently discard other PEM blocks, keys, or arbitrary content.
+    residue=_re.sub(r'-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----','',pem_text)
+    metadata_patterns = (
+        r'Bag Attributes', r'Key Attributes:.*', r'friendlyName:.*',
+        r'localKeyID:.*', r'subject\s*=.*', r'issuer\s*=.*',
+        r'Certificate bag', r'Microsoft CSP Name:.*',
+    )
+    for line_number, line in enumerate(residue.splitlines(), 1):
+        stripped=line.strip()
+        if not stripped:
+            continue
+        if not any(_re.fullmatch(pattern, stripped, _re.IGNORECASE)
+                   for pattern in metadata_patterns):
+            raise LDAPSettingsError(
+                "Données non reconnues dans le fichier PEM (ligne hors certificat "
+                + str(line_number) + "). Fournir une CA PEM/DER ou un export OpenSSL "
+                "contenant uniquement des certificats et leurs métadonnées."
+            )
+    accepted=[]
+    ignored_non_ca=0
+    subjects=[]
+    for block in blocks:
+        try:
+            cert=x509.load_pem_x509_certificate(block.encode('ascii'))
+        except (ValueError,UnicodeError):
+            raise LDAPSettingsError("Certificat PEM illisible dans la chaîne") from None
+        try:
+            basic=cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+            is_ca=bool(basic.ca)
+        except x509.ExtensionNotFound:
+            # Legacy trust anchors can lack BasicConstraints. Only a
+            # self-issued legacy root may be retained without the CA extension.
+            is_ca=(cert.subject==cert.issuer)
+        if is_ca:
+            accepted.append(cert.public_bytes(Encoding.PEM).decode('ascii').strip())
+            subjects.append(cert.subject.rfc4514_string())
+        else:
+            ignored_non_ca+=1
+    if not accepted:
+        raise LDAPSettingsError(
+            "Ce fichier contient uniquement des certificats serveur (CA:FALSE). "
+            "Importer la CA émettrice, avec CA:TRUE."
+        )
+    # Keep public CA certificates only, even when a server leaf is bundled.
+    normal='\n'.join(accepted)+'\n'
+    digest=hashlib.sha256(normal.encode()).hexdigest()
+    if store not in ('ldap-cas','proxmox-cas'):
+        raise LDAPSettingsError('Répertoire CA inconnu')
+    root=config.DATA/store
+    root.mkdir(parents=True,exist_ok=True,mode=0o700)
+    path=root/(digest+'.pem')
+    if not path.exists():
+        flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
+        try:
+            fd=os.open(path,flags,0o600)
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(fd,'w',encoding='ascii') as handle:
+                handle.write(normal)
+    return {'path':str(path),'fingerprint_sha256':digest,'certificate_count':len(accepted), 'ignored_non_ca_count':ignored_non_ca,'ca_subjects':subjects}
 
 
 def defaults():
@@ -25,7 +137,7 @@ def defaults():
                 user_attribute=config.LDAP_USER_ATTRIBUTE,
                 admin_group=config.LDAP_ADMIN_GROUP, operator_group=config.LDAP_OPERATOR_GROUP,
                 viewer_group=config.LDAP_VIEWER_GROUP, nested_groups=config.LDAP_NESTED_GROUPS,
-                ca_cert=config.LDAP_CA_CERT)
+                ca_cert=config.LDAP_CA_CERT, skip_cert_verification=False)
 
 
 def current():
@@ -67,6 +179,13 @@ def check_settings(data):
     for key in ('admin_group', 'operator_group', 'viewer_group'):
         if not re.fullmatch(r'[A-Za-z0-9_.@\- ]{1,120}', str(data.get(key) or '')):
             raise LDAPSettingsError('Nom de groupe LDAP invalide : '+key)
+    if data.get('skip_cert_verification') and not config.ALLOW_INSECURE_LDAP_TLS:
+        raise LDAPSettingsError(
+            'Exception de certificat interdite : définir ALLOW_INSECURE_LDAP_TLS=true '
+            'sur l’hôte uniquement après validation du risque'
+        )
+    if data.get('skip_cert_verification') and not isinstance(data['skip_cert_verification'], bool):
+        raise LDAPSettingsError('Option de confiance LDAP invalide')
     if data.get('ca_cert'):
         path = Path(str(data['ca_cert'])).resolve()
         # Paths are administrator-configured but must remain in trusted certificates or app data.
@@ -74,6 +193,26 @@ def check_settings(data):
         if not path.is_file() or not any(path.is_relative_to(root) for root in roots):
             raise LDAPSettingsError('Chemin de certificat CA illisible ou non autorisé')
     return data
+
+
+def tls_for(settings, uri=None):
+    """LDAP TLS: saved override is limited to its exact configured LDAP URI.
+
+    No certificate checking bypass is inherited by other vault directory URLs
+    or a workflow with a different LDAP server.
+    """
+    from ldap3 import Tls
+    saved_uri=str(settings.get('uri') or '').rstrip('/').lower()
+    selected_uri=str(uri or settings.get('uri') or '').rstrip('/').lower()
+    insecure=bool(settings.get('skip_cert_verification')) and selected_uri==saved_uri
+    if insecure and not config.ALLOW_INSECURE_LDAP_TLS:
+        raise LDAPSettingsError(
+            'Exception TLS non autorisée : ALLOW_INSECURE_LDAP_TLS=false'
+        )
+    return Tls(
+        validate=ssl.CERT_NONE if insecure else ssl.CERT_REQUIRED,
+        ca_certs_file=None if insecure else settings.get('ca_cert') or None
+    )
 
 
 def merge(updates, previous=None):
@@ -110,13 +249,14 @@ def test(settings, user_login=''):
         raise LDAPSettingsError('Activer LDAP pour lancer le test')
     check_settings(settings)
     try:
-        from ldap3 import Server, Connection, SUBTREE, BASE, Tls
+        from ldap3 import Server, Connection, SUBTREE, BASE, NONE
         from ldap3.utils.conv import escape_filter_chars
         server = Server(settings['uri'],
-                        tls=Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=settings.get('ca_cert') or None),
-                        connect_timeout=7)
+                        tls=tls_for(settings),
+                        connect_timeout=7, get_info=NONE)
         conn = Connection(server,user=settings['bind_dn'],password=settings['bind_password'],
-                          auto_bind=not settings.get('starttls'),receive_timeout=10)
+                          auto_bind=not settings.get('starttls'),receive_timeout=10,
+                          check_names=False)
         try:
             if settings.get('starttls'):
                 conn.open()
@@ -143,5 +283,13 @@ def test(settings, user_login=''):
     except LDAPSettingsError:
         raise
     except Exception as exc:
-        # Avoid echoing credentials, server responses or sensitive LDAP results.
-        raise LDAPSettingsError('Échec LDAP ('+type(exc).__name__+') : vérifier TLS, résolution DNS, bind et bases DN') from None
+        # Classify failures without disclosing LDAP entries or credentials.
+        if isinstance(exc, ssl.SSLCertVerificationError):
+            detail = "Certificat LDAP non approuvé : vérifier la CA importée et le FQDN du serveur"
+        elif isinstance(exc, ssl.SSLError):
+            detail = "Négociation TLS LDAP échouée : vérifier la chaîne de certificats"
+        elif type(exc).__name__ == "LDAPObjectClassError":
+            detail = "Schéma LDAP incompatible avec le filtre de groupes ; vérifier le type d'annuaire"
+        else:
+            detail = "Vérifier l'annuaire, le bind et les bases DN"
+        raise LDAPSettingsError('Échec LDAP ('+type(exc).__name__+') : '+detail) from None

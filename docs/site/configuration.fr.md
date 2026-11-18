@@ -1,5 +1,27 @@
 # Référence de configuration
 
+### Découverte Proxmox : rechercher et trier les ressources
+
+Dans **Serveurs & clusters Proxmox → Découvrir les nœuds/VM**, le tableau dispose d'une recherche instantanée (nom, VMID, nœud, état, ID et stockage), de filtres **Tous / Nœuds / VM / LXC / Stockages**, d'un tri **Nom / Type / VMID / Nœud / État** ascendant ou descendant, d'une pagination **100 éléments par page**, d'un récapitulatif des volumes et du bouton **Actualiser depuis Proxmox**. Le bouton **Évaluer PRA** reste disponible pour les VM QEMU. Cette fonctionnalité est **en lecture seule**.
+
+Le futur PRA automatique SD→AU avec agents autonomes mais administrés, VM de secours nommées **REP_**, témoin indépendant et **retour arrière explicite** est documenté dans le fichier **docs/ARCHITECTURE-PRA-INTERSITES.fr.md**. Il s'agit d'une conception, pas d'un moteur de bascule actuellement disponible. Une perte de ping ou d'agent ne suffit jamais à autoriser le démarrage du secours ; un véritable fencing et un propriétaire exclusif doivent être prouvés.
+
+### Proxmox avec certificat autosigné : dérogation TLS par serveur (0.3.12)
+
+Sur **Administration → Serveurs & clusters Proxmox**, cliquer **Modifier** sur le serveur ou cluster. Si l'import de la CA interne n'est pas possible, cocher **Ignorer la vérification du certificat TLS (certificat autosigné)**, puis **Enregistrer les modifications** et **Tester l'API**. Cette dérogation ne concerne que ce serveur/cluster, reste modifiable à tout moment et ne nécessite **aucune modification du `.env` ni redémarrage de Docker**.
+
+La communication continue en HTTPS chiffré, mais le certificat et le nom d'hôte ne sont **plus authentifiés** : cela augmente le risque d'interception (MITM), surtout sur un réseau non maîtrisé. Pour une configuration pérenne, importer la CA Proxmox dans le même formulaire et décocher la dérogation. Le test affiche un avertissement clair lorsqu'il est effectué sans vérification TLS. Si la connexion échoue toujours, distinguer **DNS, port 8006, pare-feu** et **droits du token** : ignorer TLS ne résout pas ces causes.
+
+### Ajouter un serveur ou cluster Proxmox entièrement depuis le navigateur (0.3.11)
+
+1. Ouvrir **Administration → Serveurs & clusters Proxmox**, puis **Ajouter un serveur / cluster**.
+2. Choisir le type **Cluster Proxmox** (détection des nœuds membres) ou **Serveur Proxmox autonome**, un nom et l'URL de l'API HTTPS (exemple `https://pve.example.org:8006`).
+3. Soit sélectionner un token existant du coffre, soit saisir **user@pve!tokenname** et le **secret du token** directement dans l'assistant : le coffre est créé automatiquement, secret chiffré.
+4. Si une CA interne est utilisée, **importer la CA publique** au format PEM/CRT/CER/DER ou en choisir une déjà importée. Un identifiant SHA-256 lie ce certificat au datacenter et à sa connexion. **Aucun changement du `.env` ni redémarrage Docker** n'est nécessaire.
+5. Cliquer **Tester l'API** puis **Découvrir les nœuds/VM**. Le bouton **Modifier** permet de changer une CA, un nom, le type et la connexion API.
+
+Les CA sont stockées sous `data/proxmox-cas`, distinctement du LDAP. Seules des CA publiques sont acceptées ; la validation du certificat serveur et du FQDN reste obligatoire. Les anciens paramètres `PROXMOX_CA_CERT` restent une compatibilité facultative quand aucune CA n'est sélectionnée dans l'interface. Les opérations VM modifiant l'état d'une machine conservent un contrôle d'autorisation supplémentaire et ne sont pas activées par le simple ajout d'un cluster.
+
 Le fichier `.env.example` constitue la liste de référence des paramètres. Redémarrer le conteneur après changement. **Ne jamais committer `.env`.**
 
 | Variable | Rôle | Recommandation |
@@ -11,11 +33,18 @@ Le fichier `.env.example` constitue la liste de référence des paramètres. Red
 | `ORIGAMI_EXECUTOR_WORKERS` | Nombre d'exécutions concurrentes | `2` au départ, une seule instance API |
 | `MAX_STEP_SECONDS` | Limite d'une étape | `1800` |
 | `MATRIX_ALLOWED_HOSTS` | Hôtes Matrix HTTPS autorisés | ex. `matrix.example.org` |
-| `PROXMOX_ALLOWED_HOSTS` | API Proxmox autorisées et tests de connexion | ex. `pve.example.org:8006` |
+| `PROXMOX_ALLOWED_HOSTS` | Ancienne liste des hôtes (connecteurs génériques historiques) | **Inutile pour les DC/token Proxmox enregistrés dans l'interface** |
 | `CONNECTION_TEST_ALLOWED_HOSTS` | Hôtes HTTPS autorisés pour les tests de jetons API génériques | Vide par défaut ; ajouter seulement des hôtes approuvés |
 | `PROXMOX_CA_CERT` | CA PEM de confiance montée dans le conteneur | Si CA interne |
+| `SSH_HOST_KEY_POLICY` | Acceptation des clés d'hôte | `accept-new` par défaut ; `strict` si contrôle manuel exigé |
 | `ALLOW_PROXMOX_ACTIONS` | Active les actions VM encadrées | `false` avant revue |
 | `GIT_ALLOWED_ORIGIN` | Origine Git autorisée au service de mise à jour | Dépôt protégé uniquement |
+
+## Administration Proxmox sans modification de `.env`
+
+Dans **Coffre-fort**, créer une connexion de type **Proxmox · API** avec `https://pve.example.org:8006`, un identifiant `user@realm!tokenname` et le secret de jeton. Dans **Administration → DC Proxmox**, cliquer **Déclarer un DC Proxmox**, choisir ce jeton et saisir **la même URL HTTPS**. L'hôte est immédiatement autorisé pour le diagnostic et l'inventaire, même si `PROXMOX_ALLOWED_HOSTS` est absent ou contient d'anciens serveurs : aucune modification du `.env`. L'interface permet de rechercher les DC dans un grand parc.
+
+Une URL différente de celle associée au jeton est rejetée pour éviter d'envoyer un token à un autre hôte. Le certificat HTTPS est toujours vérifié : si la CA interne n'est pas connue, fournir une chaîne valide via `PROXMOX_CA_CERT` ou le magasin de confiance. Les opérations VM sensibles restent protégées par les droits Proxmox **et** les contrôles d'OrigamiTasks : l'enregistrement d'un DC ne donne pas de privilèges supplémentaires au jeton.
 
 ## LDAP / Active Directory
 
@@ -37,6 +66,49 @@ Le menu **Administration → LDAP / Active Directory** permet de configurer l’
 
 Créer dans **Coffre-fort** un **profil par protocole** : SMTP (serveur, port, STARTTLS / SSL direct / aucun chiffrement, authentification activée ou non, login, mot de passe, expéditeur), SSH/SFTP (hôte, port, utilisateur, mot de passe ou clé), FTP/FTPS, LDAP, API, Matrix et Proxmox. Les champs changent selon le protocole. Le bouton **Tester SMTP** établit une connexion TLS et s'authentifie si nécessaire, **sans envoyer de courriel**. Pour l'annuaire lui-même, utiliser **Administration → LDAP → Tester la connexion**. Réserver l'édition des tâches privilégiées aux opérateurs de confiance. Les paramètres non sensibles sont consultables ; les mots de passe, jetons et clés privées ne sont jamais réaffichés. Modifier un champ secret en le laissant vide préserve l'ancien. Les anciennes connexions sans serveur configuré restent compatibles avec les tâches qui précisent l'hôte.
 
+
+### Acceptation SSH automatique des nouveaux serveurs (TOFU)
+
+Une identité SSH du coffre est **réutilisable sans modification** sur tous les hôtes où la clé publique utilisateur correspondante est autorisée. Elle n'est liée ni au FQDN ni au port d'un serveur.
+
+Avec `SSH_HOST_KEY_POLICY=accept-new` (valeur par défaut), OrigamiTasks mémorise **automatiquement** la première clé publique de chaque serveur dans `/app/data/known_hosts` lors du test SSH, d'un workflow ou d'un déploiement d'agent. Les connexions suivantes doivent présenter la même clé ; une empreinte différente bloque immédiatement l'exécution. Le fichier persiste sur le volume de données.
+
+Ce mode facilite la première connexion, mais il présente un risque d'usurpation **à cette première connexion** si le réseau est compromis. Pour les environnements nécessitant une vérification indépendante, définir `SSH_HOST_KEY_POLICY=strict` dans le `.env` et redémarrer le conteneur : l'approbation manuelle depuis l'interface reste disponible. Dans ce mode, la commande `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` sur la console cible permet de comparer l'empreinte.
+
+### Import des chaînes de CA LDAP en CRT
+
+Un fichier `.crt` peut contenir plusieurs certificats X.509. L'import prend en charge PEM et DER ; pour un bundle PEM mêlant CA et certificat serveur, il **conserve uniquement les certificats d'autorité** et indique les certificats non-CA ignorés. Les certificats CA avec `CA:TRUE` sont conservés ; un fichier ne contenant que des certificats serveur est refusé. Après import, utiliser le chemin CA fourni, **enregistrer la configuration LDAP**, puis vérifier LDAPS/STARTTLS. Si la case « Ignorer la vérification du certificat » est grisée, c'est que `ALLOW_INSECURE_LDAP_TLS` est désactivé sur l'hôte. Avec une CA correcte, laisser cette case désactivée.
+
+
+### Diagnostic SSH : identité privée et clé d'hôte
+
+La **clé privée SSH utilisateur** enregistrée dans le coffre (OpenSSH/PEM, éventuellement protégée par une phrase secrète) sert à s'authentifier. Sa clé publique correspondante doit se trouver dans `authorized_keys` sur les serveurs. Elle n'est **pas** la clé privée `/etc/ssh/ssh_host_*` des serveurs.
+
+Le test avec FQDN manuel n'ajoute pas ce FQDN à l'inventaire. En mode `accept-new`, la première connexion mémorise uniquement la **clé d'hôte publique** dans `known_hosts`, sans copie manuelle d'empreinte. Le bouton « Afficher l’empreinte SSH (facultatif) » reste utile pour contrôler un changement de clé.
+
+### Test SSH ponctuel sans inventaire
+
+Dans **Coffre-fort → Identité SSH → Tester**, choisir **Saisie manuelle**, indiquer le FQDN du serveur (par exemple `serveur.fr`) et son port SSH, 22 par défaut. La clé ou le mot de passe du coffre sont testés sur ce serveur, sans inscrire le FQDN dans l’inventaire ni l’enregistrer dans l’identité. Les modes **Inventaire SSH** et **Ancien hôte** restent disponibles. Le fichier `known_hosts` mémorise automatiquement les nouvelles clés en mode `accept-new`, puis refuse toute substitution.
+
+### Import de certificats LDAP CRT, DER ou PEM
+
+Dans **Administration → LDAP**, le bouton d’import accepte une CA publique `.crt`, `.cer`, `.der` ou `.pem`. Un fichier `.crt` peut contenir un certificat texte **PEM** ou binaire **DER** : les deux sont reconnus et convertis en fichier PEM de confiance. Les clés privées et les certificats serveur non-CA sont rejetés. **Enregistrer** la configuration LDAP après import, puis cliquer sur **Tester LDAP**. La vérification LDAPS/STARTTLS reste obligatoire ; il n’y a pas d’option globale « ignorer le certificat ».
+
+### Identités SSH et inventaire des serveurs
+
+Les connexions **SSH** du coffre sont des **identités réutilisables**, sans serveur associé : nom de profil, login, mot de passe **ou** clé privée OpenSSH, et phrase secrète facultative pour cette clé. Le mot de passe et la clé restent chiffrés dans le coffre et ne sont jamais réaffichés. Il est préférable d'utiliser une clé individuelle de service avec droits minimaux.
+
+Le menu **Administration → Serveurs & groupes SSH** permet de :
+
+- Créer un **groupe de serveurs** et saisir une liste de FQDN, un par ligne (par exemple `au-app01.infra.example.org` ou `sd-app01.infra.example.org:2222` si le port SSH diffère de 22).
+- Enregistrer des serveurs individuels avec leur FQDN, port et libellé ; rattacher une machine à **plusieurs groupes**.
+- Filtrer et retrouver les serveurs par groupe ou recherche de FQDN. Supprimer un groupe **ne supprime pas** les serveurs associés.
+- Depuis **Coffre-fort → Identité SSH → Tester**, choisir **un serveur de l'inventaire**, puis tester le compte et la clé privée sur cet hôte précis. Les vérifications optionnelles SFTP et `whoami` restent disponibles.
+
+Les tâches **SSH**, **SFTP** et le runner **Ansible** proposent un sélecteur de **serveur cible enregistré** : elles utilisent le compte SSH du coffre, mais le FQDN et le port du serveur sélectionné. Un groupe sert à **organiser et filtrer les cibles**, pas à exécuter implicitement une tâche sur tous les serveurs. Les anciennes connexions SSH contenant encore `host`/`port` continuent de fonctionner ; la sélection d'un serveur de l'inventaire les remplace pour cette tâche ou ce test.
+
+La première clé d'hôte SSH est enregistrée automatiquement avec le mode `accept-new`, puis un changement de clé est refusé. `strict` impose l'approbation manuelle. Aucune commande SSH n'est lancée lors du simple test d'authentification.
+
 ### Assistant de diagnostic des connexions
 
 Dans **Coffre-fort → Tester** ou directement depuis le sélecteur d'un workflow, chaque profil ouvre un assistant propre à son protocole :
@@ -54,7 +126,7 @@ Par défaut, les diagnostics **n'envoient aucun message** et ne modifient aucune
 
 ## SSH distant
 
-Une entrée `known_hosts` vérifiée est obligatoire. Contrôler l'empreinte **par un canal indépendant** ; ne pas accepter automatiquement la première clé en production. Windows exige OpenSSH Server et un compte de service capable d'utiliser PowerShell ; Linux exige un compte SSH de service.
+Avec `accept-new`, la première clé est acceptée et persistée automatiquement ; une modification ultérieure est bloquée. Pour une infrastructure critique, choisir `strict` et comparer les empreintes par un canal indépendant. Windows exige OpenSSH Server et un compte de service capable d'utiliser PowerShell ; Linux exige un compte SSH de service.
 
 ## Règles réseau
 
@@ -72,3 +144,15 @@ Limiter les sorties aux destinations explicitement autorisées : Matrix HTTPS, P
 | `ALLOW_DIRECTORY_WRITES` | Écritures LDAP/AD (false) |
 
 Pour la procédure complète et les précautions, consulter [Agents](agents.md) et [Tâches](tasks.md).
+
+## Certificat CA LDAP et vérification TLS
+
+Dans **Administration → LDAP / Active Directory**, importer la **CA publique** qui a signé le certificat du serveur LDAPS depuis un fichier `.pem` ou `.crt` (128 Kio maximum). Les certificats PEM sont validés et conservés dans `/app/data/ldap-cas` (volume persistant avec permissions restreintes). Le chemin est renseigné dans le formulaire ; **enregistrer la configuration**, puis **tester la connexion**. Le SAN du certificat serveur doit correspondre au FQDN utilisé.
+
+La vérification du certificat reste obligatoire pour **LDAPS:636** ou **STARTTLS:389**. Il n'y a pas d'option « ignorer le certificat », car elle rendrait possible l'interception des identifiants du compte de liaison. **Ne jamais importer de clé privée.**
+
+## Statut de mise à jour
+
+Le menu **Mises à jour** présente la version installée, la version du dernier commit de la branche `GIT_BRANCH` sur l'origine autorisée par `GIT_ALLOWED_ORIGIN`, la date du **commit** distant, le nombre de commits en retard et la date de vérification. Le service hôte `ops/update-worker.py` vérifie au démarrage puis toutes les heures environ. Le contrôle peut aussi être demandé manuellement.
+
+Configurer `GIT_ALLOWED_ORIGIN` avec l'URL exacte obtenue via `git remote get-url origin` et `GIT_BRANCH` avec la branche réellement utilisée. Quand le worker est absent, que l'origine n'est pas autorisée ou que la branche diverge, l'écran indique **Vérification indisponible**, jamais un faux « À jour ». Une installation reste une action administrateur manuelle ; la date affichée est celle du dernier commit, pas nécessairement d'une release.

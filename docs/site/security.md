@@ -6,7 +6,7 @@ OrigamiTasks is an **automation control plane**. Running a script is a powerful 
 
 - Argon2 password hashing, session cookies `HttpOnly; Secure; SameSite=Strict`, CSRF verification, login throttling.
 - LDAP group role mapping, per-job ACLs for view/run/edit, administrator-only vault and datacenter management.
-- Encrypted secret payloads (Fernet), TLS verification for LDAP, Matrix and Proxmox, strict SSH known hosts.
+- Encrypted secret payloads (Fernet), TLS verification for LDAP, Matrix and Proxmox, persistent SSH host-key pinning (automatic first use, changed keys rejected).
 - Disabled local script execution by default; isolated host updater instead of a privileged Git command in the web application.
 - Controlled transfer root and maximum log length. Known credential values are redacted from displayed logs (not an absolute guarantee).
 
@@ -34,6 +34,23 @@ See the detailed [security threat model](https://github.com/Maxime3d77/OrigamiTa
 
 ## Agent and directory task security
 
-Preview agents use distinct revocable, long-lived tokens (no mTLS yet); enrollment tokens are single-use and expire after 15 minutes. Remote provisioning uses pinned SSH host keys and allow-listed targets. The Windows scheduled task runs as SYSTEM; Linux runs unprivileged. Script execution is still privileged trusted automation.
+Preview agents use distinct revocable, long-lived tokens (no mTLS yet); enrollment tokens are single-use and expire after 15 minutes. Remote provisioning pins host keys on first use by default and rejects later changes; an allow-list still restricts target hosts. The `strict` SSH policy requires manual host-key approval. The Windows scheduled task runs as SYSTEM; Linux runs unprivileged. Script execution is still privileged trusted automation.
 
 LDAP/AD writes are disabled by default, confined by base DN, TLS certificate validation and explicit step approval. Use least-privilege service credentials, a test directory and external domain controller audit logs.
+
+
+## Bulk agent deployments and LDAP TLS
+
+Bulk agent provisioning requires an administrator session, explicit approval and an encrypted SSH vault identity. Every host must appear in `AGENT_DEPLOY_ALLOWED_HOSTS`. The durable per-host queue never automatically replays interrupted installs. API results and audit logs do not reveal passwords, private keys or raw installation output.
+
+LDAP upload accepts only **public CA certificates** in PEM or DER with restricted file access. TLS certificate verification cannot be disabled in the UI. Manual workflow network settings must never store plaintext passwords or tokens.
+
+
+### SSH first-use trust and its security boundary
+
+`SSH_HOST_KEY_POLICY=accept-new` accepts and durably stores new SSH server public keys in the application volume; mismatches remain blocked. First-use trust is vulnerable to an attacker present on that initial connection. For sensitive administrative networks, use `SSH_HOST_KEY_POLICY=strict` and verify host fingerprints out of band. User private keys remain separate from host keys.
+
+### Exceptional LDAPS/STARTTLS certificate validation override
+
+Prefer installing the **issuing public CA** instead of a server-leaf certificate. A CRT file may contain the LDAP server leaf rather than a CA. For exceptional troubleshooting only, a host administrator can set ALLOW_INSECURE_LDAP_TLS=true in .env and restart the container, then explicitly check and save the LDAP certificate-verification bypass under Administration → LDAP. **Warning:** transport remains encrypted, but the remote LDAP server is not authenticated: an active network attacker may intercept directory credentials. This exception also affects LDAP login, tests and directory workflows. Disable it as soon as the proper CA is installed.
+

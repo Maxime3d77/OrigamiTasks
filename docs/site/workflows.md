@@ -1,8 +1,43 @@
 # Workflows and scheduling
 
+### Per-workflow HTML email completion reports
+
+In the workflow editor (administrator only), use **HTML email report** to choose an encrypted SMTP vault profile, up to **5 recipients** and which events trigger a report (**success**, **failure** or both). Reports are dispatched once after a manual, scheduled, or webhook-triggered execution finishes.
+
+The subject shows `[OrigamiTasks] [SUCCÈS]` or `[OrigamiTasks] [ÉCHEC]`, workflow name and run ID. The HTML/plaintext email includes status, requester, UTC completion timestamp, per-step names, attempts, exit codes, and redacted error snippets. Full logs remain in **Runs**, and SMTP delivery failures never alter the workflow status. Operators cannot reassign vault SMTP profiles.
+
+### Zoom and navigation in the workflow graph
+
+The editor provides **−**, **＋**, **100%**, **Fit width**, and **Overview** controls. Zoom ranges from 8% to 250%, with buttons or **Ctrl + mouse wheel**. Drag the **graph background** to pan horizontally/vertically; clicking a node still selects the step. Zoom and scroll position persist when switching steps within the same workflow. The graph has a bounded viewport so it never stretches the whole editor window.
+
 ## Data model
 
 A **job** contains ordered **steps**; each step has a unique ID, type, JSON configuration, optional condition, retry policy and `on_success`/`on_failure` target. `END` exits successfully; `FAIL` terminates with failure. Up to 80 steps and 200 graph transitions are accepted per run. The engine snapshots steps when a run is queued, preserving that run against later edits.
+
+## Connection-source forms, scheduling and error recovery
+
+Connection steps (**SMTP, SSH/SFTP, FTP/FTPS, Matrix, LDAP, HTTP and Ansible runner**) now offer **Use vault connection** (recommended) versus **Manual network configuration**. Only the relevant endpoint fields are shown; action-specific inputs remain visible.
+
+- **Vault SMTP:** select an SMTP profile with host, port, TLS, sender and credentials already saved; specify only recipient, subject and body. Stale task-level SMTP host overrides are ignored when vault mode is explicitly selected.
+- **Manual SMTP:** supply host, port, transport security (STARTTLS / implicit SSL / unencrypted internal relay), sender and message. No plaintext login/password is permitted; use the vault for authenticated SMTP.
+- **SSH/SFTP/Ansible:** vault mode uses a server inventory selection; manual mode uses a typed FQDN/port. The SSH identity remains in the encrypted vault in both cases.
+- **HTTP API:** vault mode uses the stored base URL and token plus a step-specific relative path; manual mode uses a full URL without embedding any password.
+
+Scheduling choices are **Manual**, **Once**, **Repeat using assistant** (minute / five minutes / hourly / daily / weekly presets) and **Advanced cron**. Inactive schedule fields are hidden; **Once** shows no interval controls.
+
+Click **Add on failure** on a step to insert a new task automatically connected to its red `on_failure` branch. By default the recovery path ends in **FAIL** so a failed workflow remains observable; explicitly connect the recovery task to `END` when recovery should make the run successful. Additional steps can be chained via branch targets.
+
+## Vault/manual connection modes and failure recovery
+
+**SMTP, SSH/SFTP, FTP/FTPS, HTTP, Matrix, LDAP and Ansible runner** steps now offer **Use vault connection** (recommended) or **Manual network settings**. Only the selected source's relevant connection fields are displayed.
+
+For **email / SMTP**, vault mode displays the SMTP profile and the task-specific recipients, subject, body and attachments. Host, port, TLS and sender come from the vault, and hidden legacy overrides no longer take precedence. Manual mode shows host, port, transport security (STARTTLS, implicit TLS or unencrypted internal relay), sender and message. Manual SMTP is intended for relays **without authentication**; use the vault for credentials. Passwords are never stored in a workflow.
+
+**SSH/SFTP/Ansible** steps use a vault SSH identity and either an inventory host or a manually entered FQDN. HTTP steps can use a vault base URL/token with a relative path or a manually entered full URL.
+
+Scheduling modes are **Manual**, **Once**, **Repeat using assistant** (minute, 5/10/15/30 minutes, hourly, daily, weekly or custom) and **Advanced cron**. Inactive schedule controls are hidden.
+
+Click **Add on failure** on a step to insert a new task wired to `on_failure`. Its default completion is **FAIL** to preserve failure visibility after notifying or cleanup. Explicitly change the recovery task's success target to `END` if recovery should make the overall run successful.
 
 ## Example: branch after a backup
 
@@ -29,6 +64,8 @@ The **Workflows** page offers a persistent hierarchical folder explorer. Choose 
 In **New workflow**, choose the **Trigger**: **Manual**, **Once**, **Repeat at interval**, or **Advanced cron**. Local dates use the specified timezone (default Europe/Paris) and are stored as UTC. Missed interval ticks during an outage are not backfilled automatically. Use cron, rather than intervals, for weekday-specific schedules.
 
 **View / Run / Edit** permission groups can be selected via a searchable LDAP group picker, including OpenLDAP `posixGroup` / `memberUid`. The LDAP bind account needs read access to `LDAP_GROUP_BASE_DN`. When LDAP is unavailable, the UI warns and falls back to locally known groups.
+
+**SSH**, **SFTP** and **Ansible runner** workflow steps can choose an SSH server registered under **Administration → SSH servers & groups**. The same vault SSH identity may be reused with multiple hosts. Groups organize/filter targets and never silently fan out a workflow across all group members. Legacy task-level `host` and `port` settings are retained for compatibility.
 
 Vault connection profiles now also store protocol settings. SMTP steps can inherit the host, port, security and authentication from the selected vault profile, leaving task-level technical fields optional. Directory steps can default to central LDAP administration settings.
 

@@ -136,3 +136,201 @@
   #credentialTestLayer .test-wizard-option{grid-template-columns:18px minmax(0,1fr);padding:12px}
   #credentialTestLayer .test-wizard-dependent{padding-left:11px}
 }
+
+/* 0.3.4: SSH inventory and reusable server group selection */
+.ssh-inventory-layout{grid-template-columns:minmax(250px,.85fr) minmax(350px,1.35fr);gap:18px}
+.ssh-inventory-layout .panel{min-width:0}
+.ssh-group-card,.ssh-server-row{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:14px 0;border-bottom:1px solid var(--stroke);min-width:0}
+.ssh-group-card:last-child,.ssh-server-row:last-child{border-bottom:0}
+.ssh-group-card>div:first-child,.ssh-server-row>div:first-child{min-width:0;overflow-wrap:anywhere}
+.ssh-group-card b,.ssh-server-row strong{font-size:13px;color:var(--text)}
+.ssh-server-row small{display:block;color:var(--muted);font-size:11px;margin:5px 0}
+.ssh-group-card .credential-actions,.ssh-server-row .credential-actions{flex:0 0 auto}
+.ssh-server-list{max-height:60vh;overflow-y:auto;overflow-x:hidden}
+.ssh-group-checkboxes{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;border:1px solid var(--stroke);border-radius:10px;background:var(--panel2)}
+.ssh-group-option{display:inline-flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--stroke);border-radius:8px;cursor:pointer;max-width:100%}
+.ssh-group-option input[type=checkbox]{width:17px;min-width:17px;max-width:17px;height:17px;margin:0;padding:0;accent-color:var(--yellow)}
+.ssh-group-option span{font-size:12px;overflow-wrap:anywhere}
+.ssh-target-picker{border:1px solid var(--stroke);padding:14px;border-radius:12px;background:var(--panel2);min-width:0}
+.ssh-target-picker .field{min-width:0}
+.ssh-target-picker select,.ssh-target-picker input{max-width:100%;min-width:0}
+.ssh-target-picker .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.ssh-target-picker p{line-height:1.5;margin:7px 0 0}
+@media(max-width:1100px){.ssh-inventory-layout{grid-template-columns:1fr}}
+@media(max-width:690px){
+ .ssh-group-card,.ssh-server-row{flex-direction:column;align-items:stretch}
+ .ssh-group-card .credential-actions,.ssh-server-row .credential-actions{justify-content:flex-start}
+ .ssh-target-picker .form-grid{grid-template-columns:1fr}
+}
+
+/* 0.3.5: dynamic connection source and scheduling controls */
+.schedule-detail[hidden],.schedule-timezone[hidden],.schedule-info[hidden]{display:none!important}
+.connection-source-select{background:var(--panel2);border:1px solid var(--stroke);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0;margin-bottom:14px}
+.connection-source-select .field{max-width:100%;min-width:0}
+.connection-source-select select{max-width:100%}
+.connection-source-select p{line-height:1.55;margin:0}
+.failure-add{border-color:#b35a6e;color:#f2a1b2}
+.failure-add:hover{background:#5b2634;color:#fff}
+.version-comparison{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0}
+.version-entry{display:flex;flex-direction:column;gap:8px;border:1px solid var(--stroke);background:var(--panel2);border-radius:11px;padding:17px;min-width:0}
+.version-entry>span{font-size:12px;color:var(--muted)}
+.version-entry strong{font-size:22px;line-height:1.2;word-break:break-word}
+.version-entry small{font-size:11px;line-height:1.5;color:var(--muted)}
+.agent-batch{border:1px solid var(--stroke);border-radius:10px;background:var(--panel2);margin:10px 0;overflow:hidden}
+.agent-batch summary{padding:13px 14px;display:flex;gap:12px;align-items:center;justify-content:space-between;cursor:pointer;list-style:revert}
+.agent-batch summary strong{font-size:13px}
+.agent-batch summary span{font-size:12px;color:var(--muted);text-align:right}
+.agent-batch-hosts{padding:6px 14px 14px;display:flex;flex-direction:column;gap:8px}
+.agent-batch-host{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--stroke);min-width:0}
+.agent-batch-host strong{font-size:12px;overflow-wrap:anywhere}
+.agent-batch-host small{flex-basis:100%;line-height:1.4}
+#agentBulkDeployForm .field textarea{max-width:100%;min-height:190px}
+@media(max-width:730px){.version-comparison{grid-template-columns:1fr}.agent-batch summary{flex-direction:column;align-items:flex-start}.agent-batch summary span{text-align:left}}
+
+/* 0.3.6: readable, navigable workflow graph at any number of steps */
+.graph-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 0 6px}
+.graph-toolbar .btn{min-height:30px;padding:6px 10px;white-space:nowrap}
+.graph-toolbar output{display:inline-flex;align-items:center;justify-content:center;min-width:52px;padding:5px 6px;border-radius:7px;border:1px solid var(--stroke);color:var(--text);background:var(--panel);font-size:12px;font-variant-numeric:tabular-nums}
+.graph-help{color:var(--muted);font-size:11px;margin:2px 0 6px}
+.graph-surface{height:clamp(330px,55vh,620px);min-height:330px;max-height:620px;overflow:auto;overscroll-behavior:contain;touch-action:pan-x pan-y;cursor:grab;position:relative}
+.graph-surface.graph-panning{cursor:grabbing;user-select:none}
+.graph-surface svg.workflow-svg{display:block;min-width:0!important;max-width:none!important;flex:none}
+.graph-surface .step-node{cursor:pointer}
+.ssh-test-mode[hidden]{display:none!important}
+.ssh-test-mode{width:100%;min-width:0}
+.ssh-test-mode .form-grid{grid-template-columns:minmax(0,1fr) minmax(105px,.35fr)}
+@media(max-width:680px){
+ .graph-toolbar{gap:4px}
+ .graph-toolbar .btn{padding:6px 8px;font-size:11px}
+ .graph-surface{height:50vh;min-height:290px;max-height:none}
+ .ssh-test-mode .form-grid{grid-template-columns:minmax(0,1fr)}
+}
+
+/* SSH key onboarding uses an exact out-of-band fingerprint confirmation. */
+.ssh-trust-section{display:flex;flex-direction:column;align-items:flex-start;gap:9px;min-width:0;padding:11px 0}
+.ssh-trust-section>.hint{line-height:1.5;margin:0}
+.ssh-trust-section #sshHostTrustPanel{width:100%;max-width:100%;min-width:0}
+.ssh-trust-card{display:flex;flex-direction:column;align-items:flex-start;gap:11px;padding:14px;border:1px solid var(--stroke);border-radius:12px;background:var(--panel2);min-width:0}
+.ssh-trust-card>p{margin:0;line-height:1.55}
+.ssh-trust-fingerprint{max-width:100%;padding:8px 11px;background:var(--panel);border-radius:8px;overflow-wrap:anywhere;word-break:break-word;user-select:text}
+.ssh-trust-card .field{width:100%;min-width:0}
+.ssh-trust-card .field input{width:100%;max-width:100%;min-width:0;font-family:monospace}
+.ssh-trust-checkbox{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;align-items:start;min-width:0;font-size:12px;line-height:1.5;cursor:pointer}
+.ssh-trust-checkbox input[type=checkbox]{width:18px;min-width:18px;max-width:18px;height:18px;min-height:18px;margin:2px 0 0;padding:0;accent-color:var(--yellow)}
+.ssh-trust-checkbox span{min-width:0;overflow-wrap:anywhere}
+
+
+/* 0.3.12: Proxmox fleet screen — cards and actions must not overflow. */
+.proxmox-toolbar{display:flex;justify-content:flex-start;align-items:center;gap:12px;flex-wrap:wrap;margin:-8px 0 22px}
+.proxmox-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr));align-items:stretch}
+.proxmox-card{min-width:0;max-width:100%;overflow:hidden}
+.proxmox-card p,.proxmox-card .muted{overflow-wrap:anywhere;word-break:break-word}
+.proxmox-card .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;align-items:stretch}
+.proxmox-card .actions .btn{width:100%;max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:1.3;min-height:42px;padding:9px}
+.proxmox-tls-option{border:1px solid #f4ac4c88;background:#f4ac4c0d;border-radius:12px;padding:14px;margin:14px 0}
+.proxmox-tls-option .field.checkbox{margin:0 0 8px;align-items:flex-start;font-size:12px;line-height:1.5;cursor:pointer}
+.proxmox-tls-option .field.checkbox input{flex:0 0 17px;margin:2px 0 0}
+.proxmox-tls-option .hint{display:block;line-height:1.55;margin:0}
+@media(max-width:520px){.proxmox-toolbar .btn{width:100%}.proxmox-grid{grid-template-columns:minmax(0,1fr)}}
+
+
+/* 0.3.13 Proxmox discovery: responsive table search, type filter, sorting and paging. */
+.proxmox-discovery-tools{display:grid;grid-template-columns:minmax(230px,2fr) repeat(3,minmax(130px,1fr));gap:12px;align-items:end;margin:12px 0 15px}
+.proxmox-discovery-tools .field{min-width:0}
+.proxmox-discovery-counts{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.proxmox-discovery-table{min-width:720px}
+.proxmox-discovery-table th,.proxmox-discovery-table td{padding:11px 12px}
+.proxmox-discovery-table td strong{overflow-wrap:anywhere}
+.proxmox-discovery-pager{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+.proxmox-discovery-pager .tool-row{margin:0}
+@media(max-width:980px){.proxmox-discovery-tools{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:580px){.proxmox-discovery-tools{grid-template-columns:minmax(0,1fr)}.proxmox-discovery-pager{align-items:flex-start;flex-direction:column}}
+
+
+/* 0.3.14: readonly DR-site organization and fault simulation */
+.dr-sites-panel{margin:26px 0}
+.dr-sites-panel .panel-title{align-items:flex-start;flex-wrap:wrap}
+.dr-sites-panel .panel-title p{max-width:760px;line-height:1.55}
+.dr-sites-panel .tool-row{margin:0}
+.dr-sites-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+.dr-site-card{min-width:0}
+.dr-site-card .actions{display:flex;flex-wrap:wrap}
+.dr-site-card .actions .btn{flex:1 1 130px;white-space:normal}
+.dr-site-choices{border:1px solid var(--stroke);background:var(--panel2);padding:10px;border-radius:10px;display:flex;flex-direction:column;gap:6px;max-height:230px;overflow:auto}
+.dr-site-choice{display:flex;gap:10px;align-items:flex-start;cursor:pointer;padding:8px;border-radius:7px;font-size:12px}
+.dr-site-choice:hover{background:var(--glow)}
+.dr-site-choice input[type=checkbox]{width:17px;height:17px;flex:0 0 17px;margin:0}
+.dr-site-choice span{min-width:0;overflow-wrap:anywhere}
+.dr-sim-history{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--stroke);padding:9px 0;font-size:12px}
+.dr-sim-history small{margin-left:auto}
+@media(max-width:720px){.dr-sites-panel .panel-title{flex-direction:column}.dr-site-card .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+
+/* v0.3.15 overview with independently selected task, agent and Proxmox panels */
+.overview-tabs{display:flex;gap:9px;flex-wrap:wrap;margin:-7px 0 22px;padding:5px;border:1px solid var(--stroke);border-radius:12px;background:var(--panel)}
+.overview-tabs button{flex:1 1 185px;min-height:43px;padding:10px 15px;border:1px solid transparent;border-radius:9px;color:var(--muted);background:transparent;font-size:12px;font-weight:720;text-align:center}
+.overview-tabs button:hover{background:var(--panel2);color:var(--text)}
+.overview-tabs button.active{background:var(--yellow);color:#201b14;border-color:var(--yellow)}
+.overview-tabs button:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+.overview-panel{min-width:0}
+.overview-panel .panel-title{flex-wrap:wrap;align-items:flex-start}
+.overview-panel .panel-title h2{margin-bottom:5px}
+.overview-dc-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr))}
+.overview-dc-card{min-width:0}
+.overview-dc-card p{min-height:0;overflow-wrap:anywhere}
+.overview-dc-details{display:flex;flex-direction:column;gap:9px;font-size:11px;color:var(--muted);margin:4px 0 14px}
+.overview-dc-details b{color:var(--text);font-weight:650}
+.overview-dc-card>.btn{width:100%;margin-top:auto}
+.agent-action-buttons{min-width:240px}
+.agent-action-buttons .btn{white-space:normal;line-height:1.25;margin:3px 3px 3px 0}
+@media(max-width:760px){.overview-tabs{flex-direction:column}.overview-tabs button{flex:0 1 auto;text-align:left}.overview-panel .stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.agent-action-buttons{min-width:170px}}
+
+
+/* v0.3.16 unified agent Standard/Proxmox/PRA role manager */
+.agent-module-choices{display:flex;flex-direction:column;gap:9px;margin:16px 0}
+.agent-module-choice{display:flex;gap:13px;align-items:flex-start;border:1px solid var(--stroke);background:var(--panel2);border-radius:11px;padding:15px;cursor:pointer;min-width:0}
+.agent-module-choice:has(input:disabled){opacity:.7;cursor:default}
+.agent-module-choice input{flex:0 0 18px;width:18px;height:18px;accent-color:var(--yellow);margin:1px 0}
+.agent-module-choice span{display:flex;flex-direction:column;gap:5px;min-width:0}
+.agent-module-choice strong{font-size:13px}
+.agent-module-choice small{font-size:11px;color:var(--muted);line-height:1.55;overflow-wrap:anywhere}
+.agent-action-buttons{min-width:280px}
+@media(max-width:760px){.agent-module-choice{padding:11px}.agent-action-buttons{min-width:210px}}
+
+
+/* 0.3.17: clustered PVE node selection and secure SSH agent rollout */
+.fleet-node-list{display:flex;flex-direction:column;gap:7px;margin:12px 0 18px;max-height:360px;overflow:auto;padding:4px}
+.fleet-node-row,.fleet-deploy-row{display:flex;align-items:center;gap:12px;min-width:0;padding:11px 12px;border:1px solid var(--stroke);border-radius:11px;background:var(--panel2)}
+.fleet-node-row input,.fleet-deploy-row input{width:18px;height:18px;flex:0 0 18px;accent-color:var(--yellow)}
+.fleet-node-row .fleet-node-main,.fleet-deploy-row span{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
+.fleet-node-row strong,.fleet-node-row small,.fleet-deploy-row span{overflow-wrap:anywhere}
+.fleet-node-row small,.fleet-deploy-row small{font-size:11px;color:var(--muted)}
+.fleet-node-row .btn{white-space:normal;flex:0 0 auto}
+.fleet-divider{border:0;border-top:1px solid var(--stroke);margin:22px 0}
+.fleet-site-pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:10px;margin:18px 0}
+.fleet-site-pick .btn{min-height:48px;white-space:normal}
+@media(max-width:670px){.fleet-node-row{flex-wrap:wrap}.fleet-node-row .btn{flex:1 1 100%;max-width:100%}.fleet-node-list{max-height:420px}}
+
+
+/* v0.3.21: consistent success / in-progress / failure signals */
+.status.success,.status.online{color:var(--success);background:color-mix(in srgb,var(--success) 13%,transparent);border:1px solid color-mix(in srgb,var(--success) 25%,transparent)}
+.status.running,.status.queued,.status.pending,.status.planned,.status.awaiting_heartbeat{color:var(--yellow);background:color-mix(in srgb,var(--yellow) 13%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 25%,transparent)}
+.status.failed,.status.offline,.status.interrupted,.status.revoked,.status.completed_with_errors,.status.BLOCKED{color:var(--danger);background:color-mix(in srgb,var(--danger) 13%,transparent);border:1px solid color-mix(in srgb,var(--danger) 25%,transparent)}
+.status.uninstalled,.status.paused,.status.not_configured,.status.unknown{color:var(--muted);background:var(--panel2);border:1px solid var(--stroke)}
+.agent-batch summary .dr-batch-summary{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end;font-size:12px}
+.agent-batch-host .status{min-width:75px;justify-content:center}
+.dr-site-card .status{font-size:10px;line-height:1.1}
+.dr-site-card .status:before{width:5px;height:5px}
+.dr-site-card .hint .status{margin:3px;vertical-align:middle}
+.dr-plan-section{border-top:1px solid var(--stroke);padding:22px 0 10px;margin-top:18px}
+.dr-plan-section .panel-title{align-items:flex-start;flex-wrap:wrap}
+.dr-vm-actions{min-width:260px}
+.dr-vm-actions .btn{margin:2px 3px 2px 0;white-space:normal}
+.dr-vm-stat-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.dr-safety-notice{margin-bottom:22px;line-height:1.6}
+.dr-vm-test-history{padding:13px;border-bottom:1px solid var(--stroke)}
+.dr-vm-test-history p{font-size:12px;line-height:1.5;color:var(--muted)}
+.dr-vm-test-history:last-child{border:0}
+#drVMPlanFilter{max-width:270px}
+@media(max-width:950px){.dr-vm-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dr-vm-actions{min-width:185px}}
+@media(max-width:540px){.dr-vm-stat-grid{grid-template-columns:1fr}.agent-batch summary .dr-batch-summary{justify-content:flex-start}}

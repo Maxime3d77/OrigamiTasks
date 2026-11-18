@@ -1,5 +1,155 @@
 # Changelog
 
+## 0.3.23-rc1 — 2026-11-18
+
+- **Single agent update** button for an agent reporting an older known version.
+- **Bulk update outdated online agents** with explicit admin approval, SSH vault credential, serial job processing, per-host statuses and fresh version heartbeat confirmation.
+- **Identity preservation**: keep agent `config.json`, token, `modules.json`, registered ID and PRA site relationships; update only the executable script and passive Linux PRA worker.
+- **Safety**: known pinned SSH host, unambiguous inventory matching, `.origami-backup` files, best-effort executable rollback after failed restart, no automatic retry.
+- **Limitations**: upgrading the agent does not implement cross-cluster delta replication or enforce Proxmox host-level fencing.
+
+
+## 0.3.21-rc1 — 2026-11-17
+
+- **Protected DR VMs**: dedicated admin page and shortcut from every DR group. Manually choose a discovered source QEMU VM, unoccupied target VMID, target cluster/node/image storage, desired frequency and planned transfer engine (planning, cold offline copy, PBS, array replication). Saving only creates a **protection plan record** with proposed `REP_<vm-name>`—**no target VM or disk is created**. Enforce one source VM / one target VMID per cluster and prohibit cross-environment PP/production mappings.
+- **Per-VM simulations**: read-only replication preflight, failover and failback simulations, network partition and controller failure. Live Proxmox GET requests check source VM/status, target VMID collision, destination node and storage; an auditable report records missing safety prerequisites and stays **BLOCKED** without a verified replica, witness, fencing and automatic source restart prevention.
+- **Real replication is NOT yet implemented**: an explicit server endpoint rejects copy requests; no remote migration, vzdump, qmrestore, storage snapshot or LUN writes occur. Stored copy intervals are goals only, not scheduled jobs. Never invent a successful synchronization timestamp.
+- **Visual status and refresh**: green for online/success, amber for queued/running, red for failure/blocked/offline, grey for unknown/disabled. Agent/global refresh retrieves the latest *already received* heartbeat but cannot force an offline agent to reply.
+- **DR group rename**: backend returns committed group identity/name; frontend reloads group and sites independently with cache bypass for fresh titles.
+- **Protection integrity**: prevent deleting or reassigning sites with protected VMs; deleting a protection removes metadata only, not virtual machines/disks.
+
+## 0.3.20-rc1 — 2026-11-17
+
+- **Proxmox cluster agent rollout:** distinguish the **user-authentication private SSH key** in the vault (e.g. also used by Rundeck) from the **server's SSH host key**. Under **Proxmox DC → Cluster agents**, first contact now automatically records the server public host key in persistent OrigamiTasks `known_hosts` (**TOFU / accept-new**), without requiring manual approval for every new node.
+- **Changed host keys remain blocked:** the worker still confirms cluster/group/node membership before SSH; the authenticated SSH client verifies the recorded key again. Optional **View SSH fingerprint** remains available for independent checking on sensitive machines.
+- **SSH identity unchanged:** the vault key and account are not replaced. Host-key TOFU does not grant user access or noninteractive sudo/SFTP/Python/systemd rights.
+- **TOFU first-contact risk:** an intercepted initial connection might pin the wrong server key; out-of-band fingerprint confirmation is still recommended for critical hypervisors. Already pinned keys are never silently overwritten.
+- **Migration:** historic failed batches remain visible; explicitly start a new batch after upgrading, initially using a noncritical PVE node. Upgrading alone performs no agent installation.
+
+## 0.3.19-rc1 — 2026-11-17
+
+- **Independent DR groups**: create custom, editable DR protection scopes (e.g. Staging, Production, Test) directly in the PVE interface. Sites and clusters are assigned to one scope; **cross-scope simulated failovers are rejected** by backend and frontend, and no infrastructure changes occur.
+- **Non-destructive upgrade**: legacy DR sites are shown as **Unassigned sites** until an administrator explicitly assigns them to a group. A populated group cannot be deleted. Cluster-managed SSH inventory groups retain their individual cluster associations.
+- **Actionable safe agent diagnostics**: individual failed installs distinguish untrusted SSH host keys, denied authentication, network/DNS/connectivity, missing sudo/systemd/Python prerequisites, and invalid installation arguments. Remote stderr, tokens and private keys are not exposed.
+- **Generic public project**: never prefill a developer's organization URL. Each installation sets its own HTTPS agent controller origin and can name its own DR protection scopes.
+- **Release notes**: the previous failed batch cannot retroactively reveal details it did not save. Re-test one non-critical PVE host after verifying its SSH host key. This version does not provide active VM replication or failover.
+
+## 0.3.18-rc1 — 2026-11-17
+
+- **Fixed remote rollout:** no longer requires `AGENT_SERVER_URL` in `.env`. Admin-managed **Agents → Connection settings** stores the HTTPS controller origin for agents behind Nginx, with optional legacy env fallback.
+- **PVE cluster wizard:** displays this origin, blocks rollout with a direct settings link when missing, and no longer prechecks the passive DR module.
+- **Agent uninstall:** retained for Linux and Windows. Newly installed agents preserve their original controller HTTPS URL for identity-checked remote removal, even when central settings change. Older installs may specify their original URL during uninstall.
+- **Windows:** Standard-only workflow executors; Proxmox and DR roles are refused in API and hidden in the form.
+- **DR scope:** passive worker remains a local heartbeat and state cache only, **no real VM replication or failover**. Agent HTTPS certificate validation stays enabled.
+
+## 0.3.17-rc1 — 2026-11-17
+
+- **Proxmox → Cluster agents:** discover Linux nodes through the registered PVE API, review the computed SSH FQDNs (editable DNS suffix), select nodes and create / synchronize a dedicated **SSH inventory group linked to the cluster**. Direct generic edits to cluster-managed groups are blocked.
+- **DR Sites → Deploy to nodes:** choose a cluster in the site, synchronize its nodes, then approve selected missing Linux agents for one batch using an SSH identity from the encrypted vault. Existing installations are detected; new agents are automatically attached to the DR site if the cluster has one.
+- **Authorization:** **no per-host `AGENT_DEPLOY_ALLOWED_HOSTS` list or global `.env` deployment toggle is required** for this distinct cluster-bound workflow. The worker rechecks cluster/group/node membership, trusted SSH host keys, FQDN and port **before each privileged install**. Ordinary arbitrary SSH deployment keeps its legacy global safety gate.
+- **SSH key verification:** host key inspection within the wizard; new keys must be compared against the host console and explicitly confirmed by fingerprint. Unapproved/mismatched keys fail individually, never TOFU.
+- **Scope:** Linux SSH/SFTP and sudo/root, up to 100 nodes per batch; no automatic reinstallation of existing agents. Proxmox and passive DR roles can be chosen in the wizard and automatically applied after enrollment, or changed later. Passive DR never replicates or promotes VMs. **No VM replication/failover is enabled.**
+
+## 0.3.16-rc1 — 2026-11-17
+
+- **Single modular agent installation:** per-agent roles **Standard** (always on), **Proxmox** (linked inventory, API still managed centrally), **passive DR** (Linux only). Administrators configure modules under **Agents → Configure modules** with site/cluster validation, desired revision and actual agent acknowledgement.
+- **Linux:** one SSH deployment bundle installs standard `agent.py` and isolated `pra_worker.py` as two bounded systemd services. The passive DR worker caches its locally assigned policy and continues its own heartbeat if the controller disappears, but **never replicates, fences, promotes or starts any VM**. Separate worker limits: 64 MiB / 10% of one CPU.
+- **Windows:** standard and Proxmox role metadata are supported in the same agent; autonomous DR module is not enabled. Linux and Windows 0.3.2 script agents acknowledge policy revisions, while older agents keep working without secretly enabling modules.
+- **Safety:** authoritative per-agent desired/applied policy tracking with audit, role and site scoping, no PVE API secrets sent to agents. All DR policy capability flags stay false: witness, fencing, replication and promotion are not implemented.
+- **Lifecycle:** the verified remote uninstall removes both Linux units and module cache; legacy installations must be explicitly replaced/upgraded. Signed rolling updates and truly autonomous DR remain planned.
+
+## 0.3.15-rc1 — 2026-11-17
+
+- **Overview:** *Tasks & runs*, *Active agents* and *Proxmox DC / DR* tabs. Existing task metrics, agent online/offline/revoked/uninstalled states and process CPU/RAM telemetry when reported, linked Proxmox clusters and sites. Real DR replication lag remains explicitly unavailable until an actual engine is deployed.
+- **Remote removal:** SSH uninstall for enrolled Linux and Windows agents, requiring a vault SSH identity, pinned and trusted host key, matching enrolled hostname and an on-host check of agent ID and controller HTTPS URL. Removes only OrigamiTasks's service/task and agent folder, then revokes its token. Failed remote removal never silently revokes; manual revoke stays separate.
+- **Resource usage:** newly deployed Linux units apply `MemoryMax=192M`, `CPUQuota=20%`, `TasksMax=48`. New agent script versions default to configurable 10-second polling (5–60 s) and report their own process CPU/RAM. Existing agents are not automatically upgraded.
+- **Security limits:** preview-grade agents use HTTPS and individual revocable tokens, but no mTLS, signed update bundles or autonomous DR runtime yet. Windows scheduled agent still runs as SYSTEM and needs further hardening.
+
+## 0.3.14-rc1 — 2026-11-17
+
+- **DR sites:** manage freely named sites directly from the Proxmox screen, with **primary / standby / other** role, multiple registered Proxmox clusters, existing Linux agents, and declared storage profiles (auto, shared iSCSI+LVM, ZFS, Ceph, PBS, other).
+- **Outage simulation:** **cluster unavailable**, **site network partition**, and **OrigamiTasks console unavailable**. All scenarios are virtual, never touching VMs, hypervisors, agents or storage. Failure checks and outcomes are auditable.
+- **Agents:** links to existing SSH deployment and shows existing agent versions and heartbeats. Current agents still depend on the central controller; they are **not autonomous DR agents**. Rolling updates, an independent witness, fencing and replication require later implementation and validation.
+- **Fail closed:** no REP_ standby can start from a simulation.
+
+## 0.3.13-rc1 — 2026-11-17
+
+- **Proxmox discovery:** instant search by name, VMID, node, ID, status and storage; QEMU VM/LXC/node/storage filters, sort by name/type/VMID/node/status in either direction, 100-item pagination, API refresh. Existing per-VM DR assessment remains accessible.
+- **SD→AU DR architecture:** bilingual design for managed site agents, powered-off REP_ standbys, storage-specific replication, independent witness and effective fencing, no double-start, controlled failover and explicit failback. **This version implements neither replication nor automatic failover.**
+
+## 0.3.12-rc1 — 2026-11-17
+
+- **Proxmox:** per-node/per-cluster administrator checkbox **Skip TLS certificate verification (self-signed certificate)**, also available in vault Proxmox credentials. Disabled by default, stored persistently, reversible and scoped to the selected endpoint. HTTPS remains encrypted, but server identity is not authenticated in bypass mode.
+- **Diagnostics:** distinguish certificate validation, TLS handshake, DNS/port/firewall, token and permission errors. Explicit warning when a diagnostic skipped certificate validation.
+- **UI:** responsive Proxmox cards with two-column actions, unobstructed add-server button below heading, and fixed FQDN search.
+- **Compatibility:** nondestructive SQLite migration; existing inventory/workflows remain, no `.env` editing.
+
+## 0.3.11-rc1 — 2026-11-17
+
+- **Fully web-managed Proxmox registration:** add or edit a cluster or standalone node, issue a vault-backed encrypted API token profile, upload a trusted CA from the browser and assign it per target, without editing `.env` or restarting Docker.
+- **Certificates:** PEM/CRT/CER/DER imports, private persistent store, select different CA chains per datacenter or vault profile. Reject arbitrary filesystem paths or private keys; HTTPS remains verified.
+- **Fleet navigation:** searchable nodes and clusters, direct API diagnostics and discovery of cluster nodes, VMs, containers and storage.
+- **Compatibility and safety:** migrate existing SQLite entries, preserve encrypted tokens, enforce matching vault and DC URLs, retain explicit gates for VM actions.
+
+## 0.3.10-rc1 — 2026-11-16
+
+- **Proxmox:** register and manage datacenters and API tokens in the web UI without `PROXMOX_ALLOWED_HOSTS` in `.env`; searchable datacenter list, ensure vault token and DC URL match, actionable HTTP 401/403/TLS/network diagnostics.
+- **LDAP:** accept standard OpenSSL PEM certificate exports with Bag Attributes/friendlyName/subject/issuer metadata; reject arbitrary content and private keys.
+- **Email:** per-workflow HTML/plaintext completion reports with SUCCESS/FAILURE subject, encrypted SMTP vault profile, conditional sends, per-step results and redacted error excerpts; delivery status retained.
+- **Reliability:** backward-compatible SQLite migrations, regression tests, bilingual documentation.
+
+## 0.3.9-rc1 — 2026-11-16
+
+- **SSH:** the default host-key policy is now persistent trust-on-first-use (`SSH_HOST_KEY_POLICY=accept-new`): new public host keys are stored automatically; changed keys are blocked. `strict` remains available for manual approval.
+- **LDAP:** schema-neutral read-only queries eliminate client-side `LDAPObjectClassError` from mixed AD/OpenLDAP group filters. The imported CA continues to verify LDAPS/STARTTLS; PEM files with a UTF-8 BOM are supported.
+- **UI/tests:** no mandatory per-server fingerprint entry, public CA import clears the TLS bypass checkbox in the form; regression tests and English/French documentation updated.
+
+## 0.3.8-rc1 — 2026-11-16
+
+- **SSH:** browser-assisted public server host-key pinning, requiring independently verified SHA256 fingerprint confirmation. Changed existing keys remain blocked. User SSH private keys and vault identities are never altered by host-key approval.
+- **LDAP:** import mixed CRT/PEM chains containing CA and server-leaf certificates; store CAs only and report excluded non-CA certificates.
+- **UI:** readable import status, explanation of disabled TLS verification bypass, SSH/LDAP regression tests and bilingual documentation.
+
+
+
+## 0.3.7-rc1 — 2026-11-16
+
+- **SSH:** local OpenSSH/PEM user-private-key import; distinguish unreadable key, unknown host (SHA-256 fingerprint), changed host key, rejected authentication, and incompatible handshake; no automatic trust of unknown hosts.
+- **LDAP:** explicit certificate-verification exception via Administration → LDAP, allowed only with host-level ALLOW_INSECURE_LDAP_TLS=true, off by default and prominently warned. Prefer CRT/DER/PEM public CA import.
+- **Updates:** in-browser non-installation preflight, host updater heartbeat and Git/Docker Compose/data readiness checks.
+- **GitHub:** automatic version-tag release workflow for vX.Y.Z or vX.Y.Z-rcN, running version validation, tests, and documentation before publishing; ordinary commits never publish releases.
+- **Privacy:** anonymized server examples, bilingual security documentation and regression tests.
+
+
+## 0.3.6-rc1 — 2026-11-16
+
+- **SSH test** against a manually supplied FQDN and port without registering a server; strict host-key verification remains enforced.
+- **LDAP CA** import from binary `.crt`, `.cer`, `.der` or PEM, converted to trusted PEM without disabling TLS.
+- **Workflow graph**: 8–250% zoom, Ctrl-wheel, drag-to-pan, fit width, overview and viewport preservation.
+- API and UI regression tests and bilingual documentation updates.
+
+
+## 0.3.5-rc1 — 2026-11-16
+
+- Bulk Linux/Windows agent installation from a **host FQDN list** or SSH inventory group, with a persistent per-host status queue (100 targets maximum).
+- Filtered deployment credential choices to **SSH identities**; typed connection pickers no longer show unrelated protocols.
+- **Updates** screen compares installed/latest version, latest remote Git commit date, commits behind, and verified/unverified state.
+- **LDAP** public PEM CA import from the browser, preserving strict TLS certificate validation.
+- Renamed **DC Proxmox**; Proxmox API inventory and VM actions do not require PVE node agents.
+- Workflow source selector (**vault or manual network settings**), concise once/assistant/cron schedules and a one-click **Add on failure** branch.
+- Additional regression tests for bulk deployment, LDAP TLS trust, SMTP modes and failure handling.
+
+
+## 0.3.4-rc1 — 2026-11-16
+
+- Decoupled **SSH identities** (login, password or private key, optional passphrase) from server addresses in the encrypted vault.
+- Added **Administration → SSH servers & groups** with FQDN inventory, ports, labels, reusable group membership, bulk FQDN entry and search.
+- SSH credential test now accepts an explicit inventory server target and verifies host key plus the saved identity.
+- SSH, SFTP and Ansible runner workflow steps can select an inventory server without duplicating secrets.
+- Preserved legacy host-bound SSH credentials and protected removal of inventory servers still referenced by jobs.
+- Added regression tests and updated bilingual documentation.
+
+
 ## 0.3.3-rc2 — 2026-11-16
 
 - Fixed protocol diagnostic checkboxes inheriting the global 100% text input width.

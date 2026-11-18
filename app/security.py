@@ -56,14 +56,14 @@ def ldap_authenticate(username, password):
     if not (settings['uri'].startswith('ldaps://') or settings['starttls']):
         raise RuntimeError('LDAP refuse toute liaison en clair : LDAPS ou STARTTLS requis')
     try:
-        from ldap3 import Server, Connection, SUBTREE, Tls
+        from ldap3 import Server, Connection, SUBTREE, Tls, NONE
         from ldap3.utils.conv import escape_filter_chars
         from ldap3.core.exceptions import LDAPException
         uri = settings['uri']
-        tls = Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=settings['ca_cert'] or None)
-        server = Server(uri, tls=tls, connect_timeout=8)
+        tls = ldap_settings.tls_for(settings)
+        server = Server(uri, tls=tls, connect_timeout=8, get_info=NONE)
         svc = Connection(server, user=settings['bind_dn'], password=settings['bind_password'],
-                         auto_bind=not settings['starttls'], receive_timeout=8)
+                         auto_bind=not settings['starttls'], receive_timeout=8, check_names=False)
         if settings['starttls']:
             svc.open()
             if not svc.start_tls() or not svc.bind():
@@ -93,7 +93,7 @@ def ldap_authenticate(username, password):
             svc.search(settings['group_base_dn'], f'(&(objectClass=group)(member:1.2.840.113556.1.4.1941:={escape_filter_chars(user_dn)}))', SUBTREE, attributes=['distinguishedName'])
             groups.extend(x.entry_dn for x in svc.entries)
         svc.unbind()
-        user_conn = Connection(server, user=user_dn, password=password, auto_bind=not settings['starttls'], receive_timeout=8)
+        user_conn = Connection(server, user=user_dn, password=password, auto_bind=not settings['starttls'], receive_timeout=8, check_names=False)
         if settings['starttls']:
             user_conn.open()
             if not user_conn.start_tls() or not user_conn.bind():

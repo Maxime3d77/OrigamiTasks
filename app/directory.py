@@ -54,15 +54,15 @@ def execute(opts, credential):
         credential = dict(credential, username=saved['bind_dn'], password=saved['bind_password'])
     if not credential.get('username') or not credential.get('password'):
         raise DirectoryError('Compte de liaison LDAP manquant (coffre ou administration LDAP)')
-    from ldap3 import Server, Connection, Tls, SUBTREE, BASE, MODIFY_REPLACE, MODIFY_ADD, MODIFY_DELETE
+    from ldap3 import Server, Connection, Tls, SUBTREE, BASE, MODIFY_REPLACE, MODIFY_ADD, MODIFY_DELETE, NONE
     from ldap3.utils.conv import escape_filter_chars
     import urllib.parse
     parsed = urllib.parse.urlparse(uri)
     if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('','/'):
         raise DirectoryError('Invalid LDAP URI')
-    tls = Tls(validate=ssl.CERT_REQUIRED,ca_certs_file=saved['ca_cert'] or None)
-    server = Server(uri, tls=tls, connect_timeout=10)
-    conn = Connection(server,user=credential['username'],password=credential['password'],receive_timeout=15,auto_bind=not starttls)
+    tls = ldap_settings.tls_for(saved, uri=uri)
+    server = Server(uri, tls=tls, connect_timeout=10, get_info=NONE)
+    conn = Connection(server,user=credential['username'],password=credential['password'],receive_timeout=15,auto_bind=not starttls,check_names=False)
     try:
         if starttls:
             conn.open()

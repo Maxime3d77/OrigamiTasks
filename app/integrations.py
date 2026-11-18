@@ -4,34 +4,59 @@ V0.2 deliberately does not implement cross-cluster VM replication or remote migr
 those require dedicated replication agents, storage-aware validation and fencing.
 """
 import json
+import ipaddress
 import re
 import shlex
 from urllib.parse import quote, urlsplit
 import httpx
-from . import config, db
+from . import config, db, proxmox_cas
 
 
 class IntegrationError(Exception):
     pass
 
 
-def authorized_origin(raw_url, allowed_hosts):
-    """Only HTTPS to an explicitly configured host; avoids credential SSRF.
+def authorized_origin(raw_url, allowed_hosts, *, admin_proxmox=False):
+    """Validate an HTTPS API origin; never follow redirects with tokens.
 
-    Exact DNS names or IP addresses, optionally with a port, are accepted in
-    the environment allow-list. Never redirect with Authorization headers.
+    For Proxmox only, an administrator-created vault connection or datacenter
+    is sufficient to authorize a constrained HTTPS endpoint when no explicit
+    PROXMOX_ALLOWED_HOSTS is configured. An existing allow-list wins.
     """
-    url = str(raw_url or '').rstrip('/')
-    parsed = urlsplit(url)
-    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('', '/'):
+    url = str(raw_url or '').strip().rstrip('/')
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except (ValueError, TypeError):
+        raise IntegrationError("Port de l'URL Proxmox invalide") from None
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or
+            parsed.password or parsed.query or parsed.fragment or
+            parsed.path not in ('', '/')):
         raise IntegrationError('URL HTTPS racine obligatoire (sans identifiants ni chemin)')
+    host = parsed.hostname.lower().rstrip('.')
+    if admin_proxmox:
+        # This origin is already stored in an admin-controlled Proxmox vault
+        # connection or datacenter. The global env allow-list is not consulted.
+        # Auto-authorization is scoped to the expected HTTPS API ports.
+        if (port not in (None, 443, 8006) or host == 'localhost' or
+                host.endswith('.localhost') or host in ('metadata.google.internal',)):
+            raise IntegrationError('Proxmox : hôte ou port interdit en autorisation automatique')
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+                raise IntegrationError('Proxmox : adresse locale ou spéciale interdite')
+        return url
     if not allowed_hosts:
-        raise IntegrationError('Connecteur désactivé : configurer la liste des hôtes autorisés dans .env')
+        raise IntegrationError("Connecteur désactivé : configurer la liste des hôtes autorisés dans .env")
     allowed = {item.strip().lower() for item in allowed_hosts.split(',') if item.strip()}
-    host = parsed.hostname.lower()
-    effective = (host+':'+str(parsed.port)) if parsed.port else host
+    effective = (host+':'+str(port)) if port else host
     if host not in allowed and effective not in allowed:
-        raise IntegrationError('Serveur absent de la liste des hôtes autorisés')
+        raise IntegrationError(
+            'Hôte Proxmox absent de PROXMOX_ALLOWED_HOSTS (FQDN ou FQDN:8006 à ajouter)'
+        )
     return url
 
 
@@ -86,14 +111,16 @@ def ansible_command(opts):
 
 
 def proxmox_request(origin, cred, path, timeout=20, method='GET', data=None):
-    base=authorized_origin(origin,config.PROXMOX_ALLOWED_HOSTS)
+    base=authorized_origin(origin,config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True)
     ident=str(cred.get('username') or '')
     token=str(cred.get('token') or '')
     if not re.fullmatch(r'[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+![a-zA-Z0-9_.-]+', ident) or not token:
         raise IntegrationError('Coffre Proxmox : username=user@realm!tokenname et token=SECRET')
     if not path.startswith('/api2/json/') or '://' in path or '\\' in path:
         raise IntegrationError('Chemin Proxmox invalide')
-    with httpx.Client(timeout=timeout,follow_redirects=False,trust_env=False,verify=config.PROXMOX_CA_CERT or True) as client:
+    # A CA chosen in the web UI takes priority over the legacy env fallback.
+    tls_verify=False if cred.get('skip_tls_verification') is True else proxmox_cas.verify_value(cred.get('ca_cert'))
+    with httpx.Client(timeout=timeout,follow_redirects=False,trust_env=False,verify=tls_verify) as client:
         response=client.request(method,base+path,headers={'Authorization':f'PVEAPIToken={ident}={token}'},data=data)
     response.raise_for_status()
     result=response.json()
@@ -103,6 +130,8 @@ def proxmox_request(origin, cred, path, timeout=20, method='GET', data=None):
 
 
 def discover_datacenter(dc, cred, timeout=20):
+    cred=dict(cred,ca_cert=dc.get('ca_cert') or cred.get('ca_cert') or '',
+              skip_tls_verification=bool(dc.get('skip_tls_verification', False)))
     resources=proxmox_request(dc['url'],cred,'/api2/json/cluster/resources',timeout)
     if not isinstance(resources,list):
         raise IntegrationError('Inventaire Proxmox indisponible')
@@ -119,7 +148,7 @@ def configured_datacenter(dc_id):
     try: id_=int(dc_id)
     except (ValueError,TypeError): raise IntegrationError('Datacenter ID invalide')
     with db.session() as con:
-        item=con.execute('SELECT id,name,url,credential_id FROM datacenters WHERE id=?',(id_,)).fetchone()
+        item=con.execute('SELECT id,name,url,credential_id,kind,ca_cert,skip_tls_verification FROM datacenters WHERE id=?',(id_,)).fetchone()
     if not item: raise IntegrationError('Datacenter introuvable')
     return dict(item)
 
@@ -127,6 +156,8 @@ def configured_datacenter(dc_id):
 def proxmox_task(opts, load_credential, timeout):
     dc=configured_datacenter(opts.get('datacenter_id'))
     cred=load_credential(dc['credential_id'])
+    cred=dict(cred,ca_cert=dc.get('ca_cert') or cred.get('ca_cert') or '',
+              skip_tls_verification=bool(dc.get('skip_tls_verification', False)))
     action=opts.get('action','inventory')
     if action=='inventory':
         resources=discover_datacenter(dc,cred,timeout)
@@ -141,6 +172,19 @@ def proxmox_task(opts, load_credential, timeout):
     except (TypeError,ValueError):raise IntegrationError('VMID invalide')
     if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,100}',node) or not 100 <= vmid <= 999999999:
         raise IntegrationError('Nœud ou VMID invalide')
+    # OrigamiTasks must not start/reboot a designated standby via its own
+    # workflow API. This is only an application-side guard: direct PVE CLI,
+    # GUI, HA or other API tokens are NOT covered, hence no true fencing.
+    if action in ('start','reboot'):
+        with db.session() as con:
+            standby=con.execute(
+                "SELECT id FROM dr_protected_vms WHERE target_dc_id=? AND target_vmid=?",
+                (dc["id"],vmid)
+            ).fetchone()
+        if standby:
+            raise IntegrationError(
+                "Démarrage interdit : VM de secours PRA. "
+                "Bascule contrôlée et fencing non encore opérationnels.")
     # Fail closed: confirm target is the expected QEMU VM before a power action.
     resources=discover_datacenter(dc,cred,timeout)
     if not any(r.get('type')=='qemu' and r.get('vmid')==vmid and r.get('node')==node for r in resources):
@@ -162,6 +206,8 @@ def assess_vm_dr(dc, cred, vmid, timeout=20):
         raise IntegrationError('VMID invalide')
     if not 100 <= vmid <= 999999999:
         raise IntegrationError('VMID invalide')
+    cred=dict(cred,ca_cert=dc.get('ca_cert') or cred.get('ca_cert') or '',
+              skip_tls_verification=bool(dc.get('skip_tls_verification', False)))
     inventory = discover_datacenter(dc, cred, timeout)
     matches = [r for r in inventory if r.get('type') == 'qemu' and r.get('vmid') == vmid]
     if len(matches) != 1:

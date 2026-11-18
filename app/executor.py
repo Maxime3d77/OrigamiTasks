@@ -13,7 +13,7 @@ import time
 from email.message import EmailMessage
 from pathlib import Path
 import httpx
-from . import db, config, security, integrations, agents, directory, connections, ldap_settings
+from . import db, config, security, integrations, agents, directory, connections, ldap_settings, ssh_inventory
 
 
 class StepError(Exception):
@@ -101,26 +101,45 @@ def _ssh(command, opts, cred, timeout):
     client.load_system_host_keys()
     if config.KNOWN_HOSTS.exists():
         client.load_host_keys(str(config.KNOWN_HOSTS))
-    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+    from .ssh_keys import configured_host_key_policy, SSHUnknownHostKey
+    client.set_missing_host_key_policy(configured_host_key_policy())
     user = cred.get('username') or opts.get('username')
     if not user:
         raise StepError('Utilisateur SSH manquant')
-    kwargs = dict(hostname=opts.get('host') or cred.get('host'), port=int(opts.get('port') or cred.get('port') or 22), username=user,
+    # A selected inventory target takes precedence over the optional legacy host
+    # embedded in old vault profiles; never log private key/password material.
+    if opts.get('ssh_server_id'):
+        try:
+            target=ssh_inventory.server(opts['ssh_server_id'])
+        except ssh_inventory.InventoryError as exc:
+            raise StepError(str(exc)) from None
+        target_host, target_port=target['fqdn'],target['port']
+    else:
+        target_host=opts.get('host') or cred.get('host')
+        target_port=opts.get('port') or cred.get('port') or 22
+    if not target_host:
+        raise StepError('Serveur SSH manquant : sélectionner un serveur dans l’inventaire')
+    kwargs = dict(hostname=target_host, port=int(target_port), username=user,
                   timeout=min(timeout, 30), auth_timeout=min(timeout, 30), look_for_keys=False, allow_agent=False)
     if cred.get('private_key'):
-        key = cred['private_key']
-        for cls in (paramiko.Ed25519Key, paramiko.RSAKey, paramiko.ECDSAKey):
-            try:
-                kwargs['pkey'] = cls.from_private_key(io.StringIO(key), password=cred.get('passphrase') or None)
-                break
-            except (paramiko.SSHException, ValueError):
-                continue
-        if 'pkey' not in kwargs:
-            raise StepError('Clé privée SSH invalide')
+        from .ssh_keys import load_private_key, SSHKeyError
+        try:
+            kwargs['pkey'] = load_private_key(
+                cred['private_key'], cred.get('passphrase')
+            )
+        except SSHKeyError as exc:
+            raise StepError(str(exc)) from None
     else:
         kwargs['password'] = cred.get('password')
     try:
-        client.connect(**kwargs)
+        try:
+            client.connect(**kwargs)
+        except SSHUnknownHostKey as exc:
+            raise StepError(str(exc)) from None
+        except paramiko.BadHostKeyException:
+            raise StepError("Empreinte SSH du serveur différente de la clé déjà approuvée") from None
+        except paramiko.AuthenticationException:
+            raise StepError("Authentification SSH refusée par le serveur") from None
         if command is None:
             return client, None
         _, stdout, stderr = client.exec_command(command, timeout=timeout)
@@ -153,6 +172,29 @@ def _ssh(command, opts, cred, timeout):
 def execute(step, ctx):
     typ = step.get('type')
     opts = expand(step.get('config') or {}, ctx)
+    mode = opts.get('connection_mode')
+    if mode not in (None, 'manual', 'vault'):
+        raise StepError('Mode de connexion invalide')
+    # Explicit vault mode uses only vault endpoint settings; manual mode
+    # overrides the network target, but never places secrets inline.
+    if mode == 'vault':
+        hidden = {
+            'email': ('host','port','ssl','tls_mode','from'),
+            'ssh': ('host','port'),
+            'sftp': ('host','port'),
+            'ansible': ('host','port'),
+            'ftp': ('host','port','allow_plaintext'),
+            'directory': ('uri','starttls','base_dn'),
+            'matrix': ('homeserver',),
+            'http': ('url',)
+        }
+        for key in hidden.get(typ, ()):
+            opts.pop(key, None)
+    if mode == 'manual':
+        if typ in ('email','http'):
+            opts['credential_id'] = None
+        if typ in ('ssh','sftp','ansible'):
+            opts.pop('ssh_server_id', None)
     cred = credential(opts.get('credential_id'))
     timeout = min(max(int(opts.get('timeout') or 60), 1), config.MAX_STEP_SECONDS)
     if typ in ('shell', 'powershell'):
@@ -223,15 +265,28 @@ def execute(step, ctx):
         headers = dict(opts.get('headers') or {})
         if cred.get('token'):
             headers['Authorization'] = 'Bearer ' + cred['token']
+        url = opts.get('url') or cred.get('base_url') or ''
+        if mode == 'vault':
+            base=cred.get('base_url') or ''
+            if not base:
+                raise StepError('API : connexion du coffre avec URL HTTPS obligatoire')
+            path=str(opts.get('path') or '/')
+            if not path.startswith('/') or path.startswith('//') or '..' in path.split('/') or '\\' in path or '#' in path:
+                raise StepError('API : chemin relatif invalide')
+            url=base.rstrip('/')+path
+        if not url:
+            raise StepError('API : URL manquante')
         try:
             with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-                r = client.request(opts.get('method', 'GET').upper(), opts.get('url') or cred.get('base_url') or '',
+                r = client.request(opts.get('method', 'GET').upper(), url,
                                    headers=headers, content=opts.get('body') or None)
             code = 0 if 200 <= r.status_code < 400 else 1
             output = f'HTTP {r.status_code}\n{r.text[:config.MAX_LOG_BYTES]}'
         except httpx.RequestError as exc:
             raise StepError('HTTP : '+str(exc))
     elif typ == 'email':
+        if mode == 'vault' and not opts.get('credential_id'):
+            raise StepError('SMTP : choisir une connexion SMTP du coffre-fort')
         if not (opts.get('host') or cred.get('host')):
             raise StepError('SMTP : serveur manquant dans la tâche et le coffre')
         if not (opts.get('from') or cred.get('from_address')):
@@ -262,9 +317,10 @@ def execute(step, ctx):
             media = mimetypes.guess_type(file.name)[0] or 'application/octet-stream'
             main_type,sub_type = media.split('/',1)
             msg.add_attachment(file.read_bytes(), maintype=main_type, subtype=sub_type, filename=file.name)
-        mode = 'ssl' if opts.get('ssl') else cred.get('tls_mode') or 'starttls'
+        mode = opts.get('tls_mode') if opts.get('tls_mode') in ('starttls','ssl','none') else (
+            'ssl' if opts.get('ssl') else cred.get('tls_mode') or 'starttls')
         profile = dict(cred, host=opts.get('host') or cred.get('host'),
-                       port=opts.get('port') or cred.get('port') or (465 if mode=='ssl' else 587),
+                       port=opts.get('port') or cred.get('port') or (465 if mode=='ssl' else 25 if mode=='none' else 587),
                        tls_mode=mode)
         try:
             conn=connections.open_smtp(profile,timeout=timeout)

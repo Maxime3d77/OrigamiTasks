@@ -6,7 +6,7 @@ OrigamiTasks est un **poste de pilotage d'automatisation**. Exécuter du code re
 
 - Hash Argon2, cookie `HttpOnly; Secure; SameSite=Strict`, contrôle CSRF et limitation des connexions.
 - Rôles par groupe LDAP, ACL par workflow lecture/exécution/édition ; coffre et datacenters réservés aux admins.
-- Coffre chiffré Fernet, TLS vérifié pour LDAP/Matrix/Proxmox, clés SSH vérifiées.
+- Coffre chiffré Fernet, TLS vérifié pour LDAP/Matrix/Proxmox, clés SSH mémorisées à la première connexion et changements refusés.
 - Exécution locale désactivée par défaut ; worker Git séparé de l'application web.
 - Chemins de transferts encadrés et taille des logs limitée. Masquage des valeurs de secrets connus (ne garantit pas l'absence totale de fuite).
 
@@ -34,6 +34,23 @@ Lire le [modèle de sécurité détaillé](https://github.com/Maxime3d77/Origami
 
 ## Sécurité des agents et de l'annuaire
 
-En préversion, les jetons agents sont uniques et révocables, mais restent de longue durée (pas de mTLS). Les jetons d'enrôlement sont à usage unique et expirent après 15 min. Le déploiement distant repose sur SSH avec empreintes vérifiées et liste de cibles. La tâche Windows tourne sous SYSTEM et l'agent Linux sous un compte non privilégié. Les scripts restent des exécutions de confiance.
+En préversion, les jetons agents sont uniques et révocables, mais restent de longue durée (pas de mTLS). Les jetons d'enrôlement sont à usage unique et expirent après 15 min. Le déploiement distant mémorise automatiquement la première clé publique SSH de chaque serveur, bloque les changements, et conserve une liste de cibles autorisées. Le mode `strict` exige une approbation manuelle. La tâche Windows tourne sous SYSTEM et l'agent Linux sous un compte non privilégié. Les scripts restent des exécutions de confiance.
 
 Les écritures LDAP/AD sont désactivées par défaut, limitées par base DN, certificat TLS et confirmation explicite par bloc. Utiliser un compte de service à privilèges minimaux, un annuaire de test et conserver l'audit des contrôleurs de domaine.
+
+
+## Déploiements groupés et connexion LDAP
+
+Les lots d'agents nécessitent une session administrateur, une confirmation explicite et un compte SSH chiffré. Toutes les cibles doivent appartenir à `AGENT_DEPLOY_ALLOWED_HOSTS`. Une file persistante conserve un résultat par machine ; les installations interrompues ne sont pas rejouées automatiquement. Les réponses et l'audit n'exposent ni mot de passe, ni clé privée, ni sortie brute d'installation.
+
+L'import LDAP n'accepte que des certificats **CA publics** PEM ou DER, avec accès au fichier restreint. Le contournement de la vérification du certificat TLS n'est pas proposé. Le mode « connexion manuelle » des workflows ne doit jamais stocker de mot de passe ou de jeton en clair.
+
+
+### Confiance SSH à la première connexion (TOFU)
+
+`SSH_HOST_KEY_POLICY=accept-new` ajoute automatiquement les nouvelles clés publiques d'hôte au `known_hosts` persistant d'OrigamiTasks. Toute clé différente sur un hôte déjà connu est bloquée. La toute première connexion peut néanmoins être usurpée si le réseau est compromis : pour une infrastructure sensible, utiliser `SSH_HOST_KEY_POLICY=strict` et comparer les empreintes par un canal indépendant. Les clés privées des comptes SSH restent distinctes de ces clés d'hôte.
+
+### Dérogation exceptionnelle de vérification LDAPS/STARTTLS
+
+Préférer importer la **CA publique émettrice** plutôt que le certificat serveur lui-même. Un fichier CRT peut être une simple feuille de certificat serveur et n'est pas une autorité CA. Pour un dépannage exceptionnel, l'administrateur hôte peut activer ALLOW_INSECURE_LDAP_TLS=true dans le .env et redémarrer le conteneur, puis cocher et enregistrer « Ignorer la vérification du certificat LDAP » dans Administration → LDAP. **Avertissement :** la connexion reste chiffrée, mais le serveur n'est plus authentifié : des identifiants LDAP peuvent être interceptés par un adversaire réseau. Cette dérogation concerne aussi l'authentification LDAP, les tests et les actions LDAP des workflows. La retirer rapidement après dépannage.
+
