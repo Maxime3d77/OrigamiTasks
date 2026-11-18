@@ -4,10 +4,10 @@
 set -Eeuo pipefail
 umask 077
 die(){ echo "PRA REFUSED: $*" >&2; exit 2; }
-[[ $# == 5 || $# == 6 ]] || die "Usage: $0 SOURCE_VMID TARGET_HOST TARGET_VMID --confirm-offline /absolute/key [PORT]"
-sid=$1; host=$2; did=$3; approve=$4; key=$5; port=${6:-22}
+[[ $# == 7 ]] || die "Usage: $0 SOURCE_VMID TARGET_HOST TARGET_VMID --confirm-offline /absolute/key PORT PROTECTION_ID"
+sid=$1; host=$2; did=$3; approve=$4; key=$5; port=$6; protection=$7
 [[ $EUID -eq 0 && $approve == '--confirm-offline' ]] || die 'Root and explicit approval required'
-[[ $sid =~ ^[1-9][0-9]{1,8}$ && $did =~ ^[1-9][0-9]{1,8}$ ]] || die 'Invalid VMIDs'
+[[ $sid =~ ^[1-9][0-9]{1,8}$ && $did =~ ^[1-9][0-9]{1,8}$ && $protection =~ ^[1-9][0-9]{0,8}$ ]] || die 'Invalid IDs'
 [[ $host =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]] || die 'Invalid target host'
 [[ $port =~ ^[0-9]{1,5}$ ]] && ((10#$port>=1 && 10#$port<=65535)) || die 'Invalid port'
 [[ $key =~ ^/[A-Za-z0-9_./-]+$ && -f $key && ! -L $key ]] || die 'Missing source-local key'
@@ -29,11 +29,31 @@ source_slots=$(qm config "$sid" | awk -F ': ' '/^(scsi|virtio|sata|ide)[0-9]+: /
 target_slots=$(remote "qm config '$did' | awk -F ': ' '/^(scsi|virtio|sata|ide)[0-9]+: / {print \$1}' | sort")
 [[ -n $source_slots && "$source_slots" == "$target_slots" ]] || die 'Disk topology differs'
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+reporter="$script_dir/pra-sync-report.py"
+[[ -f $reporter && -f /opt/origamitasks-agent/config.json ]] || die 'Agent and PRA report helper required'
+run_uuid=$(cat /proc/sys/kernel/random/uuid)
+done_success=false
+report(){
+ python3 "$reporter" "$protection" "$run_uuid" "$1" "$total_disks" "$count" "$scanned" "$(($(date +%s)-started))" "$2"
+}
+cleanup(){
+ rc=$?
+ if [[ $done_success != true && -n ${run_uuid:-} && ${report_started:-false} == true ]]; then
+   report failed 'Synchronisation froide interrompue : vérifier la copie sur AU' || true
+ fi
+ rm -f "$tmp"
+ exit "$rc"
+}
+trap cleanup EXIT
 printf '%s\n' "$source_slots" > "$tmp"
 exec 9>"/run/lock/origami-pra-cold-$sid.lock"
 flock -n 9 || die 'Sync already running on source node'
 started=$(date +%s); count=0; scanned=0
+total_disks=$(wc -l < "$tmp")
+report_started=false
+report running '' || die 'Tracking report refused: verify agent site and current source node'
+report_started=true
 while IFS= read -r slot; do
   [[ $slot =~ ^(scsi|virtio|sata|ide)[0-9]+$ ]] || die 'Invalid slot'
   source_guard; remote "$target_guard" || die 'Standby state changed'
@@ -54,5 +74,8 @@ while IFS= read -r slot; do
     "$srcdev" "$target:$dstdev"
   source_guard; remote "$target_guard" || die 'A VM changed state during transfer'
   count=$((count+1)); scanned=$((scanned+size))
+  report running '' || die 'Progress report refused'
 done < "$tmp"
+report success '' || die 'Final status report refused'
+done_success=true
 echo "ORIGAMI_INCREMENTAL_COLD_OK vmid=$sid target_vmid=$did disks=$count scanned_bytes=$scanned elapsed_seconds=$(($(date +%s)-started))"
