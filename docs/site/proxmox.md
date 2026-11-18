@@ -1,5 +1,15 @@
 # Proxmox VE: discovery and disaster recovery
 
+### Automatic SSH first-contact pinning on Proxmox nodes (0.3.20)
+
+The SSH **vault identity** is the user account and its **private login key**, which can be reused from existing deployment workflows. The SSH **server host key** is a separate public key identifying each Proxmox node. Previously, deployment stopped until every node had been manually approved.
+
+For an explicit admin-approved rollout under **Proxmox DC → Cluster agents**, OrigamiTasks now **automatically pins the first server host key** to persistent `known_hosts` (**TOFU / accept-new**). No mandatory fingerprint approval is required for previously unknown nodes. The second, authenticated SSH connection verifies the same stored key before presenting any user credentials. If a stored host key changes, installation remains blocked; no automatic replacement occurs. **View SSH fingerprint (optional)** is still available.
+
+**TOFU caveat:** initial SSH connection interception can cause the wrong host key to be pinned, so independently verifying keys is recommended on critical hypervisors. This behavior is limited to explicitly authorized nodes in a managed Proxmox cluster; it does not expand permission for arbitrary remote hosts, and does not bypass SSH user authentication, SFTP or sudo checks.
+
+Prior failed batches do not retry automatically: create a new batch on a single noncritical node after upgrading. Further issues with the selected vault account, noninteractive sudo, Python 3 or systemd are separate from server-key trust.
+
 ### Keep staging and production DR environments isolated (0.3.19)
 
 Under **Proxmox DC → Independent DR Groups**, create any number of custom protection scopes, e.g. **Staging** and **Production**, then associate primary and standby **sites** with each scope. Sites can contain multiple registered clusters; a cluster belongs to only one site. Simulations can only use sites within the **same DR group**, enforced both by the UI and backend.

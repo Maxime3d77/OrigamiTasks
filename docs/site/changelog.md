@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.20-rc1 — 2026-11-17
+
+- **Proxmox cluster agent rollout:** distinguish the **user-authentication private SSH key** in the vault (e.g. also used by Rundeck) from the **server's SSH host key**. Under **Proxmox DC → Cluster agents**, first contact now automatically records the server public host key in persistent OrigamiTasks `known_hosts` (**TOFU / accept-new**), without requiring manual approval for every new node.
+- **Changed host keys remain blocked:** the worker still confirms cluster/group/node membership before SSH; the authenticated SSH client verifies the recorded key again. Optional **View SSH fingerprint** remains available for independent checking on sensitive machines.
+- **SSH identity unchanged:** the vault key and account are not replaced. Host-key TOFU does not grant user access or noninteractive sudo/SFTP/Python/systemd rights.
+- **TOFU first-contact risk:** an intercepted initial connection might pin the wrong server key; out-of-band fingerprint confirmation is still recommended for critical hypervisors. Already pinned keys are never silently overwritten.
+- **Migration:** historic failed batches remain visible; explicitly start a new batch after upgrading, initially using a noncritical PVE node. Upgrading alone performs no agent installation.
+
 ## 0.3.19-rc1 — 2026-11-17
 
 - **Independent DR groups**: create custom, editable DR protection scopes (e.g. Staging, Production, Test) directly in the PVE interface. Sites and clusters are assigned to one scope; **cross-scope simulated failovers are rejected** by backend and frontend, and no infrastructure changes occur.

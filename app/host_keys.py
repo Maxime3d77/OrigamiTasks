@@ -1,8 +1,9 @@
-"""Admin-only SSH host-key inspection and explicitly verified trust-on-first-use.
+"""SSH host-key inspection, manual approval and scoped automatic first-use pinning.
 
-Never auto-approve: require an exact SHA256 fingerprint verified out of band.
-Use existing pinned known_hosts entries and reject changed host keys.
-No SSH passwords or user private keys are sent during inspection.
+The manual approval endpoint still requires an independently verified SHA256
+fingerprint. Only the explicitly admin-approved Proxmox agent rollout uses
+automatic trust-on-first-use, pinning the first server key without prompting.
+Never replace a pinned key. Neither inspection nor TOFU sends user private keys.
 """
 import base64
 import fcntl
@@ -151,6 +152,34 @@ def inspect(host, ssh_port=22):
         "status":status,
         "trusted":status=="trusted",
     }
+
+
+def trust_first_use(host, ssh_port=22):
+    """First-contact pinning for explicitly approved PVE SSH agent deployments.
+
+    This operation does not use the user's SSH key and never authorizes any
+    command. It only pins the server's public host key to persistent known_hosts.
+    Any changed or conflicting previously recorded key is rejected, including
+    when the server presents another key algorithm.
+    The subsequent authenticated SSH connection re-validates this same pin.
+    """
+    host,ssh_port=target(host,ssh_port)
+    offered=_fetch(host,ssh_port)
+    status=_compare_known(host,ssh_port,offered)
+    if status=="changed":
+        raise HostKeyError(
+            "Clé d'hôte SSH modifiée depuis son enregistrement : "
+            "connexion bloquée. Contrôler le remplacement du serveur."
+        )
+    if status=="trusted":
+        return {"host":host,"port":ssh_port,"status":"trusted",
+                "added":False,"fingerprint":_fingerprint(offered)}
+    # accept_new is an atomic cross-process append that refuses to replace
+    # any known host, even if a different algorithm was previously pinned.
+    added=accept_new(_hostname(host,ssh_port),offered)
+    return {"host":host,"port":ssh_port,
+            "status":"added" if added else "trusted",
+            "added":bool(added),"fingerprint":_fingerprint(offered)}
 
 
 def approve(host, ssh_port, fingerprint, verified_out_of_band=False):
