@@ -358,7 +358,7 @@ def list_datacenters(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
         rows=con.execute(
-            'SELECT id,name,url,credential_id,kind,ca_cert,created_at FROM datacenters ORDER BY name'
+            'SELECT id,name,url,credential_id,kind,ca_cert,skip_tls_verification,created_at FROM datacenters ORDER BY name'
         ).fetchall()
     return {'items':[dict(row) for row in rows]}
 
@@ -374,6 +374,9 @@ def _datacenter_fields(payload, con, *, existing=None):
         )
     except integrations.IntegrationError as exc:
         raise HTTPException(422,str(exc)) from None
+    skip_tls=payload.get('skip_tls_verification',False)
+    if type(skip_tls) is not bool:
+        raise HTTPException(422,'Ignorer la vérification TLS : valeur booléenne attendue')
     ca_id=payload.get('ca_cert','')
     if not isinstance(ca_id,str):
         raise HTTPException(422,'Identifiant de CA Proxmox invalide')
@@ -393,7 +396,8 @@ def _datacenter_fields(payload, con, *, existing=None):
                 422,'Token Proxmox : renseigner user@realm!tokenname et son secret (8 à 1024 caractères)'
             )
         payload_credentials=connections.normalize('proxmox',{
-            'url':origin,'username':username,'token':token,'ca_cert':ca_id
+            'url':origin,'username':username,'token':token,'ca_cert':ca_id,
+            'skip_tls_verification':skip_tls
         },is_new=True)
         # The credentials remain in the encrypted vault; never return the secret.
         vault_name='Proxmox - '+name[:80]+' - '+secrets.token_hex(4)
@@ -423,19 +427,19 @@ def _datacenter_fields(payload, con, *, existing=None):
             raise HTTPException(422,
                 'L’URL du datacenter et celle du token du coffre doivent correspondre. '
                 'Choisir un autre token ou en créer un pour ce serveur.')
-    return name,kind,origin,credential_id,ca_id
+    return name,kind,origin,credential_id,ca_id,skip_tls
 
 
 @app.post('/api/datacenters')
 def add_datacenter(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
     with db.session() as con:
-        name,kind,origin,credential_id,ca_id=_datacenter_fields(payload,con)
+        name,kind,origin,credential_id,ca_id,skip_tls=_datacenter_fields(payload,con)
         try:
             cur=con.execute(
-                'INSERT INTO datacenters(name,url,credential_id,kind,ca_cert,created_at) '
-                'VALUES (?,?,?,?,?,?)',
-                (name,origin,credential_id,kind,ca_id,db.now())
+                'INSERT INTO datacenters(name,url,credential_id,kind,ca_cert,skip_tls_verification,created_at) '
+                'VALUES (?,?,?,?,?,?,?)',
+                (name,origin,credential_id,kind,ca_id,int(skip_tls),db.now())
             )
         except db.sqlite3.IntegrityError:
             raise HTTPException(409,'Nom de datacenter déjà enregistré') from None
@@ -451,10 +455,10 @@ def edit_datacenter(dc_id:int,payload:dict[str,Any],request:Request):
         old=con.execute('SELECT * FROM datacenters WHERE id=?',(dc_id,)).fetchone()
         if not old:
             raise HTTPException(404,'Serveur/cluster Proxmox introuvable')
-        name,kind,origin,credential_id,ca_id=_datacenter_fields(payload,con,existing=old)
+        name,kind,origin,credential_id,ca_id,skip_tls=_datacenter_fields(payload,con,existing=old)
         try:
-            con.execute('UPDATE datacenters SET name=?,url=?,credential_id=?,kind=?,ca_cert=? WHERE id=?',
-                        (name,origin,credential_id,kind,ca_id,dc_id))
+            con.execute('UPDATE datacenters SET name=?,url=?,credential_id=?,kind=?,ca_cert=?,skip_tls_verification=? WHERE id=?',
+                        (name,origin,credential_id,kind,ca_id,int(skip_tls),dc_id))
         except db.sqlite3.IntegrityError:
             raise HTTPException(409,'Nom de datacenter déjà enregistré') from None
     db.audit(user['username'],'datacenter.update',dc_id,name+' ('+kind+')')
@@ -469,6 +473,7 @@ def test_datacenter(dc_id:int,request:Request):
     values=dict(values,url=dc['url'])
     if dc.get('ca_cert'):
         values['ca_cert']=dc['ca_cert']
+    values['skip_tls_verification']=bool(dc.get('skip_tls_verification',False))
     try:
         return connection_tests.proxmox(values,options={'check_nodes':True})
     except (connection_tests.ConnectionTestError,integrations.IntegrationError,

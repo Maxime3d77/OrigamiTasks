@@ -417,7 +417,9 @@ def proxmox(values, options=None):
         )
         if not isinstance(data, dict):
             raise ConnectionTestError("Proxmox : réponse de permissions inattendue")
-        checks = [check("HTTPS", "Certificat API vérifié"),
+        insecure=values.get('skip_tls_verification') is True
+        checks = [warning("HTTPS / TLS", "Vérification du certificat désactivée pour cette connexion Proxmox uniquement. Réactiver dès que possible.")
+                  if insecure else check("HTTPS / TLS", "Certificat et nom d'hôte API vérifiés"),
                   check("Token API", "Requête authentifiée de permissions acceptée")]
         if _bool(options, "check_nodes"):
             nodes = integrations.proxmox_request(base, values, "/api2/json/nodes",
@@ -451,10 +453,30 @@ def proxmox(values, options=None):
         else:
             detail="HTTP "+str(status)+" — erreur API Proxmox"
         raise ConnectionTestError("Proxmox : "+detail) from None
-    except httpx.ConnectError:
+    except httpx.ConnectError as exc:
+        # httpx groups certificate validation and transport errors under ConnectError.
+        # Inspect only the *types* of the underlying failures: never surface
+        # exception repr/URLs which might contain secrets.
+        causes=[]
+        current=exc
+        for _ in range(8):
+            if current is None or any(current is previous for previous in causes):
+                break
+            causes.append(current)
+            current=current.__cause__ or current.__context__
+        if any(isinstance(cause, ssl.SSLCertVerificationError) for cause in causes):
+            raise ConnectionTestError(
+                "Proxmox : certificat TLS non approuvé ou FQDN différent. "
+                "Importer la CA Proxmox, ou activer temporairement "
+                "« Ignorer la vérification TLS » dans la fiche du serveur/cluster."
+            ) from None
+        if any(isinstance(cause, ssl.SSLError) for cause in causes):
+            raise ConnectionTestError(
+                "Proxmox : échec de négociation TLS (protocole ou certificat serveur)."
+            ) from None
         raise ConnectionTestError(
-            "Proxmox : connexion impossible (DNS/TCP ou certificat TLS non vérifiable). "
-            "Contrôler le FQDN et la CA Proxmox."
+            "Proxmox : impossible d'établir la connexion (DNS, port 8006, pare-feu ou refus TCP). "
+            "Le contournement TLS ne corrige pas les problèmes réseau."
         ) from None
     except httpx.TimeoutException:
         raise ConnectionTestError("Proxmox : délai dépassé lors de la connexion à l'API") from None

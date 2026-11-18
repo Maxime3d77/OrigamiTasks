@@ -1,5 +1,12 @@
 # Historique des modifications
 
+## 0.3.12-rc1 — 17 novembre 2026
+
+- **Proxmox :** option administrateur **« Ignorer la vérification du certificat TLS (certificat autosigné) »** sur chaque fiche serveur/cluster et dans les connexions Proxmox du coffre. Désactivée par défaut, stockée en base, réversible à tout moment ; les autres serveurs restent vérifiés. HTTPS conserve son chiffrement, mais l’identité du serveur n'est pas vérifiée si l'option est activée.
+- **Diagnostic :** distingue validation TLS, négociation TLS, erreurs DNS/port/pare-feu, token et permissions. Avertissement explicite sur les diagnostics effectués sans vérification du certificat.
+- **Interface :** cartes Proxmox redimensionnables, boutons disposés sur deux colonnes sans débordement, bouton d'ajout sous le titre pour ne plus être masqué, correction de la recherche par FQDN.
+- **Compatibilité :** migration SQLite non destructive ; workflows et inventaires existants conservés, sans modification du `.env`.
+
 ## 0.3.11-rc1 — 17 novembre 2026
 
 - **Proxmox 100 % web pour l'ajout des hôtes :** écran **Serveurs & clusters Proxmox** permettant d'enregistrer un cluster ou un nœud autonome, de saisir directement l'identifiant et le secret du token (chiffrés dans le coffre), d'affecter une CA TLS importée depuis le navigateur et de modifier la configuration existante sans `.env` ni redémarrage.

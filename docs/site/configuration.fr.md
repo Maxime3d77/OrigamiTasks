@@ -1,5 +1,11 @@
 # Référence de configuration
 
+### Proxmox avec certificat autosigné : dérogation TLS par serveur (0.3.12)
+
+Sur **Administration → Serveurs & clusters Proxmox**, cliquer **Modifier** sur le serveur ou cluster. Si l'import de la CA interne n'est pas possible, cocher **Ignorer la vérification du certificat TLS (certificat autosigné)**, puis **Enregistrer les modifications** et **Tester l'API**. Cette dérogation ne concerne que ce serveur/cluster, reste modifiable à tout moment et ne nécessite **aucune modification du `.env` ni redémarrage de Docker**.
+
+La communication continue en HTTPS chiffré, mais le certificat et le nom d'hôte ne sont **plus authentifiés** : cela augmente le risque d'interception (MITM), surtout sur un réseau non maîtrisé. Pour une configuration pérenne, importer la CA Proxmox dans le même formulaire et décocher la dérogation. Le test affiche un avertissement clair lorsqu'il est effectué sans vérification TLS. Si la connexion échoue toujours, distinguer **DNS, port 8006, pare-feu** et **droits du token** : ignorer TLS ne résout pas ces causes.
+
 ### Ajouter un serveur ou cluster Proxmox entièrement depuis le navigateur (0.3.11)
 
 1. Ouvrir **Administration → Serveurs & clusters Proxmox**, puis **Ajouter un serveur / cluster**.

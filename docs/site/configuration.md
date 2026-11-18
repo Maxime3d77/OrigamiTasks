@@ -1,5 +1,11 @@
 # Configuration reference
 
+### Self-signed Proxmox HTTPS: per-server TLS verification exception (0.3.12)
+
+Open **Administration → Proxmox servers and clusters**, click **Edit** for the target. If uploading the trusted internal CA is not possible, select **Skip TLS certificate verification (self-signed certificate)**, **Save**, then **Test API**. This administrator-only exception applies to that node/cluster only, is reversible and requires **no `.env` edits or Docker restart**.
+
+The transport remains HTTPS encrypted, but the endpoint certificate and hostname are **not authenticated**, introducing man-in-the-middle risk. For durable operations, import the PVE internal CA and disable the exception. Diagnostics warn when certificate validation is disabled and distinguish TLS errors from DNS/port 8006/firewall failures and token permissions.
+
 ### Add a Proxmox server or cluster entirely in the browser (0.3.11)
 
 1. Open **Administration → Proxmox servers and clusters**, then **Add a server / cluster**.
