@@ -6,6 +6,7 @@ source PRA site and whose host is in the configured source cluster may report.
 """
 import re
 import uuid
+from datetime import datetime, timezone, timedelta
 from . import db, integrations, dr_protected_vms
 from .executor import credential
 
@@ -37,7 +38,7 @@ def _node_authorized(agent,vm):
 
 
 def report(agent,payload):
-    if not isinstance(payload,dict) or set(payload)!={"protected_vm_id","run_uuid","status",
+    if not isinstance(payload,dict) or set(payload)!={"protected_vm_id","source_vmid","target_vmid","run_uuid","status",
                                                       "disks_total","disks_done",
                                                       "scanned_bytes","transferred_bytes","elapsed_seconds","error"}:
         raise DirectSyncError("Rapport incrémental invalide")
@@ -67,6 +68,9 @@ def report(agent,payload):
                                 numbers["disks_done"]!=numbers["disks_total"]):
         raise DirectSyncError("Succès sans disques cohérents déclaré")
     vm=dr_protected_vms._one(vmid)
+    if type(payload["source_vmid"]) is not int or payload["source_vmid"]!=vm["source_vmid"] or (
+            type(payload["target_vmid"]) is not int or payload["target_vmid"]!=vm["target_vmid"]):
+        raise DirectSyncError("VMID source / secours différent de la protection")
     if vm["state"]!="planned":
         raise DirectSyncError("Protection suspendue")
     _node_authorized(agent,vm)
@@ -118,7 +122,11 @@ def list_runs(vm_id):
     # Don't display a crashed/outdated source agent report as a forever-running sync.
     for x in items:
         if x["status"]=="running":
-            x["stale"]=True
+            try:
+                age=datetime.now(timezone.utc)-datetime.fromisoformat(x["last_report_at"])
+                x["stale"]=age>timedelta(minutes=20)
+            except (TypeError,ValueError):
+                x["stale"]=True
         else:
             x["stale"]=False
     return {"items":items}
