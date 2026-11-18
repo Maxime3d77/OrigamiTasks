@@ -45,7 +45,7 @@ if qm config "$sid" | grep -Eq '^(efidisk|tpmstate|unused|hostpci|usb|ide[0-9]+:
 fi
 slots=$(qm config "$sid" | awk -F ': ' '/^(scsi|virtio|sata|ide)[0-9]+: /{print $1}' | sort)
 [[ -n $slots ]] || die 'No supported disks'
-base_slots=$(remote "qm config '$base' | awk -F ': ' '/^(scsi|virtio|sata|ide)[0-9]+: /{print \\$1}' | sort")
+base_slots=$(remote "qm config '$base' | awk -F ': ' '/^(scsi|virtio|sata|ide)[0-9]+: /{print \$1}' | sort")
 [[ "$slots" == "$base_slots" ]] || die 'Disk topology changed since last verified generation'
 need=0
 for slot in $slots; do
