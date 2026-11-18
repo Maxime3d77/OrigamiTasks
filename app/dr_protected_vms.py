@@ -17,7 +17,7 @@ from . import db, dr_sites, integrations
 
 STRATEGIES = {
     "planning_only": "Étude / simulation uniquement",
-    "offline_copy": "Copie à froid (transport à développer)",
+    "offline_copy": "Copie directe + incrémental à froid (arrêt requis)",
     "pbs_backup_restore": "Sauvegarde PBS + restauration (à intégrer)",
     "storage_array_replication": "Réplication baie / LUN (à qualifier)",
 }
@@ -283,6 +283,19 @@ def list_vms(plan_id=None):
         # Requires independent fencing before a VM can ever be deemed ready to fail over.
         item["replica_verified"]=bool(last and last["status"]=="completed")
         item["failover_available"]=False
+        with db.session() as sync:
+            latest=sync.execute(
+                "SELECT status,disks_total,disks_done,scanned_bytes,elapsed_seconds,"
+                "error,started_at,finished_at FROM pra_direct_sync_runs "
+                "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+            last_ok=sync.execute(
+                "SELECT finished_at FROM pra_direct_sync_runs "
+                "WHERE protected_vm_id=? AND status='success' "
+                "ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+        item["incremental_sync"]=dict(latest) if latest else None
+        item["last_incremental_success"]=last_ok["finished_at"] if last_ok else None
         result.append(item)
     return result
 
@@ -312,6 +325,10 @@ def delete(vm_id):
         ).fetchone()
         if pending:
             raise ProtectedVMError("Sauvegarde PBS active ou indéterminée : contrôler la tâche avant suppression")
+        if con.execute(
+            "SELECT 1 FROM pra_direct_sync_runs WHERE protected_vm_id=?",(vm_id,)
+        ).fetchone():
+            raise ProtectedVMError("Synchronisations directes liées à la protection : conserver leur historique pour audit")
         existing=con.execute(
             "SELECT id FROM pra_pbs_restores WHERE protected_vm_id=?",(vm_id,)
         ).fetchone()

@@ -204,6 +204,25 @@ CREATE TABLE IF NOT EXISTS pra_pbs_restores (
  upid TEXT, created_at TEXT NOT NULL, finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pra_pbs_restore_vm ON pra_pbs_restores(protected_vm_id,id);
+CREATE TABLE IF NOT EXISTS pra_direct_sync_runs (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE RESTRICT,
+ run_uuid TEXT NOT NULL UNIQUE,
+ agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+ kind TEXT NOT NULL CHECK(kind IN ('offline_incremental')),
+ status TEXT NOT NULL CHECK(status IN ('running','success','failed','interrupted')),
+ disks_total INTEGER NOT NULL DEFAULT 0,
+ disks_done INTEGER NOT NULL DEFAULT 0,
+ scanned_bytes INTEGER NOT NULL DEFAULT 0,
+ transferred_bytes INTEGER NOT NULL DEFAULT 0,
+ elapsed_seconds INTEGER,
+ error TEXT NOT NULL DEFAULT '',
+ started_at TEXT NOT NULL,
+ finished_at TEXT,
+ last_report_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pra_direct_sync_vm ON pra_direct_sync_runs(protected_vm_id,id);
+
 
 
 CREATE TABLE IF NOT EXISTS runs (

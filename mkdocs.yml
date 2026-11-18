@@ -16,6 +16,7 @@ nav:
   - Proxmox & DR: proxmox.md
   - PBS backup pilot: pra-pbs-pilot.md
   - Direct SSH VM seed (no PBS): pra-direct-seed.md
+  - Offline incremental and per-VM tracking: pra-incremental-cold.md
   - Agents: agents.md
   - Operations & Upgrades: operations.md
   - Security: security.md
@@ -68,6 +69,7 @@ plugins:
             Proxmox & DR: Proxmox et PRA
             PBS backup pilot: Pilote de sauvegarde PBS
             Direct SSH VM seed (no PBS): Copie directe SSH sans PBS
+            Offline incremental and per-VM tracking: Incrémental à froid et suivi par VM
             Agents: Agents
             Operations & Upgrades: Exploitation et mises à jour
             Security: Sécurité

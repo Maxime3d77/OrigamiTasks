@@ -583,21 +583,40 @@ function datacenters(){
 
 /* A protected VM is a manually selected plan, never an actual running replica.
    All tests perform read-only GET requests to Proxmox and return BLOCKED. */
+let directSyncPollTimer=null;
+function scheduleDirectSyncPoll(){
+ if(directSyncPollTimer||state.page!=='protected-vms'||!roleAdmin())return;
+ if(!(state.drProtectedVMs||[]).some(x=>x.incremental_sync?.status==='running'))return;
+ directSyncPollTimer=setTimeout(async()=>{
+   directSyncPollTimer=null;
+   if(state.page!=='protected-vms'||!roleAdmin())return;
+   try{
+     state.drProtectedVMs=(await api('/dr/vms')).items;
+     render();
+   }catch(ex){console.warn('Actualisation PRA indisponible',ex?.message)}
+   scheduleDirectSyncPoll();
+ },5000);
+}
 function protectedVMsPage(){
  if(!roleAdmin())return title('VM protégées PRA','Administration uniquement.');
  const plans=state.drPlans||[],all=state.drProtectedVMs||[];
+ scheduleDirectSyncPoll();
  const selected=state.drVMPlanFilter||'all';
  const current=selected==='all'?all:all.filter(x=>String(x.plan_id)===String(selected));
  const tableRows=current.map(vm=>{
   const last=vm.last_check||{};
   return '<tr><td><b>'+e(vm.source_name||'VM #'+vm.source_vmid)+'</b>'
-   +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
+   +'<div class="muted tinytext">Protection #'+e(vm.id)+' · VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
    +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
    +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
    +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
    +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
-   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point : jamais vérifié</div></td>'
+   +'<td>'+labelStatus(vm.replication_status)
+   +'<div class="muted tinytext">Delta : '+(vm.incremental_sync?e(vm.incremental_sync.status)
+     +' · '+e(vm.incremental_sync.disks_done)+'/'+e(vm.incremental_sync.disks_total)+' disques'
+     :'jamais exécuté')+'</div>'
+   +'<div class="muted tinytext">Dernier incrémental réussi : '+(vm.last_incremental_success?dt(vm.last_incremental_success):'jamais')+'</div></td>'
    +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
@@ -605,6 +624,7 @@ function protectedVMsPage(){
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button><button class="btn tiny" data-action="dr-vm-pbs-restore-start" data-id="'+vm.id+'">Restaurer sur site de secours</button><button class="btn tiny" data-action="dr-vm-pbs-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
+   +'<button class="btn tiny" data-action="dr-vm-direct-history" data-id="'+vm.id+'">Suivi incrémental</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
    +'<button class="btn tiny" data-action="dr-vm-edit" data-id="'+vm.id+'">Modifier</button>'
    +'<button class="btn tiny" data-action="dr-vm-pause" data-id="'+vm.id+'">'+(vm.state==='paused'?'Reprendre la préparation':'Mettre en pause')+'</button>'
@@ -622,7 +642,9 @@ function protectedVMsPage(){
   +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Protections déclaratives</div></div>'
   +'<div class="stat-card"><span class="label">Préparations actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Aucune copie lancée</div></div>'
   +'<div class="stat-card"><span class="label">En pause</span><div class="value">'+current.filter(x=>x.state==='paused').length+'</div><div class="sub">Enregistrements conservés</div></div>'
-  +'<div class="stat-card"><span class="label">Répliques vérifiées</span><div class="value">0</div><div class="sub">Moteur non disponible</div></div></div>'
+  +'<div class="stat-card"><span class="label">Incrémental froid · dernier état OK</span><div class="value">'
+  +current.filter(v=>v.incremental_sync?.status==='success').length
+  +'</div><div class="sub">Non autorisé pour la bascule</div></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Inventaire des VM sélectionnées</h2>'
   +'<div class="tool-row"><label class="field">Groupe PRA'
   +'<select id="drVMPlanFilter">'+option([['all','Tous les groupes'],...plans.map(p=>[p.id,p.name])],selected)+'</select>'
@@ -676,7 +698,7 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  const pools=r.target_storages.filter(x=>x.images);
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
  const engines=[['planning_only','Préparation / simulation uniquement'],
-   ['offline_copy','Copie à froid (transport à développer)'],
+   ['offline_copy','Copie directe + incrémental à froid (VM arrêtées)'],
    ['pbs_backup_restore','PBS : sauvegarde + restauration réelle manuelle (sans bascule)'],
    ['storage_array_replication','Réplication de baie/LUN (à valider)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
@@ -1865,6 +1887,22 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
     '<button class="btn primary" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+x.job_id+'">Vérifier le résultat</button>',true);
   }catch(ex){toast(ex.message,false)}
   return;
+ }
+ if(a==='dr-vm-direct-history'){
+   try{
+     const x=await api('/dr/vms/'+id+'/direct-sync');
+     const rows=(x.items||[]).map(r=>'<tr><td>'+dt(r.started_at)+'</td><td>'
+      +labelStatus(r.status)+(r.stale?'<div class="hint">Aucune remontée depuis plus de 20 min</div>':'')+'</td><td>'+e(r.disks_done)+' / '+e(r.disks_total)+'</td><td>'
+      +e(r.scanned_bytes)+' octets parcourus</td><td>'+e(r.elapsed_seconds||'—')
+      +' s · '+e(r.transferred_bytes)+' octets envoyés</td><td>'+e(r.error||'—')+'</td></tr>').join('');
+     modal('Historique des deltas · VM protégée #'+id,
+       '<div class="notice">Synchronisations incrémentales à froid uniquement. État fourni par les agents source ; aucune promotion automatique autorisée.</div>'
+       +'<div class="table-wrap"><table><thead><tr><th>Début</th><th>État</th><th>Disques</th><th>Volume examiné</th><th>Durée</th><th>Erreur</th></tr></thead><tbody>'
+       +(rows||'<tr><td colspan="6">Aucune synchronisation enregistrée</td></tr>')
+       +'</tbody></table></div>',
+       '<button class="btn" data-action="dr-vm-direct-history" data-id="'+id+'">Actualiser</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
  }
  if(a==='dr-vm-pbs-release'){
    if(!confirm('Avez-vous supprimé manuellement la VM secours sur Proxmox AU ? OrigamiTasks vérifiera son absence et libérera uniquement les enregistrements de restauration.'))return;

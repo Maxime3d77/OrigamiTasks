@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates, pra_restore
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates, pra_restore, pra_direct_sync
 
 
 @asynccontextmanager
@@ -262,6 +262,15 @@ def agent_enroll(payload:dict[str,Any]):
 @app.post('/api/agent/poll')
 def agent_poll(payload:dict[str,Any],request:Request):
     return agents.poll(agents.authenticate(request),payload)
+
+
+@app.post('/api/agent/pra/sync/report')
+def report_agent_pra_direct_sync(payload:dict[str,Any],request:Request):
+    agent=agents.authenticate(request)
+    try:
+        return pra_direct_sync.report(agent,payload)
+    except (pra_direct_sync.DirectSyncError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
 
 
 @app.post('/api/agent/report')
@@ -733,6 +742,15 @@ def dr_pbs_release(vm_id:int,payload:dict[str,Any],request:Request):
         return pra_restore.release_after_manual_removal(vm_id,payload['approved'],user['username'])
     except (pra_restore.RestoreError,dr_protected_vms.ProtectedVMError) as exc:
         raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/direct-sync')
+def direct_vm_sync_history(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_direct_sync.list_runs(vm_id)
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
 
 
 @app.get('/api/dr/plans')
