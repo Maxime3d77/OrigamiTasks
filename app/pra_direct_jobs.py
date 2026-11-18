@@ -238,14 +238,16 @@ def _execute(job,vm,source,target):
             client_source,_=_ssh(None,{"host":source["fqdn"],"port":source["port"]},source_cred,40)
         except Exception:
             raise PRAJobError("Connexion SSH source refusée") from None
-        check=(
-            "test \"$(id -u)\" -eq 0 || sudo -n true; "
+        private_check=(
             "test -f "+BIN+"/pra-direct-seed.sh; "
             "test -f "+BIN+"/pra-incremental-cold.sh; "
             "test -f "+BIN+"/pra-sync-report.py; "
             "test -d "+BIN+"; "
             "test \"$(stat -c %U "+BIN+")\" = root"
         )
+        check=('sh -c '+shlex.quote(private_check) if
+               str(source_cred.get("username"))=="root" else
+               'sudo -n sh -c '+shlex.quote(private_check))
         _check_remote(client_source,check)
         # Exact argument list, no user-provided shell expansion. The script
         # name is determined by the internally recorded job type.
