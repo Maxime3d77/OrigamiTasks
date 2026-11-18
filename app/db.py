@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS pra_direct_sync_runs (
  disks_total INTEGER NOT NULL DEFAULT 0,
  disks_done INTEGER NOT NULL DEFAULT 0,
  scanned_bytes INTEGER NOT NULL DEFAULT 0,
+ transferred_bytes INTEGER NOT NULL DEFAULT 0,
  elapsed_seconds INTEGER,
  error TEXT NOT NULL DEFAULT '',
  started_at TEXT NOT NULL,
