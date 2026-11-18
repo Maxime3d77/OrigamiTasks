@@ -1,22 +1,22 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drProtectedVMs:[],drVMOptions:null,drVMPlanFilter:'all',drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dt=v=>v?new Date(v).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'}):'—';
-const statusName={success:'Réussi',failed:'Échec',running:'En cours',queued:'En attente',interrupted:'Interrompu',skipped:'Ignoré',online:'En ligne',offline:'Hors ligne',pending:'En attente',revoked:'Révoqué',uninstalled:'Désinstallé'};
+const statusName={success:'Réussi',failed:'Échec',running:'En cours',queued:'En attente',interrupted:'Interrompu',skipped:'Ignoré',online:'En ligne',offline:'Hors ligne',pending:'En attente',revoked:'Révoqué',uninstalled:'Désinstallé',completed_with_errors:'Terminé avec erreurs',BLOCKED:'Bloqué',planned:'Préparation',paused:'En pause',not_configured:'Non configurée',unknown:'Inconnu'};
 const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>`;
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
-async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
+async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{},cache:'no-store'};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drProtectedVMs=(await api('/dr/vms')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
 const badgeTags=tags=>tags.map(t=>`<span class="chip tag">#${e(t)}</span>`).join('');
-function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'DC Proxmox',agents:'Agents Linux / Windows','ssh-inventory':'Serveurs & groupes SSH',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
-function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage,'ssh-inventory':sshInventoryPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
+function showPage(page){state.page=page;state.selectedRun=null;$('#breadcrumb').textContent=({dashboard:"Vue d'ensemble",jobs:'Workflows',runs:'Exécutions',vault:'Coffre-fort',users:'Utilisateurs & droits',ldap:'LDAP / Active Directory',updates:'Mises à jour',datacenters:'DC Proxmox','protected-vms':'VM protégées PRA',agents:'Agents Linux / Windows','ssh-inventory':'Serveurs & groupes SSH',catalog:'Catalogue des tâches',audit:"Journal d'audit"})[page]||page;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('.sidebar').classList.remove('visible');render()}
+function render(){const pages={dashboard, jobs, runs, vault,users,updates,audit,datacenters,agents:agentsPage,catalog,ldap:ldapPage,'ssh-inventory':sshInventoryPage,'protected-vms':protectedVMsPage};$('#content').innerHTML=(pages[state.page]||dashboard)();bindLocal()}
 function dashboard(){
  const tab=roleAdmin()?(state.dashboardTab||'tasks'):'tasks';
  const all=[['tasks','Tâches & exécutions'],['agents','Agents actifs'],['proxmox','DC Proxmox / PRA']];
@@ -93,7 +93,8 @@ function dashboardProxmox(){
   +'<div class="stat-card"><span class="label">Synchronisations actives</span><div class="value">—</div><div class="sub">Non mesurées : moteur PRA absent</div></div></div>'
   +'<div class="notice">Les statuts de réplication (dernier point de restauration, retard, réussite / échec) ne seront affichés qu’après intégration d’un moteur réel. Aucun statut « synchronisé » n’est inventé.</div>'
   +'<div class="panel"><div class="panel-title"><h2>Datacenters Proxmox</h2>'
-  +'<button class="btn primary" data-action="page" data-page="datacenters">Administrer les DC / sites PRA ↗</button></div>'
+  +'<div class="tool-row"><button class="btn primary" data-action="page" data-page="datacenters">Administrer les DC / sites PRA ↗</button>'
+  +'<button class="btn" data-action="page" data-page="protected-vms">VM protégées ↗</button></div></div>'
   +'<div class="workflow-grid overview-dc-grid">'+(cards||'<p class="hint">Aucun DC Proxmox enregistré.</p>')+'</div>'
   +(dcs.length>80?'<p class="hint">80 premiers DC affichés. Ouvrir Proxmox pour la liste complète.</p>':'')
   +'</div>';
@@ -301,6 +302,7 @@ function agentsPage(){
    :'<button class="btn tiny primary" data-action="agent-modules" data-id="'+agent.id+'">Configurer modules</button>'
     +'<button class="btn tiny danger" data-action="agent-uninstall" data-id="'+agent.id+'">Désinstaller via SSH</button>'
      +(agent.revoked?'':'<button class="btn tiny" data-action="agent-revoke" data-id="'+agent.id+'">Révoquer le jeton</button>');
+  const refreshButton='<button class="btn tiny" data-action="agent-status-refresh" data-id="'+agent.id+'">↻ État reçu</button>';
   return '<tr><td class="name-cell">'+e(agent.name)+'<div class="muted tinytext">'+e(agent.hostname||'Non enrôlé')+'</div></td>'
     +'<td>'+e(agent.platform)+' · '+e(agent.version||'Version inconnue')+'</td>'
     +'<td>'+e(agent.group_name)+'</td><td>'+labelStatus(agent.status)+'</td>'
@@ -312,7 +314,7 @@ function agentsPage(){
     +'<td>'+(Number.isFinite(agent.cpu_percent)?e(agent.cpu_percent.toFixed(1))+' %':'—')+'</td>'
     +'<td>'+(Number.isFinite(agent.memory_mb)?e(agent.memory_mb.toFixed(1))+' Mio':'—')+'</td>'
     +'<td>'+dt(agent.last_seen)+'</td>'
-    +'<td class="agent-action-buttons">'+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
+    +'<td class="agent-action-buttons">'+refreshButton+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
  }).join('');
  return title('Agents Linux et Windows','Agent Linux modulaire ; agent Windows dédié aux actions des workflows.',
   '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button>'
@@ -320,6 +322,7 @@ function agentsPage(){
   +'<button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')
   +agentConnectionSettingsPanel()
   +'<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2>'
+  +'<button class="btn tiny" data-action="agents-status-refresh">↻ Actualiser les états reçus</button>'
   +'<span class="hint">'+state.agents.length+' agent(s)</span></div>'
   +'<div class="table-wrap"><table><thead><tr><th>Nom / hôte</th><th>OS / version</th><th>Groupe</th>'
   +'<th>État</th><th>Modules & synchronisation</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
@@ -421,13 +424,13 @@ function agentBatchPanel(){
  if(!batches.length)return '<p class="hint">Aucun déploiement groupé pour le moment.</p>';
  return batches.slice(0,8).map(batch=>{
   const stateLabel=batch.status==='success'?'Terminé':batch.status==='completed_with_errors'?'Terminé avec erreurs':batch.status==='interrupted'?'Interrompu':'En cours';
-  const rows=batch.targets.map(t=>'<div class="agent-batch-host"><strong>'+e(t.host)+':'+e(t.port)+'</strong><span class="chip">'+e(t.status)+'</span>'
+  const rows=batch.targets.map(t=>'<div class="agent-batch-host"><strong>'+e(t.host)+':'+e(t.port)+'</strong><span class="status '+e(t.status)+'">'+e(statusName[t.status]||t.status)+'</span>'
    +(t.error?'<small class="hint">'+e(t.error)+'</small>':'')+'</div>').join('');
   const planName=batch.dr_plan_name||'';
   const scope=batch.datacenter_name
    ?'<small class="hint">'+(planName?'PRA : '+e(planName)+' · ':'PRA non classé · ')+e(batch.datacenter_name)+'</small>'
    :'<small class="hint">Déploiement générique (hors groupe PRA)</small>';
-  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong>'+scope+'<span>'+e(stateLabel)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
+  return '<details class="agent-batch"><summary><strong>Lot #'+e(batch.id)+'</strong>'+scope+'<span class="dr-batch-summary">'+labelStatus(batch.status)+' · '+e(batch.done)+'/'+e(batch.total)+' · '+e(batch.success)+' réussis</span></summary>'
    +'<div class="agent-batch-hosts">'+rows+'</div></details>';
  }).join('');
 }
@@ -502,7 +505,8 @@ function renderProxmoxDiscoveryResults(){
   return '<tr><td>'+e(label)+'</td><td><strong>'+e(item.name||item.vmid||item.id||'—')+'</strong></td>'
     +'<td>'+e(vmid)+'</td><td>'+e(item.node||'—')+'</td><td>'+e(item.status||'—')+'</td>'
     +'<td>'+(item.type==='qemu'&&Number.isSafeInteger(Number(item.vmid))
-      ?'<button class="btn tiny" data-action="assess-dr" data-id="'+d.dcId+'" data-vmid="'+e(item.vmid)+'">Évaluer PRA</button>':'')
+      ?'<div class="tool-row"><button class="btn tiny" data-action="assess-dr" data-id="'+d.dcId+'" data-vmid="'+e(item.vmid)+'">Évaluer PRA</button>'
+        +'<button class="btn tiny primary" data-action="protect-vm-resource" data-id="'+d.dcId+'" data-vmid="'+e(item.vmid)+'">Protéger</button></div>':'')
     +'</td></tr>';
  }).join('');
  $('#proxmoxDiscoveryTable').innerHTML='<table class="proxmox-discovery-table"><thead><tr>'
@@ -536,11 +540,157 @@ function datacenters(){
    +'La vérification TLS est activée par défaut ; une exception est possible sur chaque fiche Proxmox pour les certificats autosignés. Les actions sensibles restent soumises à des permissions et validations distinctes.</div>';
 }
 
+
+/* A protected VM is a manually selected plan, never an actual running replica.
+   All tests perform read-only GET requests to Proxmox and return BLOCKED. */
+function protectedVMsPage(){
+ if(!roleAdmin())return title('VM protégées PRA','Administration uniquement.');
+ const plans=state.drPlans||[],all=state.drProtectedVMs||[];
+ const selected=state.drVMPlanFilter||'all';
+ const current=selected==='all'?all:all.filter(x=>String(x.plan_id)===String(selected));
+ const tableRows=current.map(vm=>{
+  const last=vm.last_check||{};
+  return '<tr><td><b>'+e(vm.source_name||'VM #'+vm.source_vmid)+'</b>'
+   +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
+   +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
+   +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
+   +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
+   +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
+   +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
+   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point : jamais vérifié</div></td>'
+   +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
+     +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
+   +'<td class="dr-vm-actions">'
+   +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
+   +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
+   +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
+   +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
+   +'<button class="btn tiny" data-action="dr-vm-edit" data-id="'+vm.id+'">Modifier</button>'
+   +'<button class="btn tiny" data-action="dr-vm-pause" data-id="'+vm.id+'">'+(vm.state==='paused'?'Reprendre la préparation':'Mettre en pause')+'</button>'
+   +'<button class="btn tiny danger" data-action="dr-vm-delete" data-id="'+vm.id+'">Retirer</button>'
+   +'</td></tr>';
+ }).join('');
+ return title('VM protégées PRA','Choix manuel par VM, destination, stockage et tests de reprise sans action sur les hyperviseurs.',
+   '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
+   +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
+  +'<div class="notice dr-safety-notice"><b>Protection encore préparatoire :</b> une entrée REP_ est un nom réservé dans OrigamiTasks, '
+  +'pas une VM réellement créée. Aucun moteur de copie iSCSI/LVM, PBS ou Pure n’a encore été activé ; '
+  +'pas de synchronisation réelle, de démarrage ni de bascule. Les tests sont des vérifications en lecture seule.</div>'
+  +'<div class="stats-grid dr-vm-stat-grid">'
+  +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Protections déclaratives</div></div>'
+  +'<div class="stat-card"><span class="label">Préparations actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Aucune copie lancée</div></div>'
+  +'<div class="stat-card"><span class="label">En pause</span><div class="value">'+current.filter(x=>x.state==='paused').length+'</div><div class="sub">Enregistrements conservés</div></div>'
+  +'<div class="stat-card"><span class="label">Répliques vérifiées</span><div class="value">0</div><div class="sub">Moteur non disponible</div></div></div>'
+  +'<div class="panel"><div class="panel-title"><h2>Inventaire des VM sélectionnées</h2>'
+  +'<div class="tool-row"><label class="field">Groupe PRA'
+  +'<select id="drVMPlanFilter">'+option([['all','Tous les groupes'],...plans.map(p=>[p.id,p.name])],selected)+'</select>'
+  +'</label></div></div>'
+  +'<div class="table-wrap"><table><thead><tr><th>VM source</th><th>Périmètre</th>'
+  +'<th>Réplique prévue</th><th>État</th><th>Réplication</th><th>Dernier test</th><th>Actions</th></tr></thead>'
+  +'<tbody>'+(tableRows||'<tr><td colspan="7">Aucune VM sélectionnée dans ce groupe. '
+    +'Ajoute manuellement une VM après découverte des clusters.</td></tr>')+'</tbody></table></div></div>';
+}
+function drVMClusters(planId,role){
+ const sites=(state.drSites||[]).filter(s=>s.plan_id===Number(planId)&&s.role===role);
+ return sites.flatMap(s=>(s.datacenters||[]).map(d=>({
+  id:d.id,name:d.name+' · '+s.name,site:s.name
+ })));
+}
+function openProtectedVMWizard(existingId=null,preselectDC=null,preselectVMID=null,preselectPlan=null){
+ const current=(state.drProtectedVMs||[]).find(x=>x.id===Number(existingId));
+ const groups=(state.drPlans||[]).filter(p=>
+  drVMClusters(p.id,'primary').length&&drVMClusters(p.id,'standby').length);
+ if(!groups.length)return toast('Créer d’abord un groupe PRA avec un cluster principal et un cluster secours.',false);
+ const site=(state.drSites||[]).find(s=>(s.datacenters||[]).some(d=>d.id===Number(preselectDC)));
+ const planId=current?.plan_id||preselectPlan||site?.plan_id||Number(groups[0].id);
+ const src=drVMClusters(planId,'primary');
+ const dst=drVMClusters(planId,'standby');
+ if(!src.length||!dst.length)return toast('Les deux sites du groupe PRA doivent être configurés.',false);
+ const sourceId=current?.source_dc_id||(src.find(x=>x.id===Number(preselectDC))||src[0]).id;
+ const targetId=current?.target_dc_id||dst[0].id;
+ state.drVMWizard={existingId:current?.id||null,
+                   preselectVMID:current?.source_vmid||preselectVMID||null};
+ const body='<form id="drVMSourceForm"><div class="notice">Étape 1 — choisir le groupe PRA et deux clusters de sites différents. '
+  +'Les VM et stockages seront ensuite lus directement dans les API Proxmox.</div>'
+  +'<div class="form-grid">'
+  +selectField('Groupe PRA','dr_vm_plan',groups.map(p=>[p.id,p.name]),planId)
+  +selectField('Cluster principal','dr_vm_source_dc',src.map(x=>[x.id,x.name]),sourceId)
+  +selectField('Cluster secours','dr_vm_target_dc',dst.map(x=>[x.id,x.name]),targetId)
+  +'</div><div class="tool-row"><button class="btn primary" type="submit">Découvrir les VM et stockages</button>'
+  +'<button class="btn" data-action="modal-close" type="button">Annuler</button></div></form>';
+ modal(current?'Modifier la protection de VM #'+current.source_vmid:'Ajouter une VM protégée',body,'',true);
+}
+async function openProtectedVMConfig(planId,sourceDC,targetDC){
+ const r=await api('/dr/vms/options?plan_id='+Number(planId)
+    +'&source_dc_id='+Number(sourceDC)+'&target_dc_id='+Number(targetDC));
+ state.drVMOptions=r;
+ const current=(state.drProtectedVMs||[]).find(x=>x.id===state.drVMWizard?.existingId);
+ const vmid=current?.source_vmid||Number(state.drVMWizard?.preselectVMID)||r.vms[0]?.vmid;
+ if(!r.vms.length)throw Error('Aucune VM QEMU n’a été découverte sur le cluster principal.');
+ const src= r.vms.find(x=>x.vmid===vmid)||r.vms[0];
+ const candidate=current?.target_vmid||src.vmid;
+ const targetDefault=r.target_vmids_in_use.includes(candidate)?'':candidate;
+ const nodes=r.target_nodes.filter(x=>x.status==='online');
+ const pools=r.target_storages.filter(x=>x.images);
+ if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
+ const engines=[['planning_only','Préparation / simulation uniquement'],
+   ['offline_copy','Copie à froid (transport à développer)'],
+   ['pbs_backup_restore','PBS backup + restore (à intégrer)'],
+   ['storage_array_replication','Réplication de baie/LUN (à valider)']];
+ const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
+  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Aucune copie ni VM REP_ ne sera créée lors de l’enregistrement. '
+  +'Le stockage cible doit accepter des images VM ; un VG iSCSI/LVM peut contenir plusieurs disques sur une même LUN.</div>'
+  +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)+'</p>'
+  +'<div class="form-grid">'
+  +selectField('VM source (choix manuel)','source_vmid',
+    r.vms.map(v=>[v.vmid,v.vmid+' — '+v.name+' · '+v.node+' ['+v.status+']']),src.vmid)
+  +field('VMID cible réservé pour REP_','target_vmid',targetDefault,'number')
+  +selectField('Nœud Proxmox cible','target_node',
+    nodes.map(x=>[x.name,x.name]),current?.target_node||nodes[0].name)
+  +selectField('Stockage cible','target_storage',
+    pools.map(x=>[x.storage,x.storage+' · '+x.type+(x.shared?' (partagé)':'')]),
+    current?.target_storage||pools[0].storage)
+  +selectField('Moteur envisagé (NON exécuté)','engine',engines,current?.engine||'planning_only')
+  +selectField('Fréquence souhaitée (indicative)','interval_minutes',
+    [[15,'15 minutes'],[30,'30 minutes'],[60,'1 heure'],[240,'4 heures'],
+     [720,'12 heures'],[1440,'24 heures']],
+    current?.interval_minutes||60)+'</div>'
+  +'<p class="hint">Noms cibles prévus : REP_&lt;nom de VM&gt;. Le VMID cible doit être libre. '
+  +'Aucune création ou réservation n’est envoyée au cluster de secours.</p>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer la protection préparatoire</button>'
+  +'<button type="button" class="btn" data-action="modal-close">Annuler</button></div></form>';
+ modal('VM protégée · '+e(r.source_name)+' → '+e(r.target_name),body,'',true);
+}
+function showProtectedVMTest(report){
+ const rows=(report.checks||[]).map(x=>
+  '<tr><td>'+e(x.name)+'</td><td>'+labelStatus(x.pass?'success':'failed')+'</td><td>'+e(x.detail)+'</td></tr>').join('');
+ modal('Test PRA · VM #'+e(report.vmid)+' · '+e(report.scenario),
+  '<div class="notice error"><b>Décision : '+e(report.decision)+'.</b> '+e(report.conclusion)
+   +' Aucune copie de disque, aucun arrêt ni démarrage de VM.</div>'
+  +'<div class="tool-row"><span class="chip">Préfixe cible : '+e(report.replica_name)+'</span>'
+  +'<span class="chip">Source : '+e(report.source_status)+'</span></div>'
+  +'<div class="table-wrap"><table><thead><tr><th>Contrôle</th><th>État</th><th>Constat</th></tr></thead>'
+  +'<tbody>'+rows+'</tbody></table></div>'
+  +'<p class="hint">'+e(report.next_step)+'</p>',
+  '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
+}
+async function openProtectedVMHistory(vmId){
+ const item=(state.drProtectedVMs||[]).find(x=>x.id===vmId);
+ const rows=(await api('/dr/vms/'+vmId+'/tests')).items;
+ const html=rows.map(t=>'<div class="dr-vm-test-history"><div class="tool-row">'
+   +labelStatus(t.outcome)+' <b>'+e(t.scenario)+'</b><small class="hint">'+dt(t.created_at)
+   +' · '+e(t.actor)+'</small></div><p>'+e(t.report.conclusion)+'</p>'
+   +'<small class="hint">Lecture seule : '+e(t.report.mode)+'</small></div>').join('');
+ modal('Historique des tests · '+e(item?.source_name||vmId),html||
+   '<div class="notice">Aucun test réalisé. Tu peux lancer le prévol de réplication ou une bascule simulée.</div>',
+   '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
+}
+
 function renderDRSitesPanel(){
  const plans=state.drPlans||[],sites=state.drSites||[];
  const card=site=>{
   const clusters=(site.datacenters||[]).map(dc=>e(dc.name)).join(' · ')||'—';
-  const ags=(site.agents||[]).map(agent=>e(agent.name)+' ('+e(agent.status)+')').join(' · ')||'Aucun';
+  const ags=(site.agents||[]).map(agent=>e(agent.name)+' '+labelStatus(agent.status)).join(' · ')||'Aucun';
   const role=site.role==='primary'?'Principal':site.role==='standby'?'Secours':'Autre';
   const storage={auto:'À détecter',iscsi_lvm:'iSCSI + LVM',zfs:'ZFS',ceph:'Ceph',pbs:'PBS',other:'Autre'}[site.storage_profile]||site.storage_profile;
   return '<div class="job-card dr-site-card"><div class="job-card-head"><span class="chip tag">'+e(role)+'</span><span class="chip">'+e(storage)+'</span></div>'
@@ -553,7 +703,8 @@ function renderDRSitesPanel(){
  const group=(plan,items)=>
   '<div class="dr-plan-section"><div class="panel-title"><div><h3>'+e(plan.name)+'</h3>'
   +'<p class="hint">'+e(plan.description||'Périmètre de protection indépendant')+' · '+items.length+' site(s)</p></div>'
-  +'<div class="tool-row"><button class="btn tiny" data-action="dr-site-new" data-plan-id="'+plan.id+'">＋ Site</button>'
+  +'<div class="tool-row"><button class="btn tiny" data-action="dr-plan-protected" data-id="'+plan.id+'">VM protégées</button>'
+  +'<button class="btn tiny" data-action="dr-site-new" data-plan-id="'+plan.id+'">＋ Site</button>'
   +'<button class="btn tiny" data-action="dr-plan-edit" data-id="'+plan.id+'">Modifier le groupe</button>'
   +'<button class="btn tiny danger" data-action="dr-plan-delete" data-id="'+plan.id+'">Supprimer</button></div></div>'
   +'<div class="workflow-grid dr-sites-grid">'+(items.map(card).join('')||'<p class="hint">Aucun site associé. Ajouter les clusters principal et secours de ce périmètre.</p>')+'</div></div>';
@@ -567,6 +718,8 @@ function renderDRSitesPanel(){
   +'<p class="hint">Créer autant de périmètres PP, Production, Recette ou autres que nécessaire. '
   +'Chaque groupe contient ses propres sites et clusters. Aucune association ou simulation inter-groupes.</p></div>'
   +'<div class="tool-row"><button class="btn primary" data-action="dr-plan-new">＋ Nouveau groupe PRA</button>'
+  +'<button class="btn" data-action="dr-plans-refresh">↻ Actualiser</button>'
+  +'<button class="btn" data-action="page" data-page="protected-vms">VM protégées</button>'
   +'<button class="btn" data-action="dr-simulation-form">Simuler une panne (sans action)</button></div></div>'
   +(plans.map(p=>group(p,sites.filter(s=>s.plan_id===p.id))).join('')||'<div class="notice">Créer un premier groupe PRA pour séparer les environnements.</div>')
   +(legacy.length?'<div class="dr-plan-section"><h3>Sites existants à classer</h3><div class="notice">'
@@ -636,11 +789,19 @@ function openDRSimulationForm(){
 }
 function showDRSimulationResult(result){
  const lines=(result.checks||[]).map(c=>
-  '<tr><td>'+e(c.name)+'</td><td>'+e(c.pass?'Validé':'Bloquant')+'</td><td>'+e(c.detail)+'</td></tr>').join('');
+  '<tr><td>'+e(c.name)+'</td><td>'+labelStatus(c.pass?'success':'failed')+'</td><td>'+e(c.detail)+'</td></tr>').join('');
+ const vms=result.protected_vms||[];
+ const rows=vms.map(vm=>'<tr><td>'+e(vm.source_vmid)+' · '+e(vm.source_name)+'</td>'
+  +'<td>'+e(vm.replica_name)+' (#'+e(vm.target_vmid)+')</td>'
+  +'<td>'+e(vm.target_node)+' · '+e(vm.target_storage)+'</td>'
+  +'<td>'+labelStatus('BLOCKED')+'</td></tr>').join('');
  modal('Simulation #'+e(result.simulation_id)+' · '+e(result.decision),
   '<div class="notice error"><b>Aucune bascule effectuée.</b> '+e(result.conclusion)+'</div>'
   +'<p>'+e(result.source.name)+' → '+e(result.target.name)+'</p>'
-  +'<table><thead><tr><th>Contrôle</th><th>Résultat</th><th>Explication</th></tr></thead><tbody>'+lines+'</tbody></table>'
+  +'<div class="table-wrap"><table><thead><tr><th>Contrôle</th><th>Résultat</th><th>Explication</th></tr></thead><tbody>'+lines+'</tbody></table></div>'
+  +'<h3>VM déclarées dans ce parcours PRA ('+vms.length+')</h3>'
+  +'<div class="table-wrap"><table><thead><tr><th>VM source</th><th>Réplique prévue</th><th>Nœud / stockage</th><th>Reprise</th></tr></thead>'
+  +'<tbody>'+(rows||'<tr><td colspan="4">Aucune VM sélectionnée : créer une fiche dans VM protégées PRA.</td></tr>')+'</tbody></table></div>'
   +'<p class="hint">'+e(result.next_step)+'</p>',
   '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
 }
@@ -1670,6 +1831,53 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='fleet-ssh-key'){await inspectClusterSSHKey(b);return}
  if(a==='dr-site-fleet'){await openPRAClusterSelector(id);return}
+ if(a==='agents-status-refresh'||a==='agent-status-refresh'){
+  state.agents=(await api('/agents')).items;
+  state.drSites=(await api('/dr/sites')).items;
+  render();
+  toast('Derniers états enregistrés rechargés ; le prochain heartbeat de chaque agent arrivera automatiquement.');
+  return;
+ }
+ if(a==='dr-plans-refresh'){
+  state.drPlans=(await api('/dr/plans')).items;
+  state.drSites=(await api('/dr/sites')).items;
+  render();toast('Groupes et sites PRA actualisés depuis la base');return;
+ }
+ if(a==='dr-plan-protected'){
+  state.drVMPlanFilter=String(id);
+  showPage('protected-vms');return;
+ }
+ if(a==='dr-vm-new'){openProtectedVMWizard();return}
+ if(a==='protect-vm-resource'){
+  closeModal();openProtectedVMWizard(null,id,Number(b.dataset.vmid));return
+ }
+ if(a==='dr-vm-edit'){openProtectedVMWizard(id);return}
+ if(a==='dr-vm-preflight'||a==='dr-vm-failover'||a==='dr-vm-failback'){
+  const scenario=a==='dr-vm-preflight'?'replication_preflight':
+                 a==='dr-vm-failback'?'failback_simulation':'failover_simulation';
+  toast('Tests Proxmox en lecture seule en cours…');
+  const result=await api('/dr/vms/'+id+'/simulate','POST',{scenario});
+  state.drProtectedVMs=(await api('/dr/vms')).items;
+  showProtectedVMTest(result);return;
+ }
+ if(a==='dr-vm-history'){await openProtectedVMHistory(id);return}
+ if(a==='dr-vm-refresh'){
+  state.drProtectedVMs=(await api('/dr/vms')).items;
+  render();toast('États et derniers tests rechargés depuis la base');return;
+ }
+ if(a==='dr-vm-pause'){
+  const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
+  if(!vm)return;
+  const action=vm.state==='paused'?'planned':'paused';
+  await api('/dr/vms/'+id+'/state','POST',{state:action});
+  state.drProtectedVMs=(await api('/dr/vms')).items;
+  render();toast('Préparation VM '+(action==='paused'?'en pause':'reprise')+' ; aucune réplication réelle déclenchée');return;
+ }
+ if(a==='dr-vm-delete'){
+  if(!confirm('Retirer ce plan de protection VM ? Aucune VM ou disque Proxmox ne sera supprimé.'))return;
+  await api('/dr/vms/'+id,'DELETE');state.drProtectedVMs=(await api('/dr/vms')).items;
+  render();toast('Plan VM retiré ; aucune action Proxmox');return;
+ }
  if(a==='dr-plan-new'){openDRPlanForm();return}
  if(a==='dr-plan-edit'){openDRPlanForm(id);return}
  if(a==='dr-plan-delete'){
@@ -1728,15 +1936,56 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   hydrateAdmins();return
  }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='drVMSourceForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target);
+  const button=ev.target.querySelector('[type=submit]');
+  if(button)button.disabled=true;
+  try{
+   await openProtectedVMConfig(Number(f.get('dr_vm_plan')),
+    Number(f.get('dr_vm_source_dc')),Number(f.get('dr_vm_target_dc')));
+  }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
+  return;
+ }
+ if(ev.target.id==='drVMConfigForm'){
+  ev.preventDefault();
+  const r=state.drVMOptions,f=new FormData(ev.target);
+  if(!r)return toast('Découverte de VM expirée, recommencer.',false);
+  const currentId=Number(ev.target.dataset.id)||0;
+  const body={
+   plan_id:r.plan_id,source_dc_id:r.source_dc_id,target_dc_id:r.target_dc_id,
+   source_vmid:Number(f.get('source_vmid')),target_vmid:Number(f.get('target_vmid')),
+   target_node:String(f.get('target_node')||''),target_storage:String(f.get('target_storage')||''),
+   interval_minutes:Number(f.get('interval_minutes')),engine:String(f.get('engine'))
+  };
+  const button=ev.target.querySelector('[type=submit]');
+  if(button)button.disabled=true;
+  try{
+   const result=await api(currentId?'/dr/vms/'+currentId:'/dr/vms',
+     currentId?'PUT':'POST',body);
+   closeModal();state.drProtectedVMs=(await api('/dr/vms')).items;
+   state.drVMPlanFilter=String(body.plan_id);
+   showPage('protected-vms');
+   toast('VM #'+body.source_vmid+' enregistrée : cible '+result.replica_name+
+         ' (plan seulement, aucun disque copié)');
+  }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
+  return;
+ }
+
  if(ev.target.id==='drPlanForm'){
   ev.preventDefault();
   const f=new FormData(ev.target),id=Number(ev.target.dataset.id)||0;
   try{
-   await api(id?'/dr/plans/'+id:'/dr/plans',id?'PUT':'POST',{
+   const result=await api(id?'/dr/plans/'+id:'/dr/plans',id?'PUT':'POST',{
     name:String(f.get('dr_plan_name')||'').trim(),
     description:String(f.get('dr_plan_description')||'').trim()
    });
-   closeModal();toast('Groupe PRA enregistré');await refresh();showPage('datacenters');
+   // Fetch these two resources independently of all other admin APIs;
+   // one unrelated vault/API error must not leave a stale group title.
+   state.drPlans=(await api('/dr/plans')).items;
+   state.drSites=(await api('/dr/sites')).items;
+   closeModal();showPage('datacenters');
+   toast('Groupe PRA '+(result.plan?.name||String(f.get('dr_plan_name')||''))+' enregistré et actualisé');
   }catch(ex){toast(ex.message,false)}
   return
  }
@@ -2012,6 +2261,17 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  if(ev.target.id==='proxmoxResourceSearch'&&state.proxmoxDiscovery){state.proxmoxDiscovery.query=ev.target.value;state.proxmoxDiscovery.page=0;renderProxmoxDiscoveryResults();}
  if(ev.target.id==='proxmoxDcSearch'){const q=ev.target.value.toLowerCase().trim();$$('[data-dc-search]').forEach(card=>card.hidden=!card.dataset.dcSearch.includes(q));}
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',async ev=>{
+ if(ev.target.id==='drVMPlanFilter'){
+  state.drVMPlanFilter=String(ev.target.value||'all');render();return;
+ }
+ if(ev.target.name==='dr_vm_plan'&&ev.target.closest('#drVMSourceForm')){
+  const form=ev.target.closest('form'),planId=Number(ev.target.value);
+  const src=drVMClusters(planId,'primary'),dst=drVMClusters(planId,'standby');
+  form.elements.namedItem('dr_vm_source_dc').innerHTML=option(src.map(x=>[x.id,x.name]),src[0]?.id);
+  form.elements.namedItem('dr_vm_target_dc').innerHTML=option(dst.map(x=>[x.id,x.name]),dst[0]?.id);
+  return;
+ }
+
  if(ev.target.name==='dr_sim_plan'&&ev.target.closest('#drSimulationForm')){
   const planId=Number(ev.target.value);
   const sites=(state.drSites||[]).filter(site=>site.plan_id===planId);

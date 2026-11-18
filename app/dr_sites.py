@@ -78,9 +78,22 @@ def save_site(payload, existing_id=None):
         if plan_id is not None and not con.execute("SELECT 1 FROM dr_plans WHERE id=?",(plan_id,)).fetchone():
             raise DRSiteError("Groupe PRA sélectionné introuvable")
         if existing_id is not None:
-            old=con.execute("SELECT id FROM dr_sites WHERE id=?",(existing_id,)).fetchone()
+            old=con.execute("SELECT id,plan_id,role FROM dr_sites WHERE id=?",(existing_id,)).fetchone()
             if not old:
                 raise DRSiteError("Site PRA introuvable")
+            active=con.execute(
+                "SELECT source_dc_id,target_dc_id FROM dr_protected_vms "
+                "WHERE source_site_id=? OR target_site_id=?",
+                (existing_id,existing_id)
+            ).fetchall()
+            if active:
+                needed={r["source_dc_id"] if old["role"]=="primary" else
+                        r["target_dc_id"] for r in active}
+                if old["plan_id"]!=plan_id or old["role"]!=role or not needed.issubset(set(dcids)):
+                    raise DRSiteError(
+                        "Site utilisé par des VM protégées : conserver le groupe, "
+                        "le rôle et les clusters concernés, ou retirer d'abord les protections."
+                    )
         marks=",".join("?" for _ in dcids)
         existing_dc=con.execute(
             "SELECT id FROM datacenters WHERE id IN ("+marks+")",dcids
@@ -134,6 +147,12 @@ def delete_site(site_id):
         row=con.execute("SELECT name FROM dr_sites WHERE id=?",(site_id,)).fetchone()
         if not row:
             raise DRSiteError("Site PRA introuvable")
+        if con.execute(
+            "SELECT 1 FROM dr_protected_vms "
+            "WHERE source_site_id=? OR target_site_id=? LIMIT 1",
+            (site_id,site_id)
+        ).fetchone():
+            raise DRSiteError("Site utilisé par des VM protégées : retirer les protections avant la suppression")
         con.execute("DELETE FROM dr_sites WHERE id=?",(site_id,))
     return row["name"]
 
@@ -160,10 +179,25 @@ def simulate(payload, actor):
     if source_id not in site_map or target_id not in site_map:
         raise DRSiteError("Site source ou destination inconnu")
     source,target=site_map[source_id],site_map[target_id]
+    if source["plan_id"] is None or target["plan_id"] is None:
+        raise DRSiteError(
+            "Simulation refusée : classer les deux sites dans un groupe PRA "
+            "explicite avant tout test, pour éviter le mélange PP / PROD."
+        )
     if source["plan_id"]!=target["plan_id"]:
         raise DRSiteError(
             "Simulation refusée : sites appartenant à deux groupes PRA différents (PP / PROD)."
         )
+    with db.session() as con:
+        selected_vms=[
+            dict(r) for r in con.execute(
+                "SELECT id,source_vmid,source_name,source_node,target_vmid,"
+                "replica_name,target_node,target_storage,state,last_check_at "
+                "FROM dr_protected_vms "
+                "WHERE source_site_id=? AND target_site_id=? ORDER BY source_vmid",
+                (source_id,target_id)
+            )
+        ]
     checks=[
         {"name":"Sites", "pass":source["role"]=="primary" and target["role"]=="standby",
          "detail":"Source principale et cible secours associées" if source["role"]=="primary" and target["role"]=="standby" else "Rôles primary/standby à corriger"},
@@ -176,7 +210,8 @@ def simulate(payload, actor):
         {"name":"Fencing source", "pass":False,
          "detail":"Aucune preuve de neutralisation de la VM source ; injoignable ne veut pas dire arrêtée"},
         {"name":"Réplication consistante", "pass":False,
-         "detail":"Aucun snapshot validé ou copie REP_ liée à une VM source"},
+         "detail":str(len(selected_vms))+" VM(s) sélectionnées ; aucune copie REP_ "
+                  "cohérente ou point de restauration validé"},
         {"name":"Interdiction de redémarrage SD", "pass":False,
          "detail":"Aucun verrou HA/onboot et stockage opposable au site SD"},
     ]
@@ -195,6 +230,9 @@ def simulate(payload, actor):
         "would_start_replica":False,
         "would_stop_source":False,
         "would_modify_infrastructure":False,
+        "protected_vms":[dict(vm,replica_verified=False,
+                              last_successful_sync=None,
+                              failover_ready=False) for vm in selected_vms],
         "checks":checks,
         "next_step":"Installer et vérifier des agents PRA autonomes, témoin, fencing et copie consistante avant une bascule réelle.",
     }

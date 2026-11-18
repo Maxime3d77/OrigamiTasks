@@ -1,5 +1,17 @@
 # Proxmox VE: discovery and disaster recovery
 
+### Manually protected VMs and safe DR rehearsals (0.3.21)
+
+Under **Administration → Protected DR VMs**, choose **Add VM**, select a DR group (e.g., Staging or Production) and a primary and standby cluster belonging to that **same** group. Select **Discover VMs and storage** to retrieve actual QEMU guests, candidate destination nodes and VM-image storages over the Proxmox API.
+
+Explicitly choose the source VM, unused target VMID, destination node/storage, desired repetition interval, and **proposed** transport. OrigamiTasks records a proposed `REP_<vm-name>` identifier; **it does NOT create a target guest or copy disk blocks**. Shared iSCSI/LVM volume groups may contain multiple guests on one LUN: no per-VM LUN isolation or consistency is inferred. The interval is a planning preference, **not** an active job schedule.
+
+**Test replication** performs read-only Proxmox preflight checks on both clusters; **Simulate failover** generates an audited, always-blocked decision until a verified consistent recovery point, external witness, effective source fencing and enforceable source restart suppression exist. Failback, network-partition and controller-offline simulations are available too. Legacy sites that have not been assigned to an explicit DR group cannot be used in outage simulations. None of these invokes a write, snapshot, remote migration, backup, restore, source shutdown or target boot. No fake replication lag or last-successful-sync timestamp is presented.
+
+A future real copy engine for PBS backup/sync/restore or validated storage-array replication will require site-specific storage mapping, free-capacity validation, backup/consistency group verification, real RPO/RTO evidence, target isolation, independent witness and effective fencing. Proxmox remote migration **moves** VMs rather than maintaining standbys. `pvesr` does not solve arbitrary independent-cluster iSCSI+LVM replication. Never copy a live shared LVM disk using raw rsync/dd as a general DR mechanism.
+
+PP and Production group boundaries are enforced. Protected sites cannot be silently deleted or moved across groups. Pausing or deleting a plan record changes only OrigamiTasks metadata. Agent refresh retrieves the most recently received heartbeat—it does not send an unsolicited remote command.
+
 ### Automatic SSH first-contact pinning on Proxmox nodes (0.3.20)
 
 The SSH **vault identity** is the user account and its **private login key**, which can be reused from existing deployment workflows. The SSH **server host key** is a separate public key identifying each Proxmox node. Previously, deployment stopped until every node had been manually approved.

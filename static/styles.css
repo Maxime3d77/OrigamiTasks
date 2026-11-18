@@ -310,3 +310,27 @@
 .fleet-site-pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:10px;margin:18px 0}
 .fleet-site-pick .btn{min-height:48px;white-space:normal}
 @media(max-width:670px){.fleet-node-row{flex-wrap:wrap}.fleet-node-row .btn{flex:1 1 100%;max-width:100%}.fleet-node-list{max-height:420px}}
+
+
+/* v0.3.21: consistent success / in-progress / failure signals */
+.status.success,.status.online{color:var(--success);background:color-mix(in srgb,var(--success) 13%,transparent);border:1px solid color-mix(in srgb,var(--success) 25%,transparent)}
+.status.running,.status.queued,.status.pending,.status.planned{color:var(--yellow);background:color-mix(in srgb,var(--yellow) 13%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 25%,transparent)}
+.status.failed,.status.offline,.status.interrupted,.status.revoked,.status.completed_with_errors,.status.BLOCKED{color:var(--danger);background:color-mix(in srgb,var(--danger) 13%,transparent);border:1px solid color-mix(in srgb,var(--danger) 25%,transparent)}
+.status.uninstalled,.status.paused,.status.not_configured,.status.unknown{color:var(--muted);background:var(--panel2);border:1px solid var(--stroke)}
+.agent-batch summary .dr-batch-summary{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end;font-size:12px}
+.agent-batch-host .status{min-width:75px;justify-content:center}
+.dr-site-card .status{font-size:10px;line-height:1.1}
+.dr-site-card .status:before{width:5px;height:5px}
+.dr-site-card .hint .status{margin:3px;vertical-align:middle}
+.dr-plan-section{border-top:1px solid var(--stroke);padding:22px 0 10px;margin-top:18px}
+.dr-plan-section .panel-title{align-items:flex-start;flex-wrap:wrap}
+.dr-vm-actions{min-width:260px}
+.dr-vm-actions .btn{margin:2px 3px 2px 0;white-space:normal}
+.dr-vm-stat-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.dr-safety-notice{margin-bottom:22px;line-height:1.6}
+.dr-vm-test-history{padding:13px;border-bottom:1px solid var(--stroke)}
+.dr-vm-test-history p{font-size:12px;line-height:1.5;color:var(--muted)}
+.dr-vm-test-history:last-child{border:0}
+#drVMPlanFilter{max-width:270px}
+@media(max-width:950px){.dr-vm-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dr-vm-actions{min-width:185px}}
+@media(max-width:540px){.dr-vm-stat-grid{grid-template-columns:1fr}.agent-batch summary .dr-batch-summary{justify-content:flex-start}}

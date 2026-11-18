@@ -148,6 +148,43 @@ CREATE TABLE IF NOT EXISTS dr_simulations (
  scenario TEXT NOT NULL, outcome TEXT NOT NULL,
  result_json TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS dr_protected_vms (
+ id INTEGER PRIMARY KEY,
+ plan_id INTEGER NOT NULL REFERENCES dr_plans(id) ON DELETE RESTRICT,
+ source_site_id INTEGER NOT NULL REFERENCES dr_sites(id) ON DELETE RESTRICT,
+ target_site_id INTEGER NOT NULL REFERENCES dr_sites(id) ON DELETE RESTRICT,
+ source_dc_id INTEGER NOT NULL REFERENCES datacenters(id) ON DELETE RESTRICT,
+ target_dc_id INTEGER NOT NULL REFERENCES datacenters(id) ON DELETE RESTRICT,
+ source_vmid INTEGER NOT NULL,
+ source_name TEXT NOT NULL,
+ source_node TEXT NOT NULL,
+ target_vmid INTEGER NOT NULL,
+ target_node TEXT NOT NULL,
+ target_storage TEXT NOT NULL,
+ replica_name TEXT NOT NULL,
+ source_storage TEXT NOT NULL DEFAULT '',
+ engine TEXT NOT NULL DEFAULT 'planning_only',
+ interval_minutes INTEGER NOT NULL DEFAULT 60,
+ state TEXT NOT NULL DEFAULT 'planned' CHECK(state IN ('planned','paused')),
+ last_check_at TEXT,
+ last_check_json TEXT NOT NULL DEFAULT '{}',
+ created_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+ UNIQUE(source_dc_id,source_vmid),
+ UNIQUE(target_dc_id,target_vmid),
+ CHECK(source_site_id<>target_site_id),
+ CHECK(source_dc_id<>target_dc_id)
+);
+CREATE INDEX IF NOT EXISTS idx_dr_protected_vms_plan ON dr_protected_vms(plan_id);
+CREATE TABLE IF NOT EXISTS dr_vm_tests (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
+ scenario TEXT NOT NULL,
+ outcome TEXT NOT NULL,
+ report_json TEXT NOT NULL,
+ actor TEXT NOT NULL,
+ created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dr_vm_tests_vm ON dr_vm_tests(protected_vm_id,id);
 CREATE TABLE IF NOT EXISTS runs (
  id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
  job_name TEXT NOT NULL, steps_snapshot TEXT NOT NULL, variables_json TEXT NOT NULL DEFAULT '{}',
