@@ -20,8 +20,16 @@ user=${6:-root}; key=${7:-}
 qm config "$vmid" >/dev/null || { echo 'Source VM cannot be read' >&2; exit 3; }
 sshargs=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 -o ForwardAgent=no)
 if [[ -n $key ]]; then
-  [[ $key == /* && -f $key && ! -L $key ]] || exit 3
+  if [[ "$key" == /proc/self/fd/* ]]; then
+    [[ "$key" =~ ^/proc/self/fd/[0-9]+$ && -r "$key" ]] || exit 3
+  else
+    [[ $key == /* && -f $key && ! -L $key ]] || exit 3
+  fi
   sshargs+=(-o IdentitiesOnly=yes -i "$key")
+fi
+if [[ -n "${PRA_PINNED_KNOWN_HOSTS:-}" ]]; then
+  [[ "$PRA_PINNED_KNOWN_HOSTS" =~ ^/proc/self/fd/[0-9]+$ ]] || exit 3
+  sshargs+=(-o "UserKnownHostsFile=$PRA_PINNED_KNOWN_HOSTS" -o GlobalKnownHostsFile=/dev/null)
 fi
 dest="$user@$targethost"
 preflight="set -eu; command -v qmrestore; pvesm status | awk '\$1 == \"$storage\" {found=1} END {exit !found}'; if qm config '$targetvmid' >/dev/null 2>&1; then echo 'TARGET VMID EXISTS' >&2; exit 40; fi"
