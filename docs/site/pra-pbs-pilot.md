@@ -32,3 +32,18 @@ OrigamiTasks' own workflow PVE `start/reboot` operation now blocks protected sta
 - Staging acceptance exercises (node migration mid-job, partition, failed backup, stale epoch, double start)
 
 See [PRA architecture](https://github.com/Maxime3d77/OrigamiTasks/blob/feat/dr-protected-vms-simulations-0.3.21/docs/ARCHITECTURE-PRA-INTERSITES.md).
+
+## Real stopped-standby restoration on a second cluster (0.3.27)
+
+**Restore on standby site** issues actual Proxmox `POST /nodes/{node}/qemu` with a validated PBS `archive`, target `vmid`, destination image `storage`, and explicit `start=0`, `onboot=0`, `ha-managed=0`, `unique=1`. The controller tracks task UPID and confirms a stopped QEMU guest with autostart disabled. Existing destination VMIDs are never overwritten.
+
+**Prerequisite:** both PVE clusters must see the **same PBS backup snapshot**, either a shared PBS datastore configured as storage on both or a separately synchronized PBS remote exposing an identical snapshot. SAN iSCSI remains unrouted; actual guest disk data is read from PBS over the configured storage network.
+
+For a disposable VM:
+1. Configure PBS for both clusters and review datastore and PVE restore permissions.
+2. Select the PBS strategy, a free target VMID, destination node and target image storage.
+3. Run **Save to PBS** and poll its UPID until completed; note the numerical backup job ID.
+4. Open **Restore on standby site**, supply the completed backup job ID and target PBS storage ID, select a matching source VM backup snapshot and explicitly confirm.
+5. Poll restore UPID until completion and verify the guest remains stopped with autostart disabled in target PVE.
+
+**Not provided:** repeated changed-block application to a preexisting standby, near-real-time streaming, independent witness, host-wide PVE fencing, safe automated failover or failback. Never boot both copies together on connected networks. This is a manual backup/restore proof-of-concept, not a production-ready high-availability solution.
