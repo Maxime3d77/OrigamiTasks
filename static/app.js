@@ -1877,7 +1877,7 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    try{
      const x=await api('/dr/vms/'+id+'/direct-sync');
      const rows=(x.items||[]).map(r=>'<tr><td>'+dt(r.started_at)+'</td><td>'
-      +labelStatus(r.status)+'</td><td>'+e(r.disks_done)+' / '+e(r.disks_total)+'</td><td>'
+      +labelStatus(r.status)+(r.stale?'<div class="hint">Aucune remontée depuis plus de 20 min</div>':'')+'</td><td>'+e(r.disks_done)+' / '+e(r.disks_total)+'</td><td>'
       +e(r.scanned_bytes)+' octets parcourus</td><td>'+e(r.elapsed_seconds||'—')
       +' s · '+e(r.transferred_bytes)+' octets envoyés</td><td>'+e(r.error||'—')+'</td></tr>').join('');
      modal('Historique des deltas · VM protégée #'+id,
