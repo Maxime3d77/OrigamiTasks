@@ -642,7 +642,9 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
   +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Aucune copie ni VM REP_ ne sera créée lors de l’enregistrement. '
   +'Le stockage cible doit accepter des images VM ; un VG iSCSI/LVM peut contenir plusieurs disques sur une même LUN.</div>'
-  +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)+'</p>'
+  +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)
+  +' · '+e(r.source_vm_total??r.vms.length)+' VM QEMU visibles'
+  +' · '+e(r.source_lxc_excluded??0)+' conteneur(s) LXC exclus. Si des VM manquent, contrôler les ACL du token Proxmox sur le cluster.</p>'
   +'<div class="form-grid">'
   +selectField('VM source (choix manuel)','source_vmid',
     r.vms.map(v=>[v.vmid,v.vmid+' — '+v.name+' · '+v.node+' ['+v.status+']']),src.vmid)
