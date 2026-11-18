@@ -172,6 +172,19 @@ def proxmox_task(opts, load_credential, timeout):
     except (TypeError,ValueError):raise IntegrationError('VMID invalide')
     if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,100}',node) or not 100 <= vmid <= 999999999:
         raise IntegrationError('Nœud ou VMID invalide')
+    # OrigamiTasks must not start/reboot a designated standby via its own
+    # workflow API. This is only an application-side guard: direct PVE CLI,
+    # GUI, HA or other API tokens are NOT covered, hence no true fencing.
+    if action in ('start','reboot'):
+        with db.session() as con:
+            standby=con.execute(
+                "SELECT id FROM dr_protected_vms WHERE target_dc_id=? AND target_vmid=?",
+                (dc["id"],vmid)
+            ).fetchone()
+        if standby:
+            raise IntegrationError(
+                "Démarrage interdit : VM de secours PRA. "
+                "Bascule contrôlée et fencing non encore opérationnels.")
     # Fail closed: confirm target is the expected QEMU VM before a power action.
     resources=discover_datacenter(dc,cred,timeout)
     if not any(r.get('type')=='qemu' and r.get('vmid')==vmid and r.get('node')==node for r in resources):
