@@ -1974,6 +1974,17 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='dr-vm-direct-seed'){openDirectPRAJobForm(id,'seed');return}
  if(a==='dr-vm-hot-generation'){openPRAHotGenerationForm(id);return}
+ if(a==='dr-vm-hot-resolve'){
+   if(!confirm('Avez-vous vérifié AU et supprimé manuellement tout clone incomplet ? '
+      +'OrigamiTasks contrôlera son absence et libérera UNIQUEMENT le verrou de suivi.'))return;
+   try{
+     await api('/dr/vms/'+id+'/hot-generations/'+Number(b.dataset.job)+'/resolve',
+       'POST',{approved:true});
+     toast('Verrou libéré après contrôle AU ; aucune VM supprimée');
+     state.drProtectedVMs=(await api('/dr/vms')).items;render();
+   }catch(ex){toast(ex.message,false)}
+   return;
+ }
  if(a==='dr-vm-hot-history'){
   try{
    const x=await api('/dr/vms/'+id+'/hot-generations');
@@ -1981,14 +1992,18 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
      +labelStatus(r.status)+'</td><td>'+e(r.base_vmid)+'</td><td>'
      +e(r.candidate_vmid||'—')+'</td><td>'+e(r.disk_count||0)
      +'</td><td>'+e(r.scanned_bytes||0)+'</td><td>'
-     +e(r.transferred_bytes||0)+'</td><td>'+e(r.error||'—')+'</td></tr>').join('');
+     +e(r.transferred_bytes||0)+'</td><td>'+e(r.error||'—')+'</td>'
+     +'<td>'+(r.status==='uncertain'&&!r.resolved_at
+         ?'<button class="btn tiny" data-action="dr-vm-hot-resolve" data-id="'+id
+           +'" data-job="'+r.id+'">Libérer après retrait manuel</button>'
+         :r.resolved_at?'Libéré après contrôle':'—')+'</td></tr>').join('');
    modal('Générations PRA à chaud · VM #'+id,
      '<div class="notice">Chaque génération est une VM AU DISTINCTE, éteinte. '
      +'Une génération incertaine reste inutilisable. La bascule reste interdite tant que le fencing '
      +'et la configuration de reprise ne sont pas validés.</div>'
      +'<div class="table-wrap"><table><thead><tr><th>Début</th><th>État</th><th>Base</th>'
-     +'<th>Nouvelle AU</th><th>Disques</th><th>Octets lus</th><th>Octets transférés</th><th>Erreur</th>'
-     +'</tr></thead><tbody>'+(rows||'<tr><td colspan="8">Aucune génération</td></tr>')
+     +'<th>Nouvelle AU</th><th>Disques</th><th>Octets lus</th><th>Octets transférés</th><th>Erreur</th><th>Résolution</th>'
+     +'</tr></thead><tbody>'+(rows||'<tr><td colspan="9">Aucune génération</td></tr>')
      +'</tbody></table></div>',
      '<button class="btn" data-action="dr-vm-hot-history" data-id="'+id+'">Actualiser</button>',true);
   }catch(ex){toast(ex.message,false)}
