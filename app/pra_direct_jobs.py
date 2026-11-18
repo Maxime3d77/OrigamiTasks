@@ -63,7 +63,7 @@ def _agent(con,vm,node):
     if not agent["enrolled"] or agent["revoked"] or not agent["last_seen"] or agent["last_seen"]<utc_plus(-90):
         raise PRAJobError("Agent source hors ligne")
     if outdated(agent["version"],"0.3.31") or not re.fullmatch(r"\d+\.\d+\.\d+",str(agent["version"] or "")):
-        raise PRAJobError("Mettre à jour l'agent source en v0.3.30 avant le transfert")
+        raise PRAJobError("Mettre à jour l'agent source en v0.3.31 avant le transfert")
     return dict(agent)
 
 
