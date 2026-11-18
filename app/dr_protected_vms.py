@@ -98,16 +98,10 @@ def options(plan_id, source_dc_id, target_dc_id):
     if source_dc_id==target_dc_id:
         raise ProtectedVMError("La source et la destination doivent être distinctes")
     source_site_id,target_site_id=_sites(plan_id,source_dc_id,target_dc_id)
-    source_dc,source_cred,source_resources=_inventory(source_dc_id)
+    # discover_datacenter uses the cluster-wide /cluster/resources endpoint,
+    # not /nodes/{node}; count excluded containers for troubleshooting.
+    source_dc,_,source_resources=_inventory(source_dc_id)
     target_dc,target_cred,target_resources=_inventory(target_dc_id)
-    # Explicit VM view prevents accidentally relying on a node-local inventory.
-    # This is read-only and does not guarantee visibility outside the API
-    # identity's ACL; provide counts so operators can compare with PVE.
-    cluster_vms=integrations.proxmox_request(
-        source_dc["url"],source_cred,"/api2/json/cluster/resources?type=vm",18)
-    if not isinstance(cluster_vms,list):
-        raise ProtectedVMError("Inventaire VM global Proxmox indisponible")
-    source_resources=[r for r in cluster_vms if isinstance(r,dict)]
     vms=[{"vmid":r["vmid"],"name":r.get("name") or ("VM "+str(r["vmid"])),
           "node":r.get("node") or "","status":r.get("status") or "unknown"}
          for r in source_resources if r.get("type")=="qemu" and
