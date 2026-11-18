@@ -1,5 +1,12 @@
 # Historique des modifications
 
+## 0.3.27-rc1 — 18 novembre 2026
+
+- **Première copie réelle de VM entre clusters Proxmox** : restauration depuis un snapshot PBS visible sur le cluster cible avec copie des disques vers le stockage de destination. Création du VMID cible éteint, sans remplacement et sans bascule.
+- Historique des tâches de restauration PVE avec UPID, validation de l'état arrêté et refus de suppression du plan de protection si une restauration y est associée.
+- **Limites** : nécessite un PBS partagé ou synchronisé. Pas de transfert direct hôte-à-hôte, de réplication delta continue, de bascule/failback ou de fencing hyperviseur.
+
+
 ## 0.3.23-rc1 — 18 novembre 2026
 
 - **Mise à jour d'agents à l'unité** : bouton « Mettre à jour » pour un agent dont la version connue est plus ancienne que celle intégrée à la console.

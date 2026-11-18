@@ -193,6 +193,18 @@ CREATE TABLE IF NOT EXISTS pra_pbs_backups (
  upid TEXT,actor TEXT NOT NULL,created_at TEXT NOT NULL,finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pra_pbs_backup_vm ON pra_pbs_backups(protected_vm_id,id);
+CREATE TABLE IF NOT EXISTS pra_pbs_restores (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
+ backup_job_id INTEGER NOT NULL REFERENCES pra_pbs_backups(id),
+ pbs_storage TEXT NOT NULL, archive TEXT NOT NULL,
+ node TEXT NOT NULL, target_vmid INTEGER NOT NULL, target_storage TEXT NOT NULL,
+ actor TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('starting','submitted','running','uncertain','completed','failed')),
+ upid TEXT, created_at TEXT NOT NULL, finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pra_pbs_restore_vm ON pra_pbs_restores(protected_vm_id,id);
+
 
 CREATE TABLE IF NOT EXISTS runs (
  id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
