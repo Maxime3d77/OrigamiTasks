@@ -19,7 +19,7 @@ class NoRedirect(HTTPRedirectHandler):
 def main():
     if len(sys.argv)!=12:
         raise ValueError("Usage: report.py PROTECTION SOURCE_VMID TARGET_VMID RUN_UUID STATUS TOTAL DONE SCANNED TRANSFERRED ELAPSED ERROR")
-    protection,job,status,total,done,scanned,transferred,elapsed,error=sys.argv[1:]
+    protection,sourcevmid,targetvmid,job,status,total,done,scanned,transferred,elapsed,error=sys.argv[1:]
     config=Path("/opt/origamitasks-agent/config.json")
     cfg=json.loads(config.read_text())
     server=cfg["server"].rstrip("/")
