@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.30-rc1 — Moteur PRA embarqué dans les agents
+
+- Les agents Linux déploient et mettent à jour automatiquement le moteur PRA (copie initiale, incrémental à froid, remontée de statistiques), sous une arborescence privilégiée appartenant à root.
+- Nouveaux boutons **Copie initiale directe** et **Synchronisation incrémentale à froid** par VM, depuis la console.
+- Deux identités SSH sélectionnées dans le coffre OrigamiTasks, source SD et destination AU. La clé destination est déchiffrée pour la durée de la tâche uniquement dans la mémoire du nœud source, via un canal SSH chiffré : pas de clé persistée sur l'hyperviseur. Prévoir des identités techniques dédiées ; root source peut lire la clé durant l'opération.
+- Transfert direct source→destination, sans PBS, ni routage iSCSI, ni nouvelle variable .env. Historique des jobs par VM, progression et vérification de la réplique éteinte.
+- Restrictions : synchronisation différentielle **à froid**, source et secours arrêtés et sans HA ; modes avancés de réplication à chaud et bascule/fencing non opérationnels. Recette non critique uniquement.
+
+
 ## 0.3.29-rc1 — Suivi par VM et incrémental à froid
 
 - Historique et dernière synchronisation par VM protégée : état, disques, durée, octets lus, octets envoyés et erreurs.

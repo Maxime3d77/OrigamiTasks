@@ -17,6 +17,7 @@ nav:
   - PBS backup pilot: pra-pbs-pilot.md
   - Direct SSH VM seed (no PBS): pra-direct-seed.md
   - Offline incremental and per-VM tracking: pra-incremental-cold.md
+  - Integrated Linux PRA agent: pra-agent-integrated.md
   - Agents: agents.md
   - Operations & Upgrades: operations.md
   - Security: security.md
@@ -70,6 +71,7 @@ plugins:
             PBS backup pilot: Pilote de sauvegarde PBS
             Direct SSH VM seed (no PBS): Copie directe SSH sans PBS
             Offline incremental and per-VM tracking: Incrémental à froid et suivi par VM
+            Integrated Linux PRA agent: Module PRA intégré à l'agent
             Agents: Agents
             Operations & Upgrades: Exploitation et mises à jour
             Security: Sécurité

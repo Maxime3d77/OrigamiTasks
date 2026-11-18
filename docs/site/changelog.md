@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.30-rc1 — PRA engine bundled with Linux agents
+
+- Linux agent install/update automatically ships root-owned PRA source-to-destination full-seed and offline differential executables, plus per-disk progress reporter.
+- Protected-VM UI now exposes **Direct initial seed** and **Offline incremental synchronization**, with admin confirmation and selected SD/AU SSH vault identities.
+- The destination SSH key travels only through the source's encrypted SSH stdin into anonymous in-memory descriptors for the job duration; never written permanently to Proxmox hosts. A source-root operator can access it during execution, so use restricted dedicated technical identities.
+- Actual data goes directly over source→target SSH; no PBS, routed SAN, manual scp or additional .env toggle. Per-VM persistent job audit, status, progress and stopped standby verification.
+- Only offline differential updates, not running-guest CBT, automatic scheduling, cross-cluster fencing or failover/failback. Test machines only.
+
+
 ## 0.3.29-rc1 — Per-VM status and offline incremental replication
 
 - Per protected VM: latest sync state, recent successful run, completed disks, scanned bytes, bytes sent, duration and error history.

@@ -296,6 +296,18 @@ def list_vms(plan_id=None):
             ).fetchone()
         item["incremental_sync"]=dict(latest) if latest else None
         item["last_incremental_success"]=last_ok["finished_at"] if last_ok else None
+        with db.session() as direct:
+            latest=direct.execute(
+                "SELECT id,kind,status,created_at,finished_at,error FROM pra_direct_jobs "
+                "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+            last_seed=direct.execute(
+                "SELECT finished_at FROM pra_direct_jobs WHERE protected_vm_id=? "
+                "AND kind='seed' AND status='success' ORDER BY id DESC LIMIT 1",
+                (item["id"],)
+            ).fetchone()
+        item["direct_job"]=dict(latest) if latest else None
+        item["last_direct_seed"]=last_seed["finished_at"] if last_seed else None
         result.append(item)
     return result
 
@@ -325,6 +337,13 @@ def delete(vm_id):
         ).fetchone()
         if pending:
             raise ProtectedVMError("Sauvegarde PBS active ou indéterminée : contrôler la tâche avant suppression")
+        if con.execute(
+            "SELECT 1 FROM pra_direct_jobs WHERE protected_vm_id=?",(vm_id,)
+        ).fetchone():
+            raise ProtectedVMError(
+                "Historique PRA réel associé à cette VM : suppression du plan bloquée "
+                "pour éviter de perdre la référence au clone secours"
+            )
         if con.execute(
             "SELECT 1 FROM pra_direct_sync_runs WHERE protected_vm_id=?",(vm_id,)
         ).fetchone():

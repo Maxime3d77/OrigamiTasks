@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates, pra_restore, pra_direct_sync
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates, pra_restore, pra_direct_sync, pra_direct_jobs
 
 
 @asynccontextmanager
@@ -26,11 +26,13 @@ async def lifespan(app):
     scheduler.start()
     agent_deployments.start()
     agent_updates.start()
+    pra_direct_jobs.start()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
     agent_deployments.STOP.set()
     agent_updates.STOP.set()
+    pra_direct_jobs.STOP.set()
 
 
 app = FastAPI(title='OrigamiTasks', version=config.APP_VERSION, docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -751,6 +753,43 @@ def direct_vm_sync_history(vm_id:int,request:Request):
         return pra_direct_sync.list_runs(vm_id)
     except dr_protected_vms.ProtectedVMError as exc:
         raise HTTPException(404,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/direct-jobs')
+def direct_vm_jobs(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_direct_jobs.list_jobs(vm_id)
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/direct-jobs')
+def start_direct_vm_job(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={
+            'kind','source_credential_id','target_credential_id','approved'}:
+        raise HTTPException(422,'Mode PRA, identités SSH et confirmation requis')
+    try:
+        return pra_direct_jobs.queue(
+            vm_id,payload['kind'],payload['source_credential_id'],
+            payload['target_credential_id'],payload['approved'],user['username']
+        )
+    except (pra_direct_jobs.PRAJobError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/direct-release')
+def release_direct_vm_tracking(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'}:
+        raise HTTPException(422,'Confirmation explicite requise')
+    try:
+        return pra_direct_jobs.release_after_manual_clone_removal(
+            vm_id,payload['approved'],user['username']
+        )
+    except (pra_direct_jobs.PRAJobError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
 
 
 @app.get('/api/dr/plans')
