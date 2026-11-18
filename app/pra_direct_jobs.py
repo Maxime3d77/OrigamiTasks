@@ -308,9 +308,11 @@ def _execute(job,vm,source,target):
             raise PRAJobError("Transfert terminé sans confirmation explicite")
         # Check once more that a target exists, is stopped and cannot
         # reboot automatically; do not allow failover on this evidence.
-        final_check="test \"$(qm status '"+str(vm["target_vmid"])+
-                      "')\" = 'status: stopped'; test \"$(qm config '"+str(vm["target_vmid"])+
-                      "' | sed -n 's/^onboot: //p')\" != 1"
+        final_check=(
+            "test \"$(qm status '"+str(vm["target_vmid"])+
+            "')\" = 'status: stopped'; test \"$(qm config '"+str(vm["target_vmid"])+
+            "' | sed -n 's/^onboot: //p')\" != 1"
+        )
         if target_user!="root":
             final_check="sudo -n sh -c "+shlex.quote(final_check)
         _check_remote(client_target,final_check)
