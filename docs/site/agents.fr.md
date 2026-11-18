@@ -138,3 +138,7 @@ python3 -c "import ast; p=ast.parse(open('/opt/origamitasks-agent/agent.py').rea
 ### Tester la clé SSH avant une mise à jour (v0.3.25)
 
 Sélectionner l'identité SSH **du coffre-fort** utilisée pour le déploiement initial puis cliquer « Tester la clé SSH sélectionnée ». Le prévol teste la clé publique du serveur (known_hosts), l'authentification par clé privée SSH enregistrée au coffre, SFTP et les droits sudo non interactifs sous Linux. Aucun fichier n'est remplacé. Ne pas confondre la clé privée de connexion et la clé publique d'identité du serveur. Une clé d'hôte modifiée continue de bloquer l'opération.
+
+### Prévol Linux corrigé (0.3.26)
+
+Le répertoire `/opt/origamitasks-agent` est privé (mode 0700) : le compte SSH peut ne pas lire `config.json` même lorsque sudo est autorisé. Le prévol passe désormais **d'abord** par root ou `sudo -n sh -c`, puis lit le fichier sous ces privilèges et vérifie l'ID de l'agent. Le compte SSH peut utiliser sa clé privée depuis le coffre, mais doit toujours disposer des droits système nécessaires à la mise à jour. Un test positif ne change aucun fichier distant.
