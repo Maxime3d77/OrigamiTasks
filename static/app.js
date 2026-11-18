@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drProtectedVMs:[],drVMOptions:null,drVMPlanFilter:'all',drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drProtectedVMs:[],drVMOptions:null,drVMPlanFilter:'all',drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],agentUpdates:{items:[],available_versions:{}},folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +10,7 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{},cache:'no-store'};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drProtectedVMs=(await api('/dr/vms')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drProtectedVMs=(await api('/dr/vms')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items;state.agentUpdates=await api('/agents/updates')}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
@@ -297,16 +297,44 @@ function agentConnectionSettingsPanel(){
   +'</form></section>';
 }
 
+function agentVersionOutdated(current,latest){
+ const parse=x=>{const m=/^(\d+)\.(\d+)\.(\d+)$/.exec(String(x||''));return m?m.slice(1).map(Number):null;};
+ const a=parse(current),b=parse(latest);
+ if(!a||!b)return false;
+ for(let i=0;i<3;i++){if(a[i]<b[i])return true;if(a[i]>b[i])return false;}
+ return false;
+}
+function openAgentUpdateForm(ids){
+ const targets=(state.agents||[]).filter(a=>ids.includes(a.id));
+ const options=state.credentials.filter(c=>c.kind==='ssh').map(c=>[c.id,c.name]);
+ if(!options.length)return toast('Créer une identité SSH dans le coffre-fort.',false);
+ if(!targets.length)return toast('Aucun agent éligible.',false);
+ const body='<form id="agentUpdateForm"><input type="hidden" name="agent_ids" value="'+e(targets.map(a=>a.id).join(','))+'">'
+ +'<div class="notice">Mise à jour sur place par SSH : identifiant, jeton, config.json et modules conservés. Les services seront redémarrés un par un. Les agents doivent être dans l’inventaire SSH et présenter une clé d’hôte approuvée.</div>'
+ +'<p>'+e(targets.length)+' agent(s) : '+e(targets.map(a=>a.name).join(', '))+'</p>'
+ +selectField('Identité SSH (coffre)','credential_id',[['','— Choisir une identité SSH —'],...options],'')
+ +'<label class="field checkbox"><input type="checkbox" name="approved" required><span>Je confirme la mise à jour et le redémarrage de ces agents.</span></label>'
+ +'<div class="tool-row"><button class="btn primary" type="submit">Lancer les mises à jour</button><button class="btn" data-action="modal-close" type="button">Annuler</button></div></form>';
+ modal('Mettre à jour les agents',body,'',true);
+}
 function agentsPage(){
  if(!roleAdmin())return title('Agents','Administration uniquement.');
+ const targetVersions=state.agentUpdates?.available_versions||{};
+ const oldAgents=(state.agents||[]).filter(a=>a.status==='online'&&agentVersionOutdated(a.version,targetVersions[a.platform]));
  const cards=(state.agents||[]).map(agent=>{
   const action=agent.uninstalled_at?''
    :'<button class="btn tiny primary" data-action="agent-modules" data-id="'+agent.id+'">Configurer modules</button>'
     +'<button class="btn tiny danger" data-action="agent-uninstall" data-id="'+agent.id+'">Désinstaller via SSH</button>'
      +(agent.revoked?'':'<button class="btn tiny" data-action="agent-revoke" data-id="'+agent.id+'">Révoquer le jeton</button>');
+  const currentVersion=targetVersions[agent.platform];
+  const isOld=agentVersionOutdated(agent.version,currentVersion);
+  const inProgress=(state.agentUpdates?.items||[]).some(j=>j.agent_id===agent.id&&['queued','running','awaiting_heartbeat'].includes(j.status));
+  const updateButton=isOld&&!agent.revoked&&!agent.uninstalled_at
+   ?'<button class="btn tiny primary" data-action="agent-update" data-id="'+agent.id+'" '+(inProgress?'disabled':'')+'>'+(inProgress?'Mise à jour en cours':'↑ Mettre à jour')+'</button>':'';
   const refreshButton='<button class="btn tiny" data-action="agent-status-refresh" data-id="'+agent.id+'">↻ État reçu</button>';
   return '<tr><td class="name-cell">'+e(agent.name)+'<div class="muted tinytext">'+e(agent.hostname||'Non enrôlé')+'</div></td>'
-    +'<td>'+e(agent.platform)+' · '+e(agent.version||'Version inconnue')+'</td>'
+    +'<td>'+e(agent.platform)+' · '+e(agent.version||'Version inconnue')
+    +(isOld?'<div class="muted tinytext">Dernière : '+e(currentVersion)+' · à mettre à jour</div>':'')+'</td>'
     +'<td>'+e(agent.group_name)+'</td><td>'+labelStatus(agent.status)+'</td>'
     +'<td><span class="hint">Base intégrée</span>'
     +(agent.platform==='linux'&&agent.modules?.proxmox?'<span class="chip tag">Proxmox</span>':'')
@@ -316,12 +344,13 @@ function agentsPage(){
     +'<td>'+(Number.isFinite(agent.cpu_percent)?e(agent.cpu_percent.toFixed(1))+' %':'—')+'</td>'
     +'<td>'+(Number.isFinite(agent.memory_mb)?e(agent.memory_mb.toFixed(1))+' Mio':'—')+'</td>'
     +'<td>'+dt(agent.last_seen)+'</td>'
-    +'<td class="agent-action-buttons">'+refreshButton+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
+    +'<td class="agent-action-buttons">'+refreshButton+updateButton+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
  }).join('');
  return title('Agents Linux et Windows','Agent Linux modulaire ; agent Windows dédié aux actions des workflows.',
   '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button>'
   +'<button class="btn primary" data-action="agent-deploy-form">⇣ Déployer sur un serveur</button>'
-  +'<button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')
+  +'<button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button>'
+  +'<button class="btn primary" data-action="agent-update-all" '+(!oldAgents.length?'disabled':'')+'>↑ Mettre à jour les '+oldAgents.length+' agent(s) obsolètes en ligne</button></div>')
   +agentConnectionSettingsPanel()
   +'<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2>'
   +'<button class="btn tiny" data-action="agents-status-refresh">↻ Actualiser les états reçus</button>'
@@ -329,6 +358,10 @@ function agentsPage(){
   +'<div class="table-wrap"><table><thead><tr><th>Nom / hôte</th><th>OS / version</th><th>Groupe</th>'
   +'<th>État</th><th>Modules & synchronisation</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
   +'<tbody>'+(cards||'<tr><td colspan="9">Aucun agent installé.</td></tr>')+'</tbody></table></div></div>'
+  +'<div class="panel"><div class="panel-title"><h2>Mises à jour des agents</h2><span class="hint">Versions fournies par la console : Linux '+e(targetVersions.linux||'—')+' / Windows '+e(targetVersions.windows||'—')+'</span></div>'
+  +'<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Version</th><th>État</th><th>Demande</th></tr></thead><tbody>'
+  +((state.agentUpdates?.items||[]).slice(0,15).map(j=>'<tr><td>'+e(j.host)+'</td><td>'+e(j.from_version)+' → '+e(j.target_version)+'</td><td>'+labelStatus(j.status)+'</td><td>'+dt(j.created_at)+(j.error?'<div class="hint">'+e(j.error)+'</div>':'')+'</td></tr>').join('')||'<tr><td colspan="4">Aucune mise à jour demandée.</td></tr>')
+  +'</tbody></table></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2>'
   +'<button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button><button class="btn tiny danger" data-action="agent-batch-clean">Nettoyer les lots terminés</button></div>'
   +'<div id="agentBatchList">'+agentBatchPanel()+'</div></div>'
@@ -1838,6 +1871,12 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   }catch(ex){toast(ex.message,false)}
   return;
  }
+ if(a==='agent-update'){openAgentUpdateForm([id]);return}
+ if(a==='agent-update-all'){
+   const versions=state.agentUpdates?.available_versions||{};
+   const ids=(state.agents||[]).filter(x=>x.status==='online'&&agentVersionOutdated(x.version,versions[x.platform])).map(x=>x.id);
+   openAgentUpdateForm(ids);return
+ }
  if(a==='agent-batch-refresh'){await refresh();return}
  if(a==='agent-batch-clean'){
   if(!confirm('Supprimer les anciens lots terminés ? Les lots actifs et le journal d’audit seront conservés.'))return;
@@ -2245,6 +2284,16 @@ async function handleSubmit(ev){
    await refresh();showPage('agents');
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return
+ }
+ if(ev.target.id==='agentUpdateForm'){
+  ev.preventDefault();const f=new FormData(ev.target);
+  const ids=String(f.get('agent_ids')||'').split(',').map(Number);
+  if(!f.has('approved'))return toast('Confirmation requise',false);
+  try{
+   const result=await api('/agents/updates','POST',{agent_ids:ids,credential_id:Number(f.get('credential_id')),approved:true});
+   closeModal();state.agentUpdates=await api('/agents/updates');render();
+   toast(result.queued+' mise(s) à jour en file');
+  }catch(ex){toast(ex.message,false)}return;
  }
  if(ev.target.id==='agentDeployForm'){ev.preventDefault();const f=new FormData(ev.target);if(!f.get('approved'))return toast('Confirmation requise',false);try{const r=await api('/agents/deploy','POST',{name:f.get('name')||f.get('host'),host:f.get('host'),port:Number(f.get('port')||22),platform:f.get('platform'),group:f.get('group'),credential_id:Number(f.get('credential_id')),approved:true});closeModal();toast('Agent #'+r.id+' : installation envoyée');await refresh()}catch(ex){toast(ex.message,false)}return}
  if(ev.target.id==='datacenterForm'){
