@@ -17,9 +17,9 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def main():
-    if len(sys.argv)!=9:
-        raise ValueError("Usage: report.py PROTECTION RUN_UUID STATUS TOTAL DONE SCANNED ELAPSED ERROR")
-    protection,job,status,total,done,scanned,elapsed,error=sys.argv[1:]
+    if len(sys.argv)!=10:
+        raise ValueError("Usage: report.py PROTECTION RUN_UUID STATUS TOTAL DONE SCANNED TRANSFERRED ELAPSED ERROR")
+    protection,job,status,total,done,scanned,transferred,elapsed,error=sys.argv[1:]
     config=Path("/opt/origamitasks-agent/config.json")
     cfg=json.loads(config.read_text())
     server=cfg["server"].rstrip("/")
@@ -28,7 +28,8 @@ def main():
     payload={
         "protected_vm_id":int(protection),"run_uuid":job,"status":status,
         "disks_total":int(total),"disks_done":int(done),
-        "scanned_bytes":int(scanned),"elapsed_seconds":int(elapsed),
+        "scanned_bytes":int(scanned),"transferred_bytes":int(transferred),
+        "elapsed_seconds":int(elapsed),
         "error":error[:200]
     }
     req=Request(server+"/api/agent/pra/sync/report",
