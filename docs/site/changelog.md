@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.32-rc1 — Live-source direct differential, offline AU generations
+
+- New manual staging mode: running SD guest is backed up via Proxmox snapshot VMA into a dedicated scratch filesystem; only changed blocks cross SSH to an offline full-cloned, fresh AU VMID, old generation preserved.
+- Every candidate disk is SHA-256 checked against the immutable extracted snapshot; per-VM run history tracks candidate VMID, scanned/transferred bytes and errors. Failed/uncertain candidates are never promoted or automatically deleted.
+- No PBS, iSCSI SAN routing, manual scp or new .env toggle. Source guest is never intentionally stopped.
+- Not QEMU CBT: every generation reads/extracts all disks and requires full scratch plus another full AU clone. No safe automatic scheduling, retention, fencing, failover or failback; staging tests only.
+
+
 ## v0.3.31-rc1 — Live-only PRA guardrails and QMP capability check
 
 - Source SD VM must stay running; direct full seed explicitly requires a running QEMU guest and AU standby remains stopped.
