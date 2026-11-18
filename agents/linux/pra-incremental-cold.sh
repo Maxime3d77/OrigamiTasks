@@ -4,11 +4,12 @@
 set -Eeuo pipefail
 umask 077
 die(){ echo "PRA REFUSED: $*" >&2; exit 2; }
-[[ $# == 7 ]] || die "Usage: $0 SOURCE_VMID TARGET_HOST TARGET_VMID --confirm-offline /absolute/key PORT PROTECTION_ID"
-sid=$1; host=$2; did=$3; approve=$4; key=$5; port=$6; protection=$7
+[[ $# == 8 ]] || die "Usage: $0 SOURCE_VMID TARGET_HOST TARGET_VMID --confirm-offline /absolute/key PORT PROTECTION_ID TARGET_USER"
+sid=$1; host=$2; did=$3; approve=$4; key=$5; port=$6; protection=$7; dstuser=$8
 [[ $EUID -eq 0 && $approve == '--confirm-offline' ]] || die 'Root and explicit approval required'
 [[ $sid =~ ^[1-9][0-9]{1,8}$ && $did =~ ^[1-9][0-9]{1,8}$ && $protection =~ ^[1-9][0-9]{0,8}$ ]] || die 'Invalid IDs'
 [[ $host =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]] || die 'Invalid target host'
+[[ $dstuser =~ ^[A-Za-z_][A-Za-z0-9_-]{0,63}$ ]] || die 'Invalid target SSH user'
 [[ $port =~ ^[0-9]{1,5}$ ]] && ((10#$port>=1 && 10#$port<=65535)) || die 'Invalid port'
 if [[ "$key" == /proc/self/fd/* ]]; then
   [[ "$key" =~ ^/proc/self/fd/[0-9]+$ && -r "$key" ]] || die 'Invalid ephemeral key'
@@ -20,8 +21,15 @@ if [[ -n "${PRA_PINNED_KNOWN_HOSTS:-}" ]]; then
   [[ "$PRA_PINNED_KNOWN_HOSTS" =~ ^/proc/self/fd/[0-9]+$ ]] || die 'Invalid pinned host file'
   ssh_pins=(-o "UserKnownHostsFile=$PRA_PINNED_KNOWN_HOSTS" -o GlobalKnownHostsFile=/dev/null)
 fi
-target="root@$host"
-remote(){ ssh -i "$key" -p "$port" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes "${ssh_pins[@]}" "$target" "$1"; }
+target="$dstuser@$host"
+remote(){
+  if [[ "$dstuser" == root ]]; then
+    cmd=$1
+  else
+    printf -v cmd 'sudo -n sh -c %q' "$1"
+  fi
+  ssh -i "$key" -p "$port" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes "${ssh_pins[@]}" "$target" "$cmd"
+}
 source_guard(){
   [[ -f "/etc/pve/nodes/$(hostname -s)/qemu-server/$sid.conf" ]] || die 'VM migrated: rerun on its current Proxmox node'
   [[ "$(qm status "$sid")" == 'status: stopped' ]] || die 'Source VM running'
@@ -79,6 +87,7 @@ while IFS= read -r slot; do
   echo "OFFLINE incremental synchronization: $slot ($size bytes)"
   disk_log=$(mktemp)
   rsync --checksum --no-whole-file --copy-devices --write-devices \
+    --rsync-path="$(if [[ "$dstuser" == root ]]; then echo rsync; else echo 'sudo -n rsync'; fi)" \
     --inplace --block-size=65536 --stats \
     -e "ssh -i $key -p $port -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes${PRA_PINNED_KNOWN_HOSTS:+ -o UserKnownHostsFile=$PRA_PINNED_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null}" \
     "$srcdev" "$target:$dstdev" | tee "$disk_log"
