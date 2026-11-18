@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.31-rc1 — Live-only PRA guardrails and QMP capability check
+
+- Source SD VM must stay running; direct full seed explicitly requires a running QEMU guest and AU standby remains stopped.
+- Disable old offline_incremental job across API, UI and bundled Linux agent executor.
+- Read-only QMP preflight using existing SSH vault identity checks live source block devices, dirty bitmaps and Proxmox external provider support without touching guest state or storage.
+- A coherent live delta provider and safe application chain are NOT yet implemented; successful diagnostics do not imply a recoverable standby.
+
+
 ## 0.3.30-rc1 — PRA engine bundled with Linux agents
 
 - Linux agent install/update automatically ships root-owned PRA source-to-destination full-seed and offline differential executables, plus per-disk progress reporter.
