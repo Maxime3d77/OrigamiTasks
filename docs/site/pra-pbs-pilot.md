@@ -31,4 +31,4 @@ OrigamiTasks' own workflow PVE `start/reboot` operation now blocks protected sta
 - Real coherent changed-block inter-DC engine, reverse resync, safe switchover and failback
 - Staging acceptance exercises (node migration mid-job, partition, failed backup, stale epoch, double start)
 
-See [PRA architecture](../PRA-CLUSTER-AUTHORITY.md).
+See [PRA architecture](../ARCHITECTURE-PRA-INTERSITES.md).
