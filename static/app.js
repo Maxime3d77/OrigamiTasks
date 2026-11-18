@@ -5,7 +5,7 @@ const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dt=v=>v?new Date(v).toLocaleString('fr-FR',{dateStyle:'short',timeStyle:'short'}):'—';
-const statusName={success:'Réussi',failed:'Échec',running:'En cours',queued:'En attente',interrupted:'Interrompu',skipped:'Ignoré',online:'En ligne',offline:'Hors ligne',pending:'En attente',revoked:'Révoqué',uninstalled:'Désinstallé',completed_with_errors:'Terminé avec erreurs',awaiting_heartbeat:'Vérification version',BLOCKED:'Bloqué',planned:'Préparation',paused:'En pause',not_configured:'Non configurée',unknown:'Inconnu'};
+const statusName={restored_offline:'Restaurée / éteinte (dernier contrôle)',success:'Réussi',failed:'Échec',running:'En cours',queued:'En attente',interrupted:'Interrompu',skipped:'Ignoré',online:'En ligne',offline:'Hors ligne',pending:'En attente',revoked:'Révoqué',uninstalled:'Désinstallé',completed_with_errors:'Terminé avec erreurs',awaiting_heartbeat:'Vérification version',BLOCKED:'Bloqué',planned:'Préparation',paused:'En pause',not_configured:'Non configurée',unknown:'Inconnu'};
 const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>`;
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
