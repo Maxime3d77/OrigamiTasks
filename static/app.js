@@ -2464,6 +2464,7 @@ async function handleSubmit(ev){
      modal('Compatibilité réplication à chaud','<div class="notice">'
        +'VM source allumée : '+(x.source_running?'oui':'non')+' · QMP disponible : '+(x.qmp_available?'oui':'non')
        +' · Périphériques détectés : '+e(x.disks?.length||0)
+       +' · Fournisseur externe Proxmox : '+(x.external_provider_api?'détecté':'non détecté')
        +' · Fonctions QEMU disponibles : '+e((x.qmp_commands||[]).join(', ')||'aucune')
        +'</div><p><b>État du moteur :</b> '+e(x.reason||'indéterminé')
        +'. La présence des primitives QMP ne garantit pas encore la création et l’application de deltas cohérents.</p>'
