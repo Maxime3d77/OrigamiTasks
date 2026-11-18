@@ -227,14 +227,14 @@ _REMOTE_PY=r'''import json,os,sys,subprocess
 data=json.loads(sys.stdin.read(65000))
 if sys.stdin.read(1): raise SystemExit(55)
 if os.geteuid()!=0: raise SystemExit(56)
-if data["kind"] not in ("seed","offline_incremental"): raise SystemExit(57)
+if data["kind"] not in ("seed","hot_differential"): raise SystemExit(57)
 k=os.memfd_create("origami-ephemeral-ssh-key",0)
 h=os.memfd_create("origami-pinned-ssh-host",0)
 try:
  for fd,blob in ((k,data["key"]),(h,data["known_hosts"])):
   os.fchmod(fd,0o600); os.write(fd,blob.encode()); os.lseek(fd,0,0)
  args=[str(x) for x in data["args"]]
- script="/usr/local/lib/origamitasks/pra/"+("pra-direct-seed.sh" if data["kind"]=="seed" else "pra-incremental-cold.sh")
+ script="/usr/local/lib/origamitasks/pra/"+("pra-direct-seed.sh" if data["kind"]=="seed" else "pra-hot-diff.sh")
  if not os.path.isfile(script) or os.path.islink(script):
   raise SystemExit(58)
  env=os.environ.copy()
@@ -242,8 +242,7 @@ try:
  if data["kind"]=="seed":
   args.extend([data["target_user"],"/proc/self/fd/"+str(k),str(data["target_port"])])
  else:
-  args.insert(4,"/proc/self/fd/"+str(k))
-  args.append(data["target_user"])
+  args.extend([data["target_user"],"/proc/self/fd/"+str(k),str(data["target_port"])])
  child=subprocess.Popen(["bash",script,*args],env=env,pass_fds=(k,h))
  raise SystemExit(child.wait())
 finally:
@@ -305,8 +304,8 @@ def _execute(job,vm,source,target):
         try:
             client_target,_=_ssh(None,{"host":target["fqdn"],"port":target["port"]},target_cred,40)
             dest_check="command -v qm; command -v pvesm"
-            if job["kind"]=="offline_incremental":
-                dest_check+="; test \"$(qm status '"+str(vm["target_vmid"])+"')\" = 'status: stopped'"
+            if job["kind"]=="hot_differential":
+                dest_check+="; test \"$(qm status '"+str(job["base_vmid"])+"')\" = 'status: stopped'"
             else:
                 dest_check+="; ! qm config '"+str(vm["target_vmid"])+"' >/dev/null 2>&1"
             if target_user!="root":
@@ -323,6 +322,7 @@ def _execute(job,vm,source,target):
         private_check=(
             "test -f "+BIN+"/pra-direct-seed.sh; "
             "test -f "+BIN+"/pra-incremental-cold.sh; "
+            "test -f "+BIN+"/pra-hot-diff.sh; "
             "test -f "+BIN+"/pra-sync-report.py; "
             "test -d "+BIN+"; "
             "test \"$(stat -c %U "+BIN+")\" = root"
@@ -336,9 +336,12 @@ def _execute(job,vm,source,target):
         if job["kind"]=="seed":
             args=[str(vm["source_vmid"]),target["fqdn"],str(vm["target_vmid"]),
                   vm["target_storage"],"--confirm"]
+        elif job["kind"]=="hot_differential":
+            args=[str(vm["source_vmid"]),target["fqdn"],str(job["base_vmid"]),
+                  vm["target_storage"],"--confirm-hot",
+                  job["scratch_path"],str(vm["id"])]
         else:
-            args=[str(vm["source_vmid"]),target["fqdn"],str(vm["target_vmid"]),
-                  "--confirm-offline",str(target["port"]),str(vm["id"])]
+            raise PRAJobError("Type de transfert désactivé")
         package={
             "kind":job["kind"],"args":args,
             "key":target_key,"known_hosts":pinned,"target_user":target_user,
@@ -382,20 +385,37 @@ def _execute(job,vm,source,target):
         if code:
             raise PRAJobError("Transfert distant en échec (code "+str(code)+
                                ") ; vérifier la VM secours avant nouvelle tentative")
-        marker=("Seed complete" if job["kind"]=="seed" else "ORIGAMI_INCREMENTAL_COLD_OK")
+        marker=("Seed complete" if job["kind"]=="seed" else "ORIGAMI_HOT_GENERATION_READY")
         if marker not in text_out:
             raise PRAJobError("Transfert terminé sans confirmation explicite")
         # Check once more that a target exists, is stopped and cannot
         # reboot automatically; do not allow failover on this evidence.
+        if job["kind"]=="hot_differential":
+            matches=re.findall(
+                r"ORIGAMI_HOT_GENERATION_READY candidate_vmid=(\d+) disks=(\d+) "
+                r"scanned_bytes=(\d+) transferred_bytes=(\d+)",text_out
+            )
+            if len(matches)!=1:
+                raise PRAJobError("Génération terminée sans preuve de cohérence unique")
+            candidate,disks,scanned,transferred=map(int,matches[0])
+            if not 100 <= candidate <= 999999999 or disks<1 or scanned<1:
+                raise PRAJobError("Identifiant ou statistiques de la génération invalides")
+            verified_id=candidate
+        else:
+            verified_id=vm["target_vmid"]
         final_check=(
-            "test \"$(qm status '"+str(vm["target_vmid"])+
-            "')\" = 'status: stopped'; test \"$(qm config '"+str(vm["target_vmid"])+
+            "test \"$(qm status '"+str(verified_id)+
+            "')\" = 'status: stopped'; test \"$(qm config '"+str(verified_id)+
             "' | sed -n 's/^onboot: //p')\" != 1"
         )
         if target_user!="root":
             final_check="sudo -n sh -c "+shlex.quote(final_check)
         _check_remote(client_target,final_check)
-        return {"output":text_out[-1200:]}
+        result={"output":text_out[-1200:]}
+        if job["kind"]=="hot_differential":
+            result.update(candidate_vmid=candidate,disks=disks,
+                          scanned_bytes=scanned,transferred_bytes=transferred)
+        return result
     finally:
         if client_target: client_target.close()
         if client_source: client_source.close()
