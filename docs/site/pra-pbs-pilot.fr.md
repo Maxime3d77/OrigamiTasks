@@ -32,4 +32,4 @@ L'API de tâches OrigamiTasks refuse désormais **start/reboot sur un VMID cible
 - Pour réduire le RPO à quelques secondes, développer un moteur de suivi de blocs modifiés cohérent, avec resynchronisation inverse après bascule. Un backup PBS périodique ne remplace pas cela.
 - Tester sur VM sacrifiable : migration intra-cluster pendant sauvegarde, coupure réseau, stockage inaccessible, témoin perdu, bascule et failback contrôlés. Aucune bascule automatique sans preuve de fencing.
 
-Voir [architecture du PRA](../ARCHITECTURE-PRA-INTERSITES.fr.md).
+Voir [architecture du PRA](https://github.com/Maxime3d77/OrigamiTasks/blob/feat/dr-protected-vms-simulations-0.3.21/docs/ARCHITECTURE-PRA-INTERSITES.fr.md).
