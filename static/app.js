@@ -1867,7 +1867,7 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   return;
  }
  if(a==='dr-vm-pbs-restore-start'){
-   const backup=prompt('Identifiant du job PBS source terminé (depuis le bouton Vérifier le résultat) :');
+   const backup=b.dataset.backup||prompt('Identifiant du job PBS source terminé (depuis le bouton Vérifier le résultat) :');
    if(!backup||!/^\d+$/.test(backup))return;
    const storage=prompt('Identifiant du stockage PBS visible depuis AU PP :');
    if(!storage)return;
@@ -1900,10 +1900,11 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='dr-vm-pbs-status'){
   try{
    const x=await api('/dr/vms/'+id+'/pbs/backups/'+Number(b.dataset.job));
-   modal('État de sauvegarde PBS','<div class="notice">État : '+e(x.status)+' · sortie : '+e(x.exitstatus||'en cours')+
+   modal('État de sauvegarde PBS','<div class="notice">Job PBS #'+e(b.dataset.job)+' · État : '+e(x.status)+' · sortie : '+e(x.exitstatus||'en cours')+
      '. Sauvegarde terminée : '+(x.backup_verified?'oui':'non')+
      '. VM secours restaurée : non.</div>',
-    '<button class="btn primary" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+e(b.dataset.job)+'">Actualiser le statut</button>',true);
+    '<button class="btn" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+e(b.dataset.job)+'">Actualiser le statut</button>'
+    +(x.backup_verified?'<button class="btn primary" data-action="dr-vm-pbs-restore-start" data-id="'+id+'" data-backup="'+e(b.dataset.job)+'">Restaurer sur AU</button>':''),true);
   }catch(ex){toast(ex.message,false)}
   return;
  }
