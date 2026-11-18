@@ -84,20 +84,31 @@ def jobs():
 def _remote(job):
     from .executor import _ssh,credential
     if host_keys.inspect(job["host"],job["port"]).get("status")!="trusted":
-        raise UpdateError("Clé d'hôte SSH non approuvée ou modifiée")
-    client,_=_ssh(None,{"host":job["host"],"port":job["port"]},credential(job["credential_id"]),120)
+        raise UpdateError("ssh_host_key : clé d'hôte inconnue ou modifiée")
     try:
-        sftp=client.open_sftp()
+        client,_=_ssh(None,{"host":job["host"],"port":job["port"]},credential(job["credential_id"]),120)
+    except Exception:
+        raise UpdateError("ssh_auth : connexion ou authentification SSH impossible") from None
+    stage_name=None
+    try:
+        try:
+            sftp=client.open_sftp()
+        except Exception:
+            raise UpdateError("sftp : sous-système SFTP inaccessible") from None
         try:
             base=sftp.normalize(".").rstrip("/")
             stage=base+"/origami_upgrade_"+secrets.token_hex(12)
+            stage_name=stage
             names=["agent.ps1"] if job["platform"]=="windows" else ["agent.py","pra_worker.py"]
             for name in names:
                 src=ROOT/("windows" if job["platform"]=="windows" else "linux")/name
-                with sftp.file(stage+"_"+name,"xb") as f:
-                    f.write(src.read_bytes())
-                if job["platform"]=="linux":
-                    sftp.chmod(stage+"_"+name,0o600)
+                try:
+                    with sftp.file(stage+"_"+name,"xb") as f:
+                        f.write(src.read_bytes())
+                    if job["platform"]=="linux":
+                        sftp.chmod(stage+"_"+name,0o600)
+                except Exception:
+                    raise UpdateError("sftp_upload : écriture refusée dans le répertoire SSH distant") from None
         finally:
             sftp.close()
         if job["platform"]=="linux":
@@ -146,10 +157,18 @@ def _remote(job):
                 "Write-Output ORIGAMI_AGENT_UPDATED"
             )
             cmd="powershell.exe -NoProfile -NonInteractive -EncodedCommand "+base64.b64encode(ps.encode("utf-16le")).decode("ascii")
-        _,stdout,_=client.exec_command(cmd,timeout=120)
-        output=stdout.read(4096).decode("utf-8",errors="replace")
-        if stdout.channel.recv_exit_status()!=0 or "ORIGAMI_AGENT_UPDATED" not in output:
-            raise UpdateError("Remplacement distant non confirmé")
+        try:
+            _,stdout,stderr=client.exec_command(cmd,timeout=120)
+            output=stdout.read(4096).decode("utf-8",errors="replace")
+            # Never expose raw remote output: it may contain confidential paths or secrets.
+            exit_code=stdout.channel.recv_exit_status()
+        except Exception:
+            raise UpdateError("ssh_execute : exécution distante interrompue") from None
+        if exit_code!=0:
+            raise UpdateError("remote_install : commande distante échouée (code "+str(exit_code)+
+                              "). Vérifier sudo -n, l'identité et les services.")
+        if "ORIGAMI_AGENT_UPDATED" not in output:
+            raise UpdateError("remote_confirm : confirmation d'installation absente")
     finally:
         client.close()
 
@@ -167,8 +186,10 @@ def process_one():
         if host["fqdn"]!=job["host"] or host["port"]!=job["port"] or agent["platform"]!=job["platform"]:
             raise UpdateError("Association agent / serveur modifiée")
         _remote(job)
+    except UpdateError as exc:
+        status,error="failed",str(exc)[:240]
     except Exception:
-        status,error="failed","Échec ou état incertain : vérifier les services et la sauvegarde locale"
+        status,error="failed","unknown : erreur interne sans détail exposable; consulter les services du contrôleur"
     with db.session() as con:
         con.execute("UPDATE agent_update_jobs SET status=?,error=?,finished_at=? WHERE id=?",
                     (status,error,db.now() if status=="failed" else None,job["id"]))
