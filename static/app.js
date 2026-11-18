@@ -602,7 +602,7 @@ function protectedVMsPage(){
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
-   +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button><button class="btn tiny" data-action="dr-vm-pbs-restore-start" data-id="'+vm.id+'">Restaurer sur site de secours</button>':'')
+   +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button><button class="btn tiny" data-action="dr-vm-pbs-restore-start" data-id="'+vm.id+'">Restaurer sur site de secours</button><button class="btn tiny" data-action="dr-vm-pbs-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
@@ -1865,6 +1865,15 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
     '<button class="btn primary" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+x.job_id+'">Vérifier le résultat</button>',true);
   }catch(ex){toast(ex.message,false)}
   return;
+ }
+ if(a==='dr-vm-pbs-release'){
+   if(!confirm('Avez-vous supprimé manuellement la VM secours sur Proxmox AU ? OrigamiTasks vérifiera son absence et libérera uniquement les enregistrements de restauration.'))return;
+   try{
+     const x=await api('/dr/vms/'+id+'/pbs/release','POST',{approved:true});
+     state.drProtectedVMs=(await api('/dr/vms')).items;
+     render();toast(x.removed_history+' ancien(s) enregistrement(s) libéré(s). Aucun disque supprimé.');
+   }catch(ex){toast(ex.message,false)}
+   return;
  }
  if(a==='dr-vm-pbs-restore-start'){
    const backup=b.dataset.backup||prompt('Identifiant du job PBS source terminé (depuis le bouton Vérifier le résultat) :');
