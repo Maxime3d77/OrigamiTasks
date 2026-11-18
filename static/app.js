@@ -1879,7 +1879,7 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
      const rows=(x.items||[]).map(r=>'<tr><td>'+dt(r.started_at)+'</td><td>'
       +labelStatus(r.status)+'</td><td>'+e(r.disks_done)+' / '+e(r.disks_total)+'</td><td>'
       +e(r.scanned_bytes)+' octets parcourus</td><td>'+e(r.elapsed_seconds||'—')
-      +' s</td><td>'+e(r.error||'—')+'</td></tr>').join('');
+      +' s · '+e(r.transferred_bytes)+' octets envoyés</td><td>'+e(r.error||'—')+'</td></tr>').join('');
      modal('Historique des deltas · VM protégée #'+id,
        '<div class="notice">Synchronisations incrémentales à froid uniquement. État fourni par les agents source ; aucune promotion automatique autorisée.</div>'
        +'<div class="table-wrap"><table><thead><tr><th>Début</th><th>État</th><th>Disques</th><th>Volume examiné</th><th>Durée</th><th>Erreur</th></tr></thead><tbody>'
