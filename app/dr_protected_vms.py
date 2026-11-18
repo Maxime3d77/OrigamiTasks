@@ -214,6 +214,13 @@ def save(data, actor, existing_id=None):
                 ).fetchone()
                 if not old:
                     raise ProtectedVMError("Protection VM introuvable")
+                if con.execute(
+                    "SELECT 1 FROM pra_pbs_restores WHERE protected_vm_id=?",(existing_id,)
+                ).fetchone():
+                    raise ProtectedVMError(
+                        "Une copie de secours a été créée ou tentée : "
+                        "modification du VMID/site/stockage bloquée tant que le suivi PRA est actif"
+                    )
                 con.execute(
                     "UPDATE dr_protected_vms SET plan_id=?,source_site_id=?,target_site_id=?,"
                     "source_dc_id=?,target_dc_id=?,source_vmid=?,source_name=?,source_node=?,"
