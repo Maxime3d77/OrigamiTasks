@@ -1,5 +1,7 @@
 # v0.3.29 — Synchronisation incrémentale à froid et suivi par VM
 
+> **AVERTISSEMENT v0.3.31 : ce pilote à froid est DÉSACTIVÉ pour le PRA. La VM source SD doit rester allumée. Les instructions ci-dessous décrivent uniquement un historique technique et ne sont plus exécutables.**
+
 Le panneau **VM protégées PRA** affiche maintenant le dernier état, la dernière synchronisation réussie, les disques traités, le volume parcouru, les octets envoyés par rsync, la durée et les erreurs. Le bouton **Suivi incrémental** montre les trente derniers essais par VM.
 
 ## Moteur réel sans PBS

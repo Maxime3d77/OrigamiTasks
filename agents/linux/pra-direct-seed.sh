@@ -19,6 +19,9 @@ user=${6:-root}; key=${7:-}; port=${8:-22}
 [[ $port =~ ^[0-9]{1,5}$ ]] && ((10#$port>=1 && 10#$port<=65535)) || exit 2
 [[ -f "/etc/pve/nodes/$(hostname -s)/qemu-server/${vmid}.conf" ]] || { echo 'VM must be local to the source Proxmox node' >&2; exit 3; }
 qm config "$vmid" >/dev/null || { echo 'Source VM cannot be read' >&2; exit 3; }
+[[ "$(qm status "$vmid")" == "status: running" ]] || {
+  echo 'REFUS: la VM source SD doit rester allumée pour ce moteur PRA' >&2; exit 3;
+}
 sshargs=(-p "$port" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 -o ForwardAgent=no)
 if [[ -n $key ]]; then
   if [[ "$key" == /proc/self/fd/* ]]; then

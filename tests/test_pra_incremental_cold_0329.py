@@ -23,19 +23,12 @@ def test_offline_script_syntax_and_rejects_without_approval():
     assert "REFUS" in result.stderr or "REFUSED" in result.stderr
 
 
-def test_incremental_requires_offline_and_never_starts_or_deletes_vm():
+def test_legacy_offline_incremental_is_disabled():
     text=SCRIPT.read_text()
-    for option in ("--copy-devices","--write-devices","--no-whole-file",
-                   "--checksum","--inplace","--confirm-offline",
-                   "status: stopped","StrictHostKeyChecking=yes",
-                   "ORIGAMI_INCREMENTAL_COLD_OK"):
-        assert option in text
-    assert "qm start " not in text
+    assert "exit 78" in text
+    assert "rsync --" not in text
     assert "qm stop " not in text
-    assert "qm destroy " not in text
-    assert "lvremove" not in text
-    assert 'pvesm path "$srcvol"' in text
-    assert "pra-sync-report.py" in text
+    assert "qm shutdown " not in text
 
 
 def test_authenticated_run_history_is_per_vm_and_non_promoting(monkeypatch):

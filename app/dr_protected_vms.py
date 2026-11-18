@@ -17,7 +17,7 @@ from . import db, dr_sites, integrations
 
 STRATEGIES = {
     "planning_only": "Étude / simulation uniquement",
-    "offline_copy": "Copie directe + incrémental à froid (arrêt requis)",
+    "offline_copy": "Copie directe à chaud (deltas à valider)",
     "pbs_backup_restore": "Sauvegarde PBS + restauration (à intégrer)",
     "storage_array_replication": "Réplication baie / LUN (à qualifier)",
 }
@@ -308,6 +308,13 @@ def list_vms(plan_id=None):
             ).fetchone()
         item["direct_job"]=dict(latest) if latest else None
         item["last_direct_seed"]=last_seed["finished_at"] if last_seed else None
+        with db.session() as pf:
+            checked=pf.execute(
+                "SELECT checked_at,source_node,source_running,qmp_available,"
+                "external_provider_api,disk_count,reason FROM pra_hot_preflights "
+                "WHERE protected_vm_id=?",(item["id"],)
+            ).fetchone()
+        item["hot_preflight"]=dict(checked) if checked else None
         result.append(item)
     return result
 

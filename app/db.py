@@ -241,6 +241,17 @@ CREATE TABLE IF NOT EXISTS pra_direct_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_pra_direct_jobs_vm ON pra_direct_jobs(protected_vm_id,id);
 CREATE INDEX IF NOT EXISTS idx_pra_direct_jobs_queue ON pra_direct_jobs(status,id);
+CREATE TABLE IF NOT EXISTS pra_hot_preflights (
+ protected_vm_id INTEGER PRIMARY KEY REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
+ checked_at TEXT NOT NULL,
+ source_node TEXT NOT NULL,
+ source_running INTEGER NOT NULL,
+ qmp_available INTEGER NOT NULL,
+ external_provider_api INTEGER NOT NULL,
+ disk_count INTEGER NOT NULL,
+ reason TEXT NOT NULL
+);
+
 
 
 

@@ -62,14 +62,17 @@ def _agent(con,vm,node):
     from .agents import utc_plus
     if not agent["enrolled"] or agent["revoked"] or not agent["last_seen"] or agent["last_seen"]<utc_plus(-90):
         raise PRAJobError("Agent source hors ligne")
-    if outdated(agent["version"],"0.3.30") or not re.fullmatch(r"\d+\.\d+\.\d+",str(agent["version"] or "")):
-        raise PRAJobError("Mettre à jour l'agent source en v0.3.30 avant le transfert")
+    if outdated(agent["version"],"0.3.31") or not re.fullmatch(r"\d+\.\d+\.\d+",str(agent["version"] or "")):
+        raise PRAJobError("Mettre à jour l'agent source en v0.3.31 avant le transfert")
     return dict(agent)
 
 
 def _validate(vm_id,kind,source_ssh_id,target_ssh_id):
-    if kind not in ("seed","offline_incremental"):
-        raise PRAJobError("Mode PRA invalide")
+    if kind!="seed":
+        raise PRAJobError(
+            "Réplication incrémentale à chaud non disponible : "
+            "l'ancien moteur à froid est désactivé pour ne jamais imposer l'arrêt de SD"
+        )
     if any(type(x) is not int or x<1 for x in (vm_id,source_ssh_id,target_ssh_id)):
         raise PRAJobError("Identités SSH et VM invalides")
     vm=dr_protected_vms._one(vm_id)
@@ -111,6 +114,83 @@ def queue(vm_id,kind,source_ssh_id,target_ssh_id,approved,actor):
     db.audit(actor,"pra.direct.queue",vm_id,"job="+str(record)+" mode="+kind)
     return {"job_id":record,"status":"queued","kind":kind,
             "source_node":node,"target_node":vm["target_node"]}
+
+
+def hot_preflight(vm_id,source_ssh_id):
+    """Read-only QMP inspection of the current live VM via selected vault SSH.
+
+    This never starts a backup, creates a bitmap, or touches replica disks.
+    """
+    from .executor import _ssh,credential
+    if type(source_ssh_id) is not int or source_ssh_id<1:
+        raise PRAJobError("Sélectionner une identité SSH source")
+    vm=dr_protected_vms._one(vm_id)
+    if vm["engine"]!="offline_copy":
+        raise PRAJobError("Protection de copie directe requise")
+    # The VM on AU must remain powered off; inspect real cluster state,
+    # not a stale record or the desired state in OrigamiTasks.
+    from .executor import credential
+    dest=integrations.configured_datacenter(vm["target_dc_id"])
+    key=credential(dest["credential_id"])
+    auth=dict(key,ca_cert=dest.get("ca_cert") or key.get("ca_cert") or "",
+              skip_tls_verification=bool(dest.get("skip_tls_verification",False)))
+    items=integrations.discover_datacenter(dest,auth,20)
+    target=[x for x in items if x.get("type")=="qemu" and x.get("vmid")==vm["target_vmid"]]
+    if len(target)>1 or (target and (target[0].get("node")!=vm["target_node"] or
+                                     target[0].get("status")!="stopped")):
+        raise PRAJobError("La VM secours AU doit être arrêtée sur son nœud prévu")
+    node=_vm_owner(vm)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}",node):
+        raise PRAJobError("Nœud Proxmox invalide")
+    with db.session() as con:
+        source=_host(con,vm["source_dc_id"],node)
+        agent=_agent(con,vm,node)
+        row=con.execute("SELECT kind FROM credentials WHERE id=?",(source_ssh_id,)).fetchone()
+    if not row or row["kind"]!="ssh":
+        raise PRAJobError("Identité SSH du coffre invalide")
+    client=None
+    try:
+        client,_=_ssh(None,{"host":source["fqdn"],"port":source["port"]},
+                      credential(source_ssh_id),30)
+        # Escalate before accessing the root-only installed PRA module.
+        script="python3 /usr/local/lib/origamitasks/pra/pra-hot-preflight.py "+str(vm["source_vmid"])
+        user=credential(source_ssh_id).get("username")
+        command=(script if user=="root" else "sudo -n "+script)
+        _,out,err=client.exec_command(command,timeout=25)
+        content=out.read(500000)
+        status=out.channel.recv_exit_status()
+        if status:
+            raise PRAJobError("Prétest QMP échoué (code "+str(status)+")")
+        result=json.loads(content)
+        if not isinstance(result,dict) or result.get("vmid")!=vm["source_vmid"]:
+            raise PRAJobError("Réponse QMP invalide")
+        # This field never authorizes a DR promotion or incremental write.
+        result["hot_incremental_ready"]=False
+        result["target_vm_must_be_stopped"]=True
+        result["source_node"]=node
+        result["requires_provider_implementation"]=True
+        with db.session() as con:
+            con.execute(
+                "INSERT INTO pra_hot_preflights(protected_vm_id,checked_at,source_node,"
+                "source_running,qmp_available,external_provider_api,disk_count,reason) "
+                "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(protected_vm_id) DO UPDATE SET "
+                "checked_at=excluded.checked_at,source_node=excluded.source_node,"
+                "source_running=excluded.source_running,qmp_available=excluded.qmp_available,"
+                "external_provider_api=excluded.external_provider_api,"
+                "disk_count=excluded.disk_count,reason=excluded.reason",
+                (vm_id,db.now(),node,int(result.get("source_running") is True),
+                 int(result.get("qmp_available") is True),
+                 int(result.get("external_provider_api") is True),
+                 len(result.get("disks") or []),str(result.get("reason") or "")[:120])
+            )
+        return result
+    except PRAJobError:
+        raise
+    except Exception:
+        raise PRAJobError("Prétest QMP impossible sur le nœud source") from None
+    finally:
+        if client:
+            client.close()
 
 
 def list_jobs(vm_id):

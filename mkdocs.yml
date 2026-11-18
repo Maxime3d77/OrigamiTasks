@@ -18,6 +18,7 @@ nav:
   - Direct SSH VM seed (no PBS): pra-direct-seed.md
   - Offline incremental and per-VM tracking: pra-incremental-cold.md
   - Integrated Linux PRA agent: pra-agent-integrated.md
+  - Live PRA QMP compatibility: pra-hot-replication.md
   - Agents: agents.md
   - Operations & Upgrades: operations.md
   - Security: security.md
@@ -72,6 +73,7 @@ plugins:
             Direct SSH VM seed (no PBS): Copie directe SSH sans PBS
             Offline incremental and per-VM tracking: Incrémental à froid et suivi par VM
             Integrated Linux PRA agent: Module PRA intégré à l'agent
+            Live PRA QMP compatibility: Prétest PRA à chaud QMP
             Agents: Agents
             Operations & Upgrades: Exploitation et mises à jour
             Security: Sécurité

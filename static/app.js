@@ -616,16 +616,21 @@ function protectedVMsPage(){
    +'<td>'+labelStatus(vm.replication_status)
    +'<div class="muted tinytext">Transfert : '+(vm.direct_job?e(vm.direct_job.kind)+' · '+labelStatus(vm.direct_job.status):'jamais demandé')+'</div>'
    +'<div class="muted tinytext">Dernière copie complète : '+(vm.last_direct_seed?dt(vm.last_direct_seed):'jamais')+'</div>'
-   +'<div class="muted tinytext">Delta : '+(vm.incremental_sync?e(vm.incremental_sync.status)
+   +'<div class="muted tinytext">Prétest QMP à chaud : '+(vm.hot_preflight
+      ?(vm.hot_preflight.source_running?'SD allumée':'SD non confirmée')
+       +' · '+(vm.hot_preflight.external_provider_api?'API externe détectée':'API externe absente')
+       +' · '+dt(vm.hot_preflight.checked_at)
+      :'jamais effectué')+'</div>'
+   +'<div class="muted tinytext">Ancien delta à froid : '+(vm.incremental_sync?e(vm.incremental_sync.status)
      +' · '+e(vm.incremental_sync.disks_done)+'/'+e(vm.incremental_sync.disks_total)+' disques'
      :'jamais exécuté')+'</div>'
-   +'<div class="muted tinytext">Dernier incrémental réussi : '+(vm.last_incremental_success?dt(vm.last_incremental_success):'jamais')+'</div></td>'
+   +'<div class="muted tinytext">Dernier ancien incrémental : '+(vm.last_incremental_success?dt(vm.last_incremental_success):'jamais')+'</div></td>'
    +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +(vm.engine==='offline_copy'?'<button class="btn tiny primary" data-action="dr-vm-direct-seed" data-id="'+vm.id+'">Copie initiale directe</button>'
-      +'<button class="btn tiny" data-action="dr-vm-direct-incremental" data-id="'+vm.id+'">Synchronisation incrémentale à froid</button>'
+      +'<button class="btn tiny" data-action="dr-vm-hot-preflight" data-id="'+vm.id+'">Tester la réplication à chaud</button>'
       +'<button class="btn tiny" data-action="dr-vm-direct-jobs" data-id="'+vm.id+'">Journal des transferts</button>'
       +'<button class="btn tiny" data-action="dr-vm-direct-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button><button class="btn tiny" data-action="dr-vm-pbs-restore-start" data-id="'+vm.id+'">Restaurer sur site de secours</button><button class="btn tiny" data-action="dr-vm-pbs-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
@@ -644,7 +649,7 @@ function protectedVMsPage(){
   +'<div class="notice"><b>Copie directe pilotée par agent :</b> si le moteur « Copie directe » est sélectionné, '
   +'la copie initiale est transmise directement en SSH de SD vers AU à partir de l’agent Linux équipé du moteur PRA ; '
   +'les clés SSH du coffre ne sont utilisées que le temps de l’opération en mémoire. '
-  +'La synchronisation incrémentale actuelle exige les deux VM arrêtées, et aucune bascule n’est automatique.</div>'
+  +'La source SD reste allumée. Le prétest QMP est en lecture seule ; la réplication incrémentale à chaud nécessite encore un fournisseur de deltas cohérents. Aucune bascule automatique.</div>'
   +'<div class="notice dr-safety-notice"><b>PRA manuel limité :</b> le moteur PBS peut sauvegarder la VM source puis '
   +'restaurer une VM <b>éteinte</b> sur le cluster de secours si ce dernier accède au même snapshot PBS '
   +'(stockage partagé ou PBS synchronisé). Aucune synchronisation delta en continu, mise à jour automatique de la VM restaurée, '
@@ -653,7 +658,7 @@ function protectedVMsPage(){
   +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Protections déclaratives</div></div>'
   +'<div class="stat-card"><span class="label">Préparations actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Aucune copie lancée</div></div>'
   +'<div class="stat-card"><span class="label">En pause</span><div class="value">'+current.filter(x=>x.state==='paused').length+'</div><div class="sub">Enregistrements conservés</div></div>'
-  +'<div class="stat-card"><span class="label">Incrémental froid · dernier état OK</span><div class="value">'
+  +'<div class="stat-card"><span class="label">Ancien historique à froid (désactivé)</span><div class="value">'
   +current.filter(v=>v.incremental_sync?.status==='success').length
   +'</div><div class="sub">Non autorisé pour la bascule</div></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Inventaire des VM sélectionnées</h2>'
@@ -709,7 +714,7 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  const pools=r.target_storages.filter(x=>x.images);
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
  const engines=[['planning_only','Préparation / simulation uniquement'],
-   ['offline_copy','Copie directe + incrémental à froid (VM arrêtées)'],
+   ['offline_copy','Copie directe à chaud (incrémental non encore disponible)'],
    ['pbs_backup_restore','PBS : sauvegarde + restauration réelle manuelle (sans bascule)'],
    ['storage_array_replication','Réplication de baie/LUN (à valider)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
@@ -743,12 +748,9 @@ function openDirectPRAJobForm(id,kind){
  if(!vm)return toast('VM protégée introuvable',false);
  const options=state.credentials.filter(x=>x.kind==='ssh').map(x=>[x.id,x.name]);
  if(!options.length)return toast('Créer au moins une identité SSH dans le coffre-fort',false);
- const isCold=kind==='offline_incremental';
- const textNotice=isCold
-  ?'Synchronisation incrémentale réelle : les DEUX VM doivent être ARRÊTÉES et hors HA pendant toute la copie. '
-    +'Leurs disques LVM doivent avoir une topologie et une taille identiques. Aucune bascule automatique.'
-  :'Copie initiale réelle : export snapshot de la VM source vers une VM de secours ÉTEINTE. '
-    +'Le VMID cible doit être libre. Aucun arrêt de la source et aucun PBS.';
+ const textNotice='Copie initiale à chaud : la VM SD reste ALLUMÉE. '
+  +'Une sauvegarde QEMU snapshot est envoyée vers un VMID libre sur AU et la copie AU reste ÉTEINTE. '
+  +'Ce n’est pas encore une chaîne de deltas incrémentaux à chaud.';
  const body='<form id="drDirectPRAForm" data-id="'+id+'" data-kind="'+e(kind)+'">'
   +'<div class="notice error"><b>Opération sur les baies Proxmox :</b> '+e(textNotice)+'</div>'
   +'<p>VM '+e(vm.source_vmid)+' → '+e(vm.target_vmid)+' · '+e(vm.source_dc_name)+' → '+e(vm.target_dc_name)+'</p>'
@@ -762,7 +764,7 @@ function openDirectPRAJobForm(id,kind){
   +'<label class="field checkbox"><input type="checkbox" name="approved" required>'
   +'<span>Je confirme l’opération réelle sur les VM et leurs disques.</span></label>'
   +'<div class="tool-row"><button class="btn primary" type="submit">Démarrer '
-  +(isCold?'l’incrémental à froid':'la copie initiale')+'</button>'
+  +'la copie initiale'+'</button>'
   +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
  modal('PRA direct · VM #'+e(vm.source_vmid),body,'',true);
 }
@@ -1937,7 +1939,17 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    return;
  }
  if(a==='dr-vm-direct-seed'){openDirectPRAJobForm(id,'seed');return}
- if(a==='dr-vm-direct-incremental'){openDirectPRAJobForm(id,'offline_incremental');return}
+ if(a==='dr-vm-hot-preflight'){
+   const options=state.credentials.filter(c=>c.kind==='ssh').map(c=>[c.id,c.name]);
+   if(!options.length)return toast('Choisir une identité SSH du coffre',false);
+   modal('Prétest QMP à chaud — VM #'+id,
+    '<div class="notice">Ce test ne stoppe pas la VM SD et ne modifie pas les disques. '
+    +'Il vérifie les capacités QEMU mais ne lance pas encore de delta.</div>'
+    +'<form id="drHotPreflightForm" data-id="'+id+'">'
+    +selectField('Identité SSH du nœud source','source_credential_id',options,'')
+    +'<button type="submit" class="btn primary">Vérifier QMP en lecture seule</button></form>','',true);
+   return;
+ }
  if(a==='dr-vm-direct-jobs'){
    try{
      const x=await api('/dr/vms/'+id+'/direct-jobs');
@@ -1962,8 +1974,8 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
       +labelStatus(r.status)+(r.stale?'<div class="hint">Aucune remontée depuis plus de 20 min</div>':'')+'</td><td>'+e(r.disks_done)+' / '+e(r.disks_total)+'</td><td>'
       +e(r.scanned_bytes)+' octets parcourus</td><td>'+e(r.elapsed_seconds||'—')
       +' s · '+e(r.transferred_bytes)+' octets envoyés</td><td>'+e(r.error||'—')+'</td></tr>').join('');
-     modal('Historique des deltas · VM protégée #'+id,
-       '<div class="notice">Synchronisations incrémentales à froid uniquement. État fourni par les agents source ; aucune promotion automatique autorisée.</div>'
+     modal('Historique des anciens deltas à froid · VM protégée #'+id,
+       '<div class="notice">Ancien moteur à froid désactivé. Historique conservé pour audit : la source SD doit toujours rester allumée.</div>'
        +'<div class="table-wrap"><table><thead><tr><th>Début</th><th>État</th><th>Disques</th><th>Volume examiné</th><th>Durée</th><th>Erreur</th></tr></thead><tbody>'
        +(rows||'<tr><td colspan="6">Aucune synchronisation enregistrée</td></tr>')
        +'</tbody></table></div>',
@@ -2448,13 +2460,29 @@ async function handleSubmit(ev){
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return
  }
+ if(ev.target.id==='drHotPreflightForm'){
+   ev.preventDefault();
+   const f=new FormData(ev.target);
+   try{
+     const x=await api('/dr/vms/'+Number(ev.target.dataset.id)+'/hot-preflight?source_credential_id='
+       +encodeURIComponent(Number(f.get('source_credential_id'))));
+     modal('Compatibilité réplication à chaud','<div class="notice">'
+       +'VM source allumée : '+(x.source_running?'oui':'non')+' · QMP disponible : '+(x.qmp_available?'oui':'non')
+       +' · Périphériques détectés : '+e(x.disks?.length||0)
+       +' · Fournisseur externe Proxmox : '+(x.external_provider_api?'détecté':'non détecté')
+       +' · Fonctions QEMU disponibles : '+e((x.qmp_commands||[]).join(', ')||'aucune')
+       +'</div><p><b>État du moteur :</b> '+e(x.reason||'indéterminé')
+       +'. La présence des primitives QMP ne garantit pas encore la création et l’application de deltas cohérents.</p>'
+       +'<div class="notice error">Aucune synchronisation incrémentale à chaud n’a été exécutée. '
+       +'VM source jamais arrêtée par cette opération.</div>','',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+ }
  if(ev.target.id==='drDirectPRAForm'){
    ev.preventDefault();
    const f=new FormData(ev.target),id=Number(ev.target.dataset.id),kind=ev.target.dataset.kind;
    if(!f.has('approved'))return toast('Confirmation obligatoire',false);
-   const text=kind==='offline_incremental'
-       ?'Les DEUX VM sont-elles réellement arrêtées et sorties de la HA ?'
-       :'Lancer une copie complète réelle vers un nouveau VMID sur AU ?';
+   const text='La VM SD doit rester allumée. Démarrer une sauvegarde snapshot complète vers AU, copie éteinte ?';
    if(!confirm(text))return;
    try{
      const result=await api('/dr/vms/'+id+'/direct-jobs','POST',{

@@ -61,7 +61,7 @@ def test_pra_job_endpoints_require_admin():
 
 def test_pra_ui_has_real_seed_and_incremental_buttons():
     src=(ROOT/"static/app.js").read_text()
-    for token in ("Copie initiale directe","Synchronisation incrémentale à froid",
+    for token in ("Copie initiale directe","Tester la réplication à chaud",
                   "source_credential_id","target_credential_id",
                   "drDirectPRAForm","/direct-jobs"):
         assert token in src
