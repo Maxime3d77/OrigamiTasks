@@ -564,6 +564,7 @@ function protectedVMsPage(){
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
+   +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
@@ -576,8 +577,9 @@ function protectedVMsPage(){
    '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
    +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
   +'<div class="notice dr-safety-notice"><b>Protection encore préparatoire :</b> une entrée REP_ est un nom réservé dans OrigamiTasks, '
-  +'pas une VM réellement créée. Aucun moteur de copie iSCSI/LVM, PBS ou Pure n’a encore été activé ; '
-  +'pas de synchronisation réelle, de démarrage ni de bascule. Les tests sont des vérifications en lecture seule.</div>'
+  +'pas une VM réellement créée. Le mode PBS peut déclencher une sauvegarde réelle approuvée, si configuré ; '
+  +'cela ne restaure pas de VM sur le cluster cible et ne constitue ni une réplication temps réel ni une bascule. '
+  +'Les tests de reprise restent des simulations en lecture seule.</div>'
   +'<div class="stats-grid dr-vm-stat-grid">'
   +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Protections déclaratives</div></div>'
   +'<div class="stat-card"><span class="label">Préparations actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Aucune copie lancée</div></div>'
@@ -637,7 +639,7 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
  const engines=[['planning_only','Préparation / simulation uniquement'],
    ['offline_copy','Copie à froid (transport à développer)'],
-   ['pbs_backup_restore','PBS backup + restore (à intégrer)'],
+   ['pbs_backup_restore','PBS : sauvegarde réelle manuelle (restauration à intégrer)'],
    ['storage_array_replication','Réplication de baie/LUN (à valider)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
   +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Aucune copie ni VM REP_ ne sera créée lors de l’enregistrement. '
@@ -1813,6 +1815,29 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  }
  if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}
  if(a==='agent-deploy-bulk-form'){agentBulkDeployForm();return}
+ if(a==='dr-vm-pbs-backup'){
+  const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
+  if(!vm||vm.engine!=='pbs_backup_restore')return toast('Sélectionner la stratégie PBS sur la protection',false);
+  const storage=prompt('Nom du stockage PBS configuré sur le cluster SOURCE (ex. pbs-backup) :');
+  if(!storage)return;
+  if(!confirm('Déclencher une vraie sauvegarde PVE vers '+storage+' pour la VM '+vm.source_vmid+' ? Cela consomme des ressources, mais ne démarre ni n’arrête les VM.'))return;
+  try{
+   const x=await api('/dr/vms/'+id+'/pbs/backup','POST',{storage,approved:true});
+   modal('Sauvegarde PBS soumise','<div class="notice">Tâche Proxmox soumise : '+e(x.upid)+'. Le résultat n’est pas encore vérifié et aucune VM de secours n’a été créée.</div>',
+    '<button class="btn primary" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+x.job_id+'">Vérifier le résultat</button>',true);
+  }catch(ex){toast(ex.message,false)}
+  return;
+ }
+ if(a==='dr-vm-pbs-status'){
+  try{
+   const x=await api('/dr/vms/'+id+'/pbs/backups/'+Number(b.dataset.job));
+   modal('État de sauvegarde PBS','<div class="notice">État : '+e(x.status)+' · sortie : '+e(x.exitstatus||'en cours')+
+     '. Sauvegarde terminée : '+(x.backup_verified?'oui':'non')+
+     '. VM secours restaurée : non.</div>',
+    '<button class="btn primary" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+e(b.dataset.job)+'">Actualiser le statut</button>',true);
+  }catch(ex){toast(ex.message,false)}
+  return;
+ }
  if(a==='agent-batch-refresh'){await refresh();return}
  if(a==='agent-batch-clean'){
   if(!confirm('Supprimer les anciens lots terminés ? Les lots actifs et le journal d’audit seront conservés.'))return;
