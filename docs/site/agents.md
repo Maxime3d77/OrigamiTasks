@@ -119,3 +119,7 @@ Prerequisites: an unambiguous matching SSH inventory server, trusted pinned host
 The updater saves old agent executables as `.origami-backup`, replaces only the agent script and passive Linux PRA worker, and restarts the agent. It **preserves agent_id, token, config.json, modules.json and site assignments**. Agent update success does not imply that inter-cluster DR replication is operational.
 
 **Safety:** ambiguous failures are not automatically retried; inspect the local service/task and backup before retrying. Pilot on a non-critical host before upgrading Proxmox nodes.
+
+### Test your SSH key before agent update (v0.3.25)
+
+Choose your existing SSH vault identity and click **Test selected SSH key**. The read-only preflight checks the pinned remote host key, private-key authentication through the vault, SFTP and Linux noninteractive sudo. No agent files are modified. Host-key changes remain blocked.
