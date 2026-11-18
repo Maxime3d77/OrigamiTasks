@@ -102,15 +102,24 @@ def _remote(job):
             sftp.close()
         if job["platform"]=="linux":
             check="import json,sys;c=json.load(open('/opt/origamitasks-agent/config.json'));sys.exit(0 if c.get('agent_id')=="+str(job["agent_id"])+" else 5)"
+            rollback=(
+                "cp -p /opt/origamitasks-agent/agent.py.origami-backup /opt/origamitasks-agent/agent.py || true; "
+                "if test -f /opt/origamitasks-agent/pra_worker.py.origami-backup; then "
+                "cp -p /opt/origamitasks-agent/pra_worker.py.origami-backup /opt/origamitasks-agent/pra_worker.py || true; fi; "
+                "systemctl restart origamitasks-agent.service >/dev/null 2>&1 || true; "
+                "systemctl try-restart origamitasks-agent-pra.service >/dev/null 2>&1 || true"
+            )
             script=(
                 "set -eu; python3 -c "+shlex.quote(check)+"; "
                 "cp -p /opt/origamitasks-agent/agent.py /opt/origamitasks-agent/agent.py.origami-backup; "
-                "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_agent.py")+" /opt/origamitasks-agent/agent.py; "
                 "if test -f /opt/origamitasks-agent/pra_worker.py; then cp -p /opt/origamitasks-agent/pra_worker.py /opt/origamitasks-agent/pra_worker.py.origami-backup; fi; "
+                "trap "+shlex.quote(rollback)+" EXIT; "
+                "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_agent.py")+" /opt/origamitasks-agent/agent.py; "
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_pra_worker.py")+" /opt/origamitasks-agent/pra_worker.py; "
                 "systemctl restart origamitasks-agent.service; "
                 "if systemctl is-enabled --quiet origamitasks-agent-pra.service 2>/dev/null; then systemctl restart origamitasks-agent-pra.service; fi; "
                 "systemctl is-active --quiet origamitasks-agent.service; "
+                "trap - EXIT; "
                 "rm -f "+shlex.quote(stage+"_agent.py")+" "+shlex.quote(stage+"_pra_worker.py")+"; "
                 "echo ORIGAMI_AGENT_UPDATED"
             )
