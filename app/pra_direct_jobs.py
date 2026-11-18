@@ -170,3 +170,206 @@ try:
 finally:
  os.close(k);os.close(h)
 '''
+
+
+
+def _plain_key(cred):
+    """Export a vault key in memory for temporary transfer over the SSH tunnel."""
+    from cryptography.hazmat.primitives import serialization
+    raw=str(cred.get("private_key") or "").encode()
+    if not raw or len(raw)>25000:
+        raise PRAJobError("Identité SSH destination : clé privée requise")
+    pw=cred.get("passphrase")
+    password=(pw.encode() if pw else None)
+    try:
+        try:
+            key=serialization.load_ssh_private_key(raw,password=password)
+        except ValueError:
+            key=serialization.load_pem_private_key(raw,password=password)
+        return key.private_bytes(
+            serialization.Encoding.PEM,serialization.PrivateFormat.OpenSSH,
+            serialization.NoEncryption()
+        ).decode()
+    except Exception:
+        raise PRAJobError("Clé SSH destination invalide ou phrase secrète incorrecte") from None
+
+
+def _check_remote(client,command):
+    _,stdout,stderr=client.exec_command(command,timeout=25)
+    ch=stdout.channel
+    started=time.monotonic()
+    while not ch.exit_status_ready():
+        if time.monotonic()-started>30:
+            ch.close()
+            raise PRAJobError("Prévol SSH distant expiré")
+        time.sleep(.1)
+    status=ch.recv_exit_status()
+    if status:
+        raise PRAJobError("Prévol des droits/VM/stockage impossible (code "+str(status)+")")
+
+
+def _execute(job,vm,source,target):
+    from .executor import _ssh,credential
+    from . import host_keys
+    source_cred=credential(job["source_credential_id"])
+    target_cred=credential(job["target_credential_id"])
+    if str(target_cred.get("username") or "")!="root":
+        raise PRAJobError("Le pilote actuel requiert une identité SSH root sur le nœud cible")
+    target_key=_plain_key(target_cred)
+    pinned=_known_host_line(target["fqdn"],target["port"])
+    # Validate the vault identity independently on BOTH endpoints before
+    # granting the source process a temporary key in RAM.
+    client_target=None
+    client_source=None
+    try:
+        try:
+            client_target,_=_ssh(None,{"host":target["fqdn"],"port":target["port"]},target_cred,40)
+            dest_check="test \"$(id -u)\" -eq 0; command -v qm; command -v pvesm"
+            if job["kind"]=="offline_incremental":
+                dest_check+="; test \"$(qm status '"+str(vm["target_vmid"])+"')\" = 'status: stopped'"
+            else:
+                dest_check+="; ! qm config '"+str(vm["target_vmid"])+"' >/dev/null 2>&1"
+            _check_remote(client_target,dest_check)
+        except PRAJobError:
+            raise
+        except Exception:
+            raise PRAJobError("Connexion/permissions SSH destination refusées") from None
+        try:
+            client_source,_=_ssh(None,{"host":source["fqdn"],"port":source["port"]},source_cred,40)
+        except Exception:
+            raise PRAJobError("Connexion SSH source refusée") from None
+        check=(
+            "test \"$(id -u)\" -eq 0 || sudo -n true; "
+            "test -f "+BIN+"/pra-direct-seed.sh; "
+            "test -f "+BIN+"/pra-incremental-cold.sh; "
+            "test -f "+BIN+"/pra-sync-report.py; "
+            "test -d "+BIN+"; "
+            "test \"$(stat -c %U "+BIN+")\" = root"
+        )
+        _check_remote(client_source,check)
+        # Exact argument list, no user-provided shell expansion. The script
+        # name is determined by the internally recorded job type.
+        if job["kind"]=="seed":
+            args=[str(vm["source_vmid"]),target["fqdn"],str(vm["target_vmid"]),
+                  vm["target_storage"],"--confirm"]
+        else:
+            args=[str(vm["source_vmid"]),target["fqdn"],str(vm["target_vmid"]),
+                  "--confirm-offline",str(target["port"]),str(vm["id"])]
+        package={
+            "kind":job["kind"],"args":args,
+            "key":target_key,"known_hosts":pinned
+        }
+        # Script text contains no secret. The key and pinned host record are
+        # provided exclusively on the encrypted SSH stdin, never on argv.
+        py="import base64;exec(compile(base64.b64decode("+repr(
+            base64.b64encode(_REMOTE_PY.encode()).decode()
+        )+"),'<origami-pra>','exec'))"
+        cmd=('python3 -c ' if str(source_cred.get("username"))=="root" else
+             'sudo -n python3 -c ')+shlex.quote(py)
+        input_,output,errors=client_source.exec_command(cmd,timeout=80)
+        payload=json.dumps(package).encode()
+        if len(payload)>65000:
+            raise PRAJobError("Clé/paramètres SSH trop volumineux")
+        input_.channel.sendall(payload)
+        input_.channel.shutdown_write()
+        del package,target_key,payload
+        channel=output.channel
+        started=time.monotonic()
+        stdout=bytearray()
+        stderr=bytearray()
+        while True:
+            if channel.recv_ready():
+                data=channel.recv(65536)
+                if len(stdout)<8192: stdout.extend(data[:8192-len(stdout)])
+            if channel.recv_stderr_ready():
+                data=channel.recv_stderr(65536)
+                if len(stderr)<8192: stderr.extend(data[:8192-len(stderr)])
+            if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
+                break
+            if time.monotonic()-started>MAX_SECONDS:
+                channel.close()
+                raise PRAJobError("Délai maximal dépassé ; vérifier le résultat distant avant toute relance")
+            time.sleep(.07)
+        code=channel.recv_exit_status()
+        text_out=stdout.decode("utf8","replace")
+        if code:
+            raise PRAJobError("Transfert distant en échec (code "+str(code)+
+                               ") ; vérifier la VM secours avant nouvelle tentative")
+        marker=("Seed complete" if job["kind"]=="seed" else "ORIGAMI_INCREMENTAL_COLD_OK")
+        if marker not in text_out:
+            raise PRAJobError("Transfert terminé sans confirmation explicite")
+        # Check once more that a target exists, is stopped and cannot
+        # reboot automatically; do not allow failover on this evidence.
+        _check_remote(client_target,"test \"$(qm status '"+str(vm["target_vmid"])+
+                      "')\" = 'status: stopped'; test \"$(qm config '"+str(vm["target_vmid"])+
+                      "' | sed -n 's/^onboot: //p')\" != 1")
+        return {"output":text_out[-1200:]}
+    finally:
+        if client_target: client_target.close()
+        if client_source: client_source.close()
+
+
+def process_one():
+    with db.session() as con:
+        con.execute("BEGIN IMMEDIATE")
+        row=con.execute(
+            "SELECT * FROM pra_direct_jobs WHERE status='queued' ORDER BY id LIMIT 1"
+        ).fetchone()
+        if not row:
+            return False
+        job=dict(row)
+        con.execute(
+            "UPDATE pra_direct_jobs SET status='running',started_at=? WHERE id=?",
+            (db.now(),job["id"])
+        )
+    status,error,seconds="success","",None
+    started=time.monotonic()
+    try:
+        vm,node,source,target,agent=_validate(
+            job["protected_vm_id"],job["kind"],
+            job["source_credential_id"],job["target_credential_id"]
+        )
+        if (source["fqdn"]!=job["source_host"] or
+                target["fqdn"]!=job["target_host"]):
+            # A VM migrating during a queued job must be reapproved rather
+            # than silently sending secrets to a new node.
+            raise PRAJobError("Nœud changé depuis la validation : relancer depuis la nouvelle VM source")
+        _execute(job,vm,source,target)
+    except PRAJobError as exc:
+        status,error="failed",str(exc)[:250]
+    except Exception:
+        status,error="uncertain","Erreur de transfert : état distant incertain ; vérifier le nœud AU"
+    seconds=int(time.monotonic()-started)
+    with db.session() as con:
+        con.execute(
+            "UPDATE pra_direct_jobs SET status=?,error=?,elapsed_seconds=?,finished_at=? "
+            "WHERE id=?",(status,error,seconds,db.now() if status!="uncertain" else None,job["id"])
+        )
+    db.audit(job["actor"],"pra.direct."+status,job["protected_vm_id"],
+             "job="+str(job["id"])+" kind="+job["kind"])
+    return True
+
+
+def loop():
+    while not STOP.is_set():
+        try:
+            if process_one():
+                continue
+        except Exception:
+            pass
+        STOP.wait(3)
+
+
+def start():
+    global WORKER
+    with db.session() as con:
+        # Never automatically resume a stream interrupted by controller restart.
+        con.execute(
+            "UPDATE pra_direct_jobs SET status='uncertain',error=? "
+            "WHERE status='running'",
+            ("Contrôleur redémarré pendant le transfert ; vérifier le stockage cible",)
+        )
+    STOP.clear()
+    if WORKER is None or not WORKER.is_alive():
+        WORKER=threading.Thread(target=loop,name="pra-direct-worker",daemon=True)
+        WORKER.start()
