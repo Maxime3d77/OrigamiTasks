@@ -36,7 +36,10 @@ def test_restore_creates_stopped_vm_without_overwrite(monkeypatch):
             target_resources=[{'type':'node','node':'dstnode','status':'online'}]
             monkeypatch.setattr(integrations,'discover_datacenter',
                                 lambda dc,cred,timeout:target_resources)
+            import time
+            snapshot_time=int(time.time())
             archive='pbs-au:backup/vm/210/2026-11-18T11:00:00Z'
+            source_archive='pbs-sd:backup/vm/210/2026-11-18T11:00:00Z'
             calls=[]
             def pve(origin,cred,path,timeout,method='GET',data=None):
                 calls.append((method,path,data))
@@ -45,8 +48,10 @@ def test_restore_creates_stopped_vm_without_overwrite(monkeypatch):
                         {'storage':'pbs-au','type':'pbs','content':'backup'},
                         {'storage':'target-lvm','type':'lvm','content':'images,rootdir'}
                     ]
+                if path.endswith('/storage/pbs-sd/content?content=backup'):
+                    return [{'volid':source_archive,'ctime':snapshot_time,'size':1000}]
                 if path.endswith('/storage/pbs-au/content?content=backup'):
-                    return [{'volid':archive,'ctime':1795000000,'size':1000}]
+                    return [{'volid':archive,'ctime':snapshot_time,'size':1000}]
                 if path=='/api2/json/nodes/dstnode/qemu' and method=='POST':
                     assert data['start']=='0'
                     assert data['onboot']=='0'
