@@ -322,7 +322,7 @@ def deploy(body, *, cluster_authorized=False):
                 '"[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/origamitasks-agent-pra.service; '
                 'systemctl daemon-reload; systemctl enable --now origamitasks-agent.service; '
                 'systemctl enable --now origamitasks-agent-pra.service; '
-                'rm -f '+stage_script+' '+stage_config+' '+stage_worker
+                'rm -f '+stage_script+' '+stage_config+' '+stage_worker+' '+ ' '.join(stage_pra.values())
             )
             command = 'sh -c '+shlex.quote("if [ \"$(id -u)\" -eq 0 ]; then exec sh -c "+shlex.quote(install_script)+"; else exec sudo -n sh -c "+shlex.quote(install_script)+"; fi")
         _, stdout, stderr = client.exec_command(command, timeout=120)
