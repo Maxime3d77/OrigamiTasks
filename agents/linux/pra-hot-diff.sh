@@ -33,7 +33,7 @@ target="$dstuser@$host"
 remote(){
   local cmd="$1"
   if [[ $dstuser != root ]]; then printf -v cmd 'sudo -n sh -c %q' "$cmd"; fi
-  ssh ""${sshopts[@]}"" "$target" "$cmd"
+  ssh "${sshopts[@]}" "$target" "$cmd"
 }
 guard="set -eu; test -f /etc/pve/nodes/\$(hostname -s)/qemu-server/$base.conf; test \"\$(qm status '$base')\" = 'status: stopped'; if ha-manager config 2>/dev/null | grep -Eq '^vm:$base([[:space:]]|$)'; then exit 44; fi; rsync --help | grep -q -- '--write-devices'"
 remote "$guard" || die 'AU base must be stopped, node-local, no HA, rsync-compatible'
@@ -88,7 +88,7 @@ for slot in $slots; do
  options=(--checksum --no-whole-file --inplace --write-devices --block-size=65536 --stats)
  if [[ $dstuser != root ]]; then options+=(--rsync-path='sudo -n rsync'); fi
  logfile="$work/$slot.log"
- rsync ""${options[@]}"" -e "ssh -i $key -p $port -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$PRA_PINNED_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o ForwardAgent=no -o ClearAllForwardings=yes" "$raw" "$target:$dev" | tee "$logfile"
+ rsync "${options[@]}" -e "ssh -i $key -p $port -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$PRA_PINNED_KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o ForwardAgent=no -o ClearAllForwardings=yes" "$raw" "$target:$dev" | tee "$logfile"
  bytes=$(awk '/^Total bytes sent:/ {gsub(/,/,"",$4);print $4}' "$logfile" | tail -1)
  [[ $bytes =~ ^[0-9]+$ ]] || die 'Missing rsync transfer statistics'
  local_hash=$(sha256sum "$raw" | cut -d' ' -f1)
