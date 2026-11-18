@@ -7,6 +7,7 @@ automatic standby refresh, nor safe unattended failover.
 """
 import re
 import httpx
+from datetime import datetime
 from urllib.parse import quote
 from . import db, config, integrations, dr_protected_vms, pra_pbs
 
@@ -48,12 +49,26 @@ def options(vm_id,backup_job_id,target_pbs_storage):
         raise RestoreError("Stockage PBS destination invalide")
     with db.session() as con:
         backup=con.execute(
-            "SELECT id,status,storage FROM pra_pbs_backups WHERE id=? AND protected_vm_id=?",
+            "SELECT id,status,storage,node,created_at FROM pra_pbs_backups WHERE id=? AND protected_vm_id=?",
             (backup_job_id,vm_id)
         ).fetchone()
     if not backup or backup["status"]!="completed":
         raise RestoreError("Sauvegarde source terminée requise; vérifier d'abord son UPID")
     source_dc,source_cred=pra_pbs._source(vm)
+    # Only offer snapshots that are actually present in the source backup
+    # datastore and created after this backup job was submitted.
+    source_volumes=_backup_volumes(source_dc,source_cred,backup["node"],backup["storage"])
+    cutoff=datetime.fromisoformat(backup["created_at"]).timestamp()-300
+    source_versions={}
+    for v in source_volumes:
+        volid=v.get("volid","") if isinstance(v,dict) else ""
+        ctime=v.get("ctime") if isinstance(v,dict) else None
+        prefix=backup["storage"]+":backup/vm/"+str(vm["source_vmid"])+"/"
+        if not isinstance(volid,str) or not volid.startswith(prefix) or not isinstance(ctime,(int,float)) or ctime<cutoff:
+            continue
+        source_versions[volid.split(":",1)[1]]=ctime
+    if not source_versions:
+        raise RestoreError("Aucun snapshot récent de ce job trouvé sur le stockage PBS du cluster source")
     dc,cred=_target(vm)
     resources=integrations.discover_datacenter(dc,cred,20)
     if any(x.get("type")=="qemu" and x.get("vmid")==vm["target_vmid"] for x in resources):
@@ -81,7 +96,9 @@ def options(vm_id,backup_job_id,target_pbs_storage):
         volid=v.get("volid","")
         if not isinstance(volid,str) or not volid.startswith(target_pbs_storage+":backup/vm/"+str(vm["source_vmid"])+"/"):
             continue
-        # Important: only present a backup with the correct source VMID.
+        suffix=volid.split(":",1)[1]
+        if suffix not in source_versions or v.get("ctime")!=source_versions[suffix]:
+            continue
         matching.append({"volid":volid,"ctime":v.get("ctime"),"size":v.get("size")})
     matching.sort(key=lambda v:v.get("ctime") or 0,reverse=True)
     return {"vmid":vm["source_vmid"],"target_vmid":vm["target_vmid"],
