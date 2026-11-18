@@ -653,7 +653,7 @@ function protectedVMsPage(){
   +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Protections déclaratives</div></div>'
   +'<div class="stat-card"><span class="label">Préparations actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Aucune copie lancée</div></div>'
   +'<div class="stat-card"><span class="label">En pause</span><div class="value">'+current.filter(x=>x.state==='paused').length+'</div><div class="sub">Enregistrements conservés</div></div>'
-  +'<div class="stat-card"><span class="label">Incrémental froid · dernier état OK</span><div class="value">'
+  +'<div class="stat-card"><span class="label">Ancien historique à froid (désactivé)</span><div class="value">'
   +current.filter(v=>v.incremental_sync?.status==='success').length
   +'</div><div class="sub">Non autorisé pour la bascule</div></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Inventaire des VM sélectionnées</h2>'
@@ -743,12 +743,9 @@ function openDirectPRAJobForm(id,kind){
  if(!vm)return toast('VM protégée introuvable',false);
  const options=state.credentials.filter(x=>x.kind==='ssh').map(x=>[x.id,x.name]);
  if(!options.length)return toast('Créer au moins une identité SSH dans le coffre-fort',false);
- const isCold=kind==='offline_incremental';
- const textNotice=isCold
-  ?'Synchronisation incrémentale réelle : les DEUX VM doivent être ARRÊTÉES et hors HA pendant toute la copie. '
-    +'Leurs disques LVM doivent avoir une topologie et une taille identiques. Aucune bascule automatique.'
-  :'Copie initiale réelle : export snapshot de la VM source vers une VM de secours ÉTEINTE. '
-    +'Le VMID cible doit être libre. Aucun arrêt de la source et aucun PBS.';
+ const textNotice='Copie initiale à chaud : la VM SD reste ALLUMÉE. '
+  +'Une sauvegarde QEMU snapshot est envoyée vers un VMID libre sur AU et la copie AU reste ÉTEINTE. '
+  +'Ce n’est pas encore une chaîne de deltas incrémentaux à chaud.';
  const body='<form id="drDirectPRAForm" data-id="'+id+'" data-kind="'+e(kind)+'">'
   +'<div class="notice error"><b>Opération sur les baies Proxmox :</b> '+e(textNotice)+'</div>'
   +'<p>VM '+e(vm.source_vmid)+' → '+e(vm.target_vmid)+' · '+e(vm.source_dc_name)+' → '+e(vm.target_dc_name)+'</p>'
@@ -762,7 +759,7 @@ function openDirectPRAJobForm(id,kind){
   +'<label class="field checkbox"><input type="checkbox" name="approved" required>'
   +'<span>Je confirme l’opération réelle sur les VM et leurs disques.</span></label>'
   +'<div class="tool-row"><button class="btn primary" type="submit">Démarrer '
-  +(isCold?'l’incrémental à froid':'la copie initiale')+'</button>'
+  +'la copie initiale'+'</button>'
   +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
  modal('PRA direct · VM #'+e(vm.source_vmid),body,'',true);
 }
@@ -2479,9 +2476,7 @@ async function handleSubmit(ev){
    ev.preventDefault();
    const f=new FormData(ev.target),id=Number(ev.target.dataset.id),kind=ev.target.dataset.kind;
    if(!f.has('approved'))return toast('Confirmation obligatoire',false);
-   const text=kind==='offline_incremental'
-       ?'Les DEUX VM sont-elles réellement arrêtées et sorties de la HA ?'
-       :'Lancer une copie complète réelle vers un nouveau VMID sur AU ?';
+   const text='La VM SD doit rester allumée. Démarrer une sauvegarde snapshot complète vers AU, copie éteinte ?';
    if(!confirm(text))return;
    try{
      const result=await api('/dr/vms/'+id+'/direct-jobs','POST',{
