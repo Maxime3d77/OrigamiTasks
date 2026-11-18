@@ -26,7 +26,8 @@ def main():
     if not server.startswith("https://"):
         raise ValueError("An HTTPS OrigamiTasks server is required")
     payload={
-        "protected_vm_id":int(protection),"run_uuid":job,"status":status,
+        "protected_vm_id":int(protection),"source_vmid":int(sourcevmid),
+        "target_vmid":int(targetvmid),"run_uuid":job,"status":status,
         "disks_total":int(total),"disks_done":int(done),
         "scanned_bytes":int(scanned),"transferred_bytes":int(transferred),
         "elapsed_seconds":int(elapsed),
