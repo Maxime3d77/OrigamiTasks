@@ -169,6 +169,20 @@ def hot_preflight(vm_id,source_ssh_id):
         result["target_vm_must_be_stopped"]=True
         result["source_node"]=node
         result["requires_provider_implementation"]=True
+        with db.session() as con:
+            con.execute(
+                "INSERT INTO pra_hot_preflights(protected_vm_id,checked_at,source_node,"
+                "source_running,qmp_available,external_provider_api,disk_count,reason) "
+                "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(protected_vm_id) DO UPDATE SET "
+                "checked_at=excluded.checked_at,source_node=excluded.source_node,"
+                "source_running=excluded.source_running,qmp_available=excluded.qmp_available,"
+                "external_provider_api=excluded.external_provider_api,"
+                "disk_count=excluded.disk_count,reason=excluded.reason",
+                (vm_id,db.now(),node,int(result.get("source_running") is True),
+                 int(result.get("qmp_available") is True),
+                 int(result.get("external_provider_api") is True),
+                 len(result.get("disks") or []),str(result.get("reason") or "")[:120])
+            )
         return result
     except PRAJobError:
         raise
