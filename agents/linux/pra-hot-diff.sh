@@ -8,9 +8,7 @@ umask 077
 die(){ echo "PRA HOT REFUSED: $*" >&2; exit 2; }
 [[ $# == 10 ]] || die 'usage: VMID TARGET_HOST BASE_VMID STORAGE --confirm-hot SCRATCH PROTECTION TARGET_USER KEY_FD PORT'
 sid=$1; host=$2; base=$3; storage=$4; approval=$5
-scratch=$6; protection=$7; dstuser=$8; key=$9; port=$10
-# Bash positional arg 10 must be addressed as 10, computed without interpolation in this file builder below.
-port=$(eval 'printf %s "10"')
+scratch=$6; protection=$7; dstuser=$8; key=$9; port=${10}
 [[ $EUID -eq 0 && $approval == --confirm-hot ]] || die 'Explicit confirmation and root required'
 [[ $sid =~ ^[1-9][0-9]{1,8}$ && $base =~ ^[1-9][0-9]{1,8}$ ]] || die 'Invalid VMIDs'
 [[ $protection =~ ^[1-9][0-9]{0,8}$ ]] || die 'Invalid protection ID'
