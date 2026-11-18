@@ -14,7 +14,7 @@ from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHand
 from urllib.error import HTTPError
 
 CONFIG = Path(__file__).with_name('config.json')
-VERSION = '0.3.0'
+VERSION = '0.3.1'
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -79,6 +79,16 @@ def run(task):
         return command(['systemctl',verbs[action],name],timeout)
     return 1, 'Unsupported action'
 
+def process_memory_mb():
+    """Current RSS for this agent process only, not its child processes."""
+    try:
+        with open('/proc/self/statm',encoding='ascii') as stream:
+            pages=int(stream.read().split()[1])
+        return round(pages*os.sysconf('SC_PAGE_SIZE')/(1024*1024),2)
+    except (OSError,ValueError,IndexError):
+        return None
+
+
 def main():
     cfg = read_config()
     if not cfg.get('token'):
@@ -88,10 +98,19 @@ def main():
         cfg['token']=auth['token']
         cfg.pop('enrollment_token',None)
         write_config(cfg)
-    delay=3
+    interval = min(60,max(5,int(cfg.get('poll_interval_seconds',10))))
+    delay = interval
+    previous_cpu=time.process_time()
+    previous_wall=time.monotonic()
     while True:
         try:
-            body={'hostname':socket.gethostname(),'version':VERSION}
+            now_cpu=time.process_time()
+            now_wall=time.monotonic()
+            elapsed=max(.001,now_wall-previous_wall)
+            cpu=round(max(0,min(1000,100*(now_cpu-previous_cpu)/elapsed)),2)
+            previous_cpu,previous_wall=now_cpu,now_wall
+            body={'hostname':socket.gethostname(),'version':VERSION,
+                  'cpu_percent':cpu,'memory_mb':process_memory_mb()}
             response=request(cfg,'/api/agent/poll',body,True)
             task=response.get('task')
             if task:
@@ -101,7 +120,7 @@ def main():
                     code,output=1,type(exc).__name__+': '+str(exc)[:300]
                 request(cfg,'/api/agent/report',{'task_id':task['id'],'lease':task['lease'],
                     'exit_code':int(code),'output':str(output)[:32000]},True)
-            delay=3
+            delay=interval
         except (KeyboardInterrupt,SystemExit):
             raise
         except Exception as exc:

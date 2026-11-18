@@ -2,6 +2,7 @@
 import io
 import json
 import hmac
+import math
 import re
 import secrets
 import shlex
@@ -92,9 +93,20 @@ def poll(agent, body):
     version = str(body.get('version') or '')[:40]
     if hostname and not re.fullmatch(r'[A-Za-z0-9_.-]{1,120}', hostname):
         raise HTTPException(422, 'Hostname invalide')
+    cpu = body.get('cpu_percent')
+    memory = body.get('memory_mb')
+    def metric(value, maximum):
+        if value is None:
+            return None
+        if type(value) not in (int,float) or not math.isfinite(value) or not 0<=value<=maximum:
+            raise HTTPException(422, 'Métrique agent invalide')
+        return round(float(value),2)
+    cpu = metric(cpu, 1000)
+    memory = metric(memory, 262144)
     with db.session() as con:
-        con.execute('UPDATE agents SET last_seen=?, hostname=CASE WHEN ?<>\'\' THEN ? ELSE hostname END, version=? WHERE id=?',
-                    (db.now(), hostname, hostname, version, agent['id']))
+        con.execute("UPDATE agents SET last_seen=?,hostname=CASE WHEN ?<>'' THEN ? ELSE hostname END,"
+                    "version=?,cpu_percent=?,memory_mb=? WHERE id=?",
+                    (db.now(),hostname,hostname,version,cpu,memory,agent['id']))
         task = con.execute(
             "SELECT * FROM agent_tasks WHERE agent_id=? AND status='queued' ORDER BY id LIMIT 1", (agent['id'],)).fetchone()
         if not task:
@@ -276,7 +288,7 @@ def deploy(body):
                 'printf "%s\\n" "[Unit]" "Description=OrigamiTasks outbound agent" "After=network-online.target" "Wants=network-online.target" '
                 '"[Service]" "Type=simple" "User=origamitasks-agent" "Group=origamitasks-agent" '
                 '"ExecStart=/usr/bin/env python3 /opt/origamitasks-agent/agent.py" "Restart=always" "RestartSec=10" '
-                '"NoNewPrivileges=true" "ProtectSystem=strict" "ProtectHome=true" "ReadWritePaths=/opt/origamitasks-agent" '
+                '"NoNewPrivileges=true" "ProtectSystem=strict" "ProtectHome=true" "ReadWritePaths=/opt/origamitasks-agent" "MemoryMax=192M" "CPUQuota=20%" "TasksMax=48" '
                 '"[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/origamitasks-agent.service; '
                 'systemctl daemon-reload; systemctl enable --now origamitasks-agent.service; '
                 'rm -f '+stage_script+' '+stage_config

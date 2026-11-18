@@ -264,3 +264,23 @@
 .dr-sim-history{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--stroke);padding:9px 0;font-size:12px}
 .dr-sim-history small{margin-left:auto}
 @media(max-width:720px){.dr-sites-panel .panel-title{flex-direction:column}.dr-site-card .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+
+/* v0.3.15 overview with independently selected task, agent and Proxmox panels */
+.overview-tabs{display:flex;gap:9px;flex-wrap:wrap;margin:-7px 0 22px;padding:5px;border:1px solid var(--stroke);border-radius:12px;background:var(--panel)}
+.overview-tabs button{flex:1 1 185px;min-height:43px;padding:10px 15px;border:1px solid transparent;border-radius:9px;color:var(--muted);background:transparent;font-size:12px;font-weight:720;text-align:center}
+.overview-tabs button:hover{background:var(--panel2);color:var(--text)}
+.overview-tabs button.active{background:var(--yellow);color:#201b14;border-color:var(--yellow)}
+.overview-tabs button:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+.overview-panel{min-width:0}
+.overview-panel .panel-title{flex-wrap:wrap;align-items:flex-start}
+.overview-panel .panel-title h2{margin-bottom:5px}
+.overview-dc-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr))}
+.overview-dc-card{min-width:0}
+.overview-dc-card p{min-height:0;overflow-wrap:anywhere}
+.overview-dc-details{display:flex;flex-direction:column;gap:9px;font-size:11px;color:var(--muted);margin:4px 0 14px}
+.overview-dc-details b{color:var(--text);font-weight:650}
+.overview-dc-card>.btn{width:100%;margin-top:auto}
+.agent-action-buttons{min-width:240px}
+.agent-action-buttons .btn{white-space:normal;line-height:1.25;margin:3px 3px 3px 0}
+@media(max-width:760px){.overview-tabs{flex-direction:column}.overview-tabs button{flex:0 1 auto;text-align:left}.overview-panel .stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.agent-action-buttons{min-width:170px}}

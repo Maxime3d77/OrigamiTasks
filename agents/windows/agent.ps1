@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ConfigFile = Join-Path $PSScriptRoot 'config.json'
-$Version = '0.3.0'
+$Version = '0.3.1'
 
 function Read-AgentConfig {
     Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -67,10 +67,26 @@ if (-not $cfg.token) {
     $cfg.PSObject.Properties.Remove('enrollment_token')
     Save-AgentConfig $cfg
 }
-$delay=3
+$interval = 10
+if ($null -ne $cfg.poll_interval_seconds) {
+    $interval=[Math]::Min(60,[Math]::Max(5,[int]$cfg.poll_interval_seconds))
+}
+$delay=$interval
+$lastWall=[DateTime]::UtcNow
+$lastCpu=(Get-Process -Id $PID).CPU
 while ($true) {
     try {
-        $result = Send-AgentRequest $cfg '/api/agent/poll' @{hostname=$env:COMPUTERNAME;version=$Version}
+        $p=Get-Process -Id $PID
+        $now=[DateTime]::UtcNow
+        $elapsed=[Math]::Max(0.001,($now-$lastWall).TotalSeconds)
+        $cpuPercent=[Math]::Round([Math]::Max(0,($p.CPU-$lastCpu)*100/$elapsed),2)
+        $lastCpu=$p.CPU
+        $lastWall=$now
+        $rssMb=[Math]::Round($p.WorkingSet64/1MB,2)
+        $result = Send-AgentRequest $cfg '/api/agent/poll' @{
+            hostname=$env:COMPUTERNAME;version=$Version
+            cpu_percent=$cpuPercent;memory_mb=$rssMb
+        }
         if ($null -ne $result.task) {
             try {
                 $r = Invoke-AgentTask $result.task
@@ -81,7 +97,7 @@ while ($true) {
             if ($out.Length -gt 32000) { $out=$out.Substring(0,32000) }
             $null = Send-AgentRequest $cfg '/api/agent/report' @{task_id=$result.task.id;lease=$result.task.lease;exit_code=[int]$r.exit_code;output=$out}
         }
-        $delay=3
+        $delay=$interval
     } catch {
         Write-Error ('Agent polling error: ' + $_.Exception.GetType().Name) -ErrorAction Continue
         $delay=[Math]::Min($delay*2,60)

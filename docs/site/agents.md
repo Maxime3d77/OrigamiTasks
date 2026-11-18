@@ -1,5 +1,15 @@
 # Linux and Windows agents — v0.3.0-rc1 preview
 
+## Overview, consumption and remote uninstall (v0.3.15)
+
+The **Overview** has three tabs: **Tasks**, **Agents** and **Proxmox DC / DR**. Agent view shows last heartbeat, reported version, CPU and RAM of the **agent process only** when agent version 0.3.1+ reports these values. This does not include spawned scripts, VMs or services managed on the host; unavailable metrics mean *not reported*, not zero.
+
+New agent scripts default to **10-second** outbound HTTPS polling, configurable in `config.json` using `poll_interval_seconds` from 5 to 60 seconds. Exact utilization depends on the host and workload. Newly installed Linux systemd services use `CPUQuota=20%`, `MemoryMax=192M`, `TasksMax=48` for their **whole service process group**, potentially throttling or terminating heavier tasks. These are resource caps, not guaranteed measured usage. Previously installed agents keep their prior settings until explicitly replaced.
+
+Under **Linux and Windows Agents**, **Revoke token** leaves the software installed, whereas **Uninstall via SSH** removes only the dedicated OrigamiTasks service/task and agent folder then revokes its token. It requires a vault SSH identity, FQDN, SSH port, exact agent-name confirmation, previously pinned host key, matching enrolled hostname and a matching on-host agent ID and controller URL. A failed uninstall is never reported as successful, nor automatically revoked; manual revoke remains possible. Windows removal needs administrator rights, Linux removal needs root or non-interactive sudo.
+
+**Security limitations:** outbound verified HTTPS, individual revocable tokens and encrypted central vault; restricted unprivileged Linux service. There is **no mTLS, signed agent update distribution or autonomous DR runtime yet**. The Windows agent currently runs as a SYSTEM scheduled task and requires further hardening before broad deployment on critical hosts. Avoid enabling arbitrary script execution on sensitive systems.
+
 ## Autonomous DR site agents: design target, not yet available
 
 Current Linux Python/Windows PowerShell agents poll the OrigamiTasks controller over outbound HTTPS. If its VM is on SD and becomes unavailable, **they cannot receive new jobs**. These are not yet replication agents or failover arbitrators.

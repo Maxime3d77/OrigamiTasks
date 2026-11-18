@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.15-rc1 — 2026-11-17
+
+- **Overview:** *Tasks & runs*, *Active agents* and *Proxmox DC / DR* tabs. Existing task metrics, agent online/offline/revoked/uninstalled states and process CPU/RAM telemetry when reported, linked Proxmox clusters and sites. Real DR replication lag remains explicitly unavailable until an actual engine is deployed.
+- **Remote removal:** SSH uninstall for enrolled Linux and Windows agents, requiring a vault SSH identity, pinned and trusted host key, matching enrolled hostname and an on-host check of agent ID and controller HTTPS URL. Removes only OrigamiTasks's service/task and agent folder, then revokes its token. Failed remote removal never silently revokes; manual revoke stays separate.
+- **Resource usage:** newly deployed Linux units apply `MemoryMax=192M`, `CPUQuota=20%`, `TasksMax=48`. New agent script versions default to configurable 10-second polling (5–60 s) and report their own process CPU/RAM. Existing agents are not automatically upgraded.
+- **Security limits:** preview-grade agents use HTTPS and individual revocable tokens, but no mTLS, signed update bundles or autonomous DR runtime yet. Windows scheduled agent still runs as SYSTEM and needs further hardening.
+
 ## 0.3.14-rc1 — 2026-11-17
 
 - **DR sites:** manage freely named sites directly from the Proxmox screen, with **primary / standby / other** role, multiple registered Proxmox clusters, existing Linux agents, and declared storage profiles (auto, shared iSCSI+LVM, ZFS, Ceph, PBS, other).
