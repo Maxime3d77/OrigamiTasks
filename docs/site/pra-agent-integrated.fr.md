@@ -1,5 +1,7 @@
 # PRA direct depuis l'interface — v0.3.30
 
+> **AVERTISSEMENT v0.3.31 : le moteur incrémental à froid décrit ci-dessous a été désactivé. Il n'est plus exécutable ; le prétest QMP à chaud est disponible, mais la réplication incrémentale à chaud reste à implémenter.**
+
 ## Déploiement sans scripts manuels
 
 Le paquet Linux OrigamiTasks 0.3.30 embarque les trois composants PRA : copie initiale, incrémental à froid et remontée d'état. Le déploiement initial et le bouton **Mettre à jour l'agent** installent automatiquement ces fichiers dans /usr/local/lib/origamitasks/pra, répertoire accessible à root uniquement. L'agent sortant (service origamitasks-agent) reste non privilégié et ne peut pas modifier les exécutables PRA. L'agent garde ses ID, token et modules.
