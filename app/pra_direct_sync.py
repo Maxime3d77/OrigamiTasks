@@ -39,7 +39,7 @@ def _node_authorized(agent,vm):
 def report(agent,payload):
     if not isinstance(payload,dict) or set(payload)!={"protected_vm_id","run_uuid","status",
                                                       "disks_total","disks_done",
-                                                      "scanned_bytes","elapsed_seconds","error"}:
+                                                      "scanned_bytes","transferred_bytes","elapsed_seconds","error"}:
         raise DirectSyncError("Rapport incrémental invalide")
     vmid=payload["protected_vm_id"]
     run_uuid=payload["run_uuid"]
@@ -55,7 +55,7 @@ def report(agent,payload):
         raise DirectSyncError("État de synchronisation invalide")
     numbers={}
     for k,maxval in (("disks_total",64),("disks_done",64),
-                     ("scanned_bytes",2**56),("elapsed_seconds",604800)):
+                     ("scanned_bytes",2**56),("transferred_bytes",2**56),("elapsed_seconds",604800)):
         value=payload[k]
         if value is not None and (type(value) is not int or not 0<=value<=maxval):
             raise DirectSyncError("Métrique "+k+" invalide")
@@ -79,10 +79,10 @@ def report(agent,payload):
                 raise DirectSyncError("Run terminé ou appartenant à un autre agent")
             con.execute(
                 "UPDATE pra_direct_sync_runs SET status=?,disks_total=?,disks_done=?,"
-                "scanned_bytes=?,elapsed_seconds=?,error=?,last_report_at=?,"
+                "scanned_bytes=?,transferred_bytes=?,elapsed_seconds=?,error=?,last_report_at=?,"
                 "finished_at=CASE WHEN ? <> 'running' THEN ? ELSE NULL END WHERE id=?",
                 (status,numbers["disks_total"],numbers["disks_done"],
-                 numbers["scanned_bytes"],numbers["elapsed_seconds"],error,db.now(),
+                 numbers["scanned_bytes"],numbers["transferred_bytes"],numbers["elapsed_seconds"],error,db.now(),
                  status,db.now(),row["id"])
             )
             run_id=row["id"]
@@ -94,11 +94,11 @@ def report(agent,payload):
                 raise DirectSyncError("Une synchronisation est déjà enregistrée sur cette VM")
             run_id=con.execute(
                 "INSERT INTO pra_direct_sync_runs(protected_vm_id,run_uuid,agent_id,kind,"
-                "status,disks_total,disks_done,scanned_bytes,elapsed_seconds,error,"
-                "started_at,last_report_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "status,disks_total,disks_done,scanned_bytes,transferred_bytes,elapsed_seconds,error,"
+                "started_at,last_report_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (vmid,run_uuid,agent["id"],"offline_incremental","running",
                  numbers["disks_total"],numbers["disks_done"],numbers["scanned_bytes"],
-                 numbers["elapsed_seconds"],error,db.now(),db.now())
+                 numbers["transferred_bytes"],numbers["elapsed_seconds"],error,db.now(),db.now())
             ).lastrowid
     if status!="running":
         db.audit("agent:"+str(agent["id"]),"pra.direct.sync."+status,vmid,
@@ -110,7 +110,7 @@ def list_runs(vm_id):
     dr_protected_vms._one(vm_id)
     with db.session() as con:
         items=[dict(x) for x in con.execute(
-            "SELECT id,kind,status,disks_total,disks_done,scanned_bytes,"
+            "SELECT id,kind,status,disks_total,disks_done,scanned_bytes,transferred_bytes,"
             "elapsed_seconds,error,started_at,finished_at,last_report_at "
             "FROM pra_direct_sync_runs WHERE protected_vm_id=? ORDER BY id DESC LIMIT 30",
             (vm_id,)
