@@ -583,9 +583,24 @@ function datacenters(){
 
 /* A protected VM is a manually selected plan, never an actual running replica.
    All tests perform read-only GET requests to Proxmox and return BLOCKED. */
+let directSyncPollTimer=null;
+function scheduleDirectSyncPoll(){
+ if(directSyncPollTimer||state.page!=='protected-vms'||!roleAdmin())return;
+ if(!(state.drProtectedVMs||[]).some(x=>x.incremental_sync?.status==='running'))return;
+ directSyncPollTimer=setTimeout(async()=>{
+   directSyncPollTimer=null;
+   if(state.page!=='protected-vms'||!roleAdmin())return;
+   try{
+     state.drProtectedVMs=(await api('/dr/vms')).items;
+     render();
+   }catch(ex){console.warn('Actualisation PRA indisponible',ex?.message)}
+   scheduleDirectSyncPoll();
+ },5000);
+}
 function protectedVMsPage(){
  if(!roleAdmin())return title('VM protégées PRA','Administration uniquement.');
  const plans=state.drPlans||[],all=state.drProtectedVMs||[];
+ scheduleDirectSyncPoll();
  const selected=state.drVMPlanFilter||'all';
  const current=selected==='all'?all:all.filter(x=>String(x.plan_id)===String(selected));
  const tableRows=current.map(vm=>{
