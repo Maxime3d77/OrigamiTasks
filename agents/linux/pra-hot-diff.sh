@@ -18,7 +18,8 @@ scratch=$6; protection=$7; dstuser=$8; key=$9; port=${10}
 [[ $key =~ ^/proc/self/fd/[0-9]+$ && -r $key ]] || die 'Ephemeral SSH key required'
 [[ -n $PRA_PINNED_KNOWN_HOSTS && $PRA_PINNED_KNOWN_HOSTS =~ ^/proc/self/fd/[0-9]+$ ]] || die 'Pinned host file required'
 [[ $scratch =~ ^/[A-Za-z0-9_./-]+$ && $scratch != / && -d $scratch && ! -L $scratch ]] || die 'Dedicated scratch directory required'
-[[ $(findmnt -T "$scratch" -n -o TARGET) != / ]] || die 'Scratch filesystem cannot be root filesystem'
+scratch_mount=$(findmnt -T "$scratch" -n -o TARGET) || die 'Cannot identify scratch filesystem'
+[[ -n "$scratch_mount" && "$scratch_mount" != / ]] || die 'Scratch filesystem cannot be root filesystem'
 [[ -f /etc/pve/nodes/$(hostname -s)/qemu-server/$sid.conf ]] || die 'Run on current owner node'
 running(){
  [[ -f /etc/pve/nodes/$(hostname -s)/qemu-server/$sid.conf ]] || die 'Source migrated to another node'
