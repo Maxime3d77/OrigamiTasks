@@ -3,7 +3,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from . import config, db, executor
+from . import config, db, executor, notifications
 
 STOP = threading.Event()
 
@@ -90,8 +90,11 @@ def record_step(run_id, step, status, exit_code, output, attempt=1, started_at=N
 
 def enqueue(job, trigger, actor, variables=None):
     with db.session() as con:
-        cur = con.execute('INSERT INTO runs (job_id,job_name,steps_snapshot,variables_json,trigger,requested_by,queued_at,status) VALUES (?,?,?,?,?,?,?,?)',
-                          (job['id'],job['name'],job['steps_json'] if isinstance(job['steps_json'],str) else json.dumps(job['steps_json']), json.dumps(variables or {},ensure_ascii=False), trigger,actor,db.now(),'queued'))
+        cur = con.execute('INSERT INTO runs (job_id,job_name,steps_snapshot,variables_json,notification_json,trigger,requested_by,queued_at,status) VALUES (?,?,?,?,?,?,?,?,?)',
+                          (job['id'],job['name'],job['steps_json'] if isinstance(job['steps_json'],str) else json.dumps(job['steps_json']),
+                           json.dumps(variables or {},ensure_ascii=False),
+                           job.get('notification_json') if isinstance(job.get('notification_json'),str) else json.dumps(job.get('notification_json') or {}),
+                           trigger,actor,db.now(),'queued'))
         return cur.lastrowid
 
 
@@ -114,6 +117,20 @@ def process(run):
     with db.session() as con:
         con.execute('UPDATE runs SET status=?,error=?,finished_at=? WHERE id=?', (status,error,db.now(),run['id']))
     db.audit('engine', 'run.finished', run['id'], status)
+    # Notification delivery never changes execution status; surface SMTP errors
+    # separately in the run detail and audit trail, without exposing secrets.
+    try:
+        notice_status,notice_error=notifications.send(run['id'],run,status,error)
+    except Exception as exc:
+        notice_status="failed"
+        notice_error="Envoi du rapport : échec SMTP ("+type(exc).__name__+")"
+    with db.session() as con:
+        con.execute('UPDATE runs SET notification_status=?,notification_error=? WHERE id=?',
+                    (notice_status,notice_error,run['id']))
+    if notice_status=="failed":
+        db.audit('engine','run.notification.failed',run['id'],notice_error)
+    elif notice_status=="sent":
+        db.audit('engine','run.notification.sent',run['id'],"rapport de fin d'exécution")
 
 
 def loop():

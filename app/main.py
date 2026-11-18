@@ -262,6 +262,33 @@ def validate_job(payload):
         next_run = scheduler.check_schedule(schedule) if payload.get('enabled',True) else None
     except (ValueError,KeyError) as exc:
         raise HTTPException(422,'Planification: '+str(exc))
+    notice=payload.get('notification_json',{})
+    if not isinstance(notice,dict) or set(notice)-{'enabled','credential_id','recipients','on_success','on_failure'}:
+        raise HTTPException(422,'Configuration des notifications invalide')
+    if notice.get('enabled'):
+        if type(notice.get('on_success',False)) is not bool or type(notice.get('on_failure',False)) is not bool:
+            raise HTTPException(422,'Choix du statut à notifier invalide')
+        if not (notice.get('on_success') or notice.get('on_failure')):
+            raise HTTPException(422,'Sélectionner réussite et/ou échec pour les notifications')
+        recipients=str(notice.get('recipients') or '').strip()
+        emails=[v.strip() for v in recipients.split(',')]
+        if not 1<=len(emails)<=5 or any(
+            not re.fullmatch(r'[A-Za-z0-9._%+\-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}', email)
+            for email in emails
+        ):
+            raise HTTPException(422,'Notifications : 1 à 5 adresses e-mail valides, séparées par des virgules')
+        try:
+            smtp_id=int(notice.get('credential_id'))
+        except (TypeError,ValueError):
+            raise HTTPException(422,'Notifications : choisir une connexion SMTP du coffre') from None
+        with db.session() as test_con:
+            smtp=test_con.execute('SELECT kind FROM credentials WHERE id=?',(smtp_id,)).fetchone()
+        if not smtp or smtp['kind']!='smtp':
+            raise HTTPException(422,'Notifications : connexion SMTP introuvable')
+        notice={'enabled':True,'credential_id':smtp_id,'recipients':','.join(emails),
+                'on_success':notice['on_success'],'on_failure':notice['on_failure']}
+    else:
+        notice={}
     folder=folder_path(payload.get('folder','Général'))
     return {
         'name':name,
@@ -271,6 +298,7 @@ def validate_job(payload):
         'acl_json':json.dumps({k:[str(g).strip().lower()[:120] for g in acl.get(k,[]) if str(g).strip()] for k in ('view','run','edit')},ensure_ascii=False),
         'steps_json':json.dumps(steps,ensure_ascii=False),
         'schedule_json':json.dumps(schedule,ensure_ascii=False),
+        'notification_json':json.dumps(notice,ensure_ascii=False),
         'enabled':int(bool(payload.get('enabled',True))),
         'next_run_at':next_run,
     }
@@ -279,7 +307,7 @@ def validate_job(payload):
 def get_job(con,job_id):
     row=con.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
     if not row: raise HTTPException(404,'Workflow introuvable')
-    return db.obj(row,'tags_json','acl_json','steps_json','schedule_json')
+    return db.obj(row,'tags_json','acl_json','steps_json','schedule_json','notification_json')
 
 
 @app.get('/api/catalog')
@@ -318,14 +346,30 @@ def add_datacenter(payload:dict[str,Any],request:Request):
     name=str(payload.get('name','')).strip()
     if not 1<=len(name)<=100: raise HTTPException(422,'Nom du datacenter invalide')
     try:
-        origin=integrations.authorized_origin(payload.get('url'),config.PROXMOX_ALLOWED_HOSTS)
+        origin=integrations.authorized_origin(payload.get('url'),config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True)
         credential_id=int(payload.get('credential_id'))
     except (integrations.IntegrationError,ValueError,TypeError) as exc:
         raise HTTPException(422,str(exc))
     with db.session() as con:
-        credential_exists=con.execute('SELECT kind FROM credentials WHERE id=?',(credential_id,)).fetchone()
+        credential_exists=con.execute(
+            'SELECT kind,encrypted_payload FROM credentials WHERE id=?',(credential_id,)
+        ).fetchone()
         if not credential_exists or credential_exists['kind'] not in ('proxmox','api'):
             raise HTTPException(422,'Un jeton Proxmox/API du coffre-fort est obligatoire')
+        vault_values=security.decrypt(credential_exists['encrypted_payload'])
+        source_url=vault_values.get('url') or vault_values.get('base_url')
+        if not source_url:
+            raise HTTPException(422,'Le profil du coffre doit contenir l’URL du DC Proxmox')
+        try:
+            saved_origin=integrations.authorized_origin(
+                source_url,config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True)
+        except integrations.IntegrationError as exc:
+            raise HTTPException(422,'URL du token Proxmox invalide : '+str(exc)) from None
+        if saved_origin.rstrip('/').lower()!=origin.rstrip('/').lower():
+            raise HTTPException(
+                422,'L’URL du DC doit correspondre à l’URL du token enregistré dans le coffre '
+                    'pour éviter l’envoi du secret à un autre serveur'
+            )
         try:
             cur=con.execute('INSERT INTO datacenters(name,url,credential_id,created_at) VALUES (?,?,?,?)',
                             (name,origin,credential_id,db.now()))
@@ -403,7 +447,7 @@ def list_folders(request:Request):
     user=security.require(request)
     with db.session() as con:
         rows=con.execute('SELECT * FROM jobs').fetchall()
-        allowed=[db.obj(row,'tags_json','acl_json','steps_json','schedule_json') for row in rows]
+        allowed=[db.obj(row,'tags_json','acl_json','steps_json','schedule_json','notification_json') for row in rows]
         allowed=[job for job in allowed if security.can_job(user,job,'view')]
         if user['role']=='admin':
             paths=known_folders(con)
@@ -567,7 +611,7 @@ def list_jobs(request: Request):
     user=security.require(request)
     with db.session() as con:
         rows=con.execute('SELECT * FROM jobs ORDER BY updated_at DESC,id DESC').fetchall()
-    jobs=[db.obj(row,'tags_json','acl_json','steps_json','schedule_json') for row in rows]
+    jobs=[db.obj(row,'tags_json','acl_json','steps_json','schedule_json','notification_json') for row in rows]
     return {'items':[dict(j,permissions={'view':True,'run':security.can_job(user,j,'run'),'edit':security.can_job(user,j,'edit')}) for j in jobs if security.can_job(user,j,'view')]}
 
 
@@ -585,8 +629,8 @@ def create_job(payload: dict[str,Any], request: Request):
     user=security.require(request,role='admin',mutate=True)
     fields=validate_job(payload)
     with db.session() as con:
-        cur=con.execute('INSERT INTO jobs (name,description,folder,tags_json,acl_json,steps_json,schedule_json,enabled,next_run_at,created_by,created_at,updated_at) '
-                        'VALUES (:name,:description,:folder,:tags_json,:acl_json,:steps_json,:schedule_json,:enabled,:next_run_at,:created_by,:created_at,:updated_at)',
+        cur=con.execute('INSERT INTO jobs (name,description,folder,tags_json,acl_json,steps_json,schedule_json,notification_json,enabled,next_run_at,created_by,created_at,updated_at) '
+                        'VALUES (:name,:description,:folder,:tags_json,:acl_json,:steps_json,:schedule_json,:notification_json,:enabled,:next_run_at,:created_by,:created_at,:updated_at)',
                         dict(fields,created_by=user['username'],created_at=db.now(),updated_at=db.now()))
         id_=cur.lastrowid
     db.audit(user['username'],'job.create',id_,fields['name'])
@@ -605,12 +649,13 @@ def update_job(job_id: int,payload:dict[str,Any],request: Request):
             if any(s.get('type') in ('proxmox','agent','directory') for s in old['steps_json']+payload['steps_json']):
                 raise HTTPException(403,'Seul un administrateur peut modifier les étapes Proxmox')
             fields['acl_json']=json.dumps(old['acl_json'],ensure_ascii=False)
+            fields['notification_json']=json.dumps(old.get('notification_json') or {},ensure_ascii=False)
             existing_creds={step['id']:str(step.get('config',{}).get('credential_id') or '') for step in old['steps_json']}
             for step in payload['steps_json']:
                 current=str(step.get('config',{}).get('credential_id') or '')
                 if current != existing_creds.get(step['id'],''):
                     raise HTTPException(403,'Seul un administrateur peut attribuer ou changer un identifiant de coffre')
-        con.execute('UPDATE jobs SET name=:name,description=:description,folder=:folder,tags_json=:tags_json,acl_json=:acl_json,steps_json=:steps_json,schedule_json=:schedule_json,enabled=:enabled,next_run_at=:next_run_at,updated_at=:updated_at WHERE id=:id',
+        con.execute('UPDATE jobs SET name=:name,description=:description,folder=:folder,tags_json=:tags_json,acl_json=:acl_json,steps_json=:steps_json,schedule_json=:schedule_json,notification_json=:notification_json,enabled=:enabled,next_run_at=:next_run_at,updated_at=:updated_at WHERE id=:id',
                     dict(fields,id=job_id,updated_at=db.now()))
     db.audit(user['username'],'job.update',job_id,fields['name'])
     return {'ok':True}
@@ -699,7 +744,7 @@ def list_runs(request:Request):
     user=security.require(request)
     with db.session() as con:
         jobs={r['id']:db.obj(r,'acl_json') for r in con.execute('SELECT id,acl_json FROM jobs')}
-        rows=con.execute('SELECT id,job_id,job_name,status,trigger,requested_by,queued_at,started_at,finished_at,error FROM runs ORDER BY id DESC LIMIT 200').fetchall()
+        rows=con.execute('SELECT id,job_id,job_name,status,trigger,requested_by,queued_at,started_at,finished_at,error,notification_status,notification_error FROM runs ORDER BY id DESC LIMIT 200').fetchall()
     return {'items':[dict(r) for r in rows if user['role']=='admin' or (r['job_id'] in jobs and security.can_job(user,jobs[r['job_id']],'view'))]}
 
 
@@ -707,7 +752,7 @@ def list_runs(request:Request):
 def read_run(run_id:int,request:Request):
     user=security.require(request)
     with db.session() as con:
-        run=con.execute('SELECT id,job_id,job_name,status,trigger,requested_by,queued_at,started_at,finished_at,error FROM runs WHERE id=?',(run_id,)).fetchone()
+        run=con.execute('SELECT id,job_id,job_name,status,trigger,requested_by,queued_at,started_at,finished_at,error,notification_status,notification_error FROM runs WHERE id=?',(run_id,)).fetchone()
         if not run: raise HTTPException(404,'Exécution introuvable')
         job=con.execute('SELECT id,acl_json FROM jobs WHERE id=?',(run['job_id'],)).fetchone()
         if user['role']!='admin' and (not job or not security.can_job(user,db.obj(job,'acl_json'),'view')):

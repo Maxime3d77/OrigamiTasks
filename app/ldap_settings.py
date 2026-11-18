@@ -64,9 +64,26 @@ def import_ca(pem_text=None, der_base64=None):
     blocks=_re.findall(r'-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----',pem_text)
     if not 1<=len(blocks)<=10:
         raise LDAPSettingsError("Importer de 1 à 10 certificats CA PEM")
+    # PEM exports produced by OpenSSL/PKCS#12 may include harmless textual
+    # metadata (Bag Attributes, friendlyName, subject and issuer).
+    # Do not silently discard other PEM blocks, keys, or arbitrary content.
     residue=_re.sub(r'-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----','',pem_text)
-    if residue.strip():
-        raise LDAPSettingsError("Le fichier PEM doit contenir uniquement des certificats")
+    metadata_patterns = (
+        r'Bag Attributes', r'Key Attributes:.*', r'friendlyName:.*',
+        r'localKeyID:.*', r'subject\s*=.*', r'issuer\s*=.*',
+        r'Certificate bag', r'Microsoft CSP Name:.*',
+    )
+    for line_number, line in enumerate(residue.splitlines(), 1):
+        stripped=line.strip()
+        if not stripped:
+            continue
+        if not any(_re.fullmatch(pattern, stripped, _re.IGNORECASE)
+                   for pattern in metadata_patterns):
+            raise LDAPSettingsError(
+                "Données non reconnues dans le fichier PEM (ligne hors certificat "
+                + str(line_number) + "). Fournir une CA PEM/DER ou un export OpenSSL "
+                "contenant uniquement des certificats et leurs métadonnées."
+            )
     accepted=[]
     ignored_non_ca=0
     subjects=[]

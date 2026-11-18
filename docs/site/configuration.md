@@ -11,12 +11,18 @@ The `.env.example` file is the normative list of settings. Restart the container
 | `ORIGAMI_EXECUTOR_WORKERS` | Concurrent workflow workers | Start with `2`; single API instance only |
 | `MAX_STEP_SECONDS` | Upper bound for one step | `1800` |
 | `MATRIX_ALLOWED_HOSTS` | Explicit Matrix homeserver hostnames | e.g. `matrix.example.org` |
-| `PROXMOX_ALLOWED_HOSTS` | Proxmox REST API endpoints and read-only credential tests | e.g. `pve.example.org:8006` |
+| `PROXMOX_ALLOWED_HOSTS` | Legacy external allow-list for other connector paths | **Not required for Proxmox DC/token profiles stored in the web UI** |
 | `CONNECTION_TEST_ALLOWED_HOSTS` | Exact allow-listed HTTPS hosts for generic API credential GET diagnostics | Empty by default; set only trusted hosts |
 | `PROXMOX_CA_CERT` | Trusted PEM CA file inside container | Optional if system CA trusted |
 | `SSH_HOST_KEY_POLICY` | SSH server public key enrollment | `accept-new` by default; `strict` for manual verification |
 | `ALLOW_PROXMOX_ACTIONS` | Allow gated VM power actions | `false` until reviewed |
 | `GIT_ALLOWED_ORIGIN` | Updater's exact permitted Git URL | Protected origin only |
+
+## Manage Proxmox datacenters without editing `.env`
+
+Create a **Proxmox API** vault profile with an HTTPS endpoint such as `https://pve.example.org:8006`, `user@realm!tokenname` and the API token secret. Under **Administration → DC Proxmox**, register a datacenter and select that profile with **the same HTTPS URL**. The registered endpoint is authorized immediately, regardless of `PROXMOX_ALLOWED_HOSTS`; the web UI supports searching large fleets.
+
+Mismatched token and datacenter URLs are rejected to prevent sending credentials to a different host. HTTPS server certificate verification is still mandatory; if an internal CA is not trusted, configure `PROXMOX_CA_CERT` or the system trust store. Sensitive VM operations remain subject to PVE token permissions **and** OrigamiTasks action controls; registering a DC never elevates its token.
 
 ## LDAP / Active Directory
 

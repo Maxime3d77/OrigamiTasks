@@ -4,6 +4,7 @@ V0.2 deliberately does not implement cross-cluster VM replication or remote migr
 those require dedicated replication agents, storage-aware validation and fencing.
 """
 import json
+import ipaddress
 import re
 import shlex
 from urllib.parse import quote, urlsplit
@@ -15,23 +16,47 @@ class IntegrationError(Exception):
     pass
 
 
-def authorized_origin(raw_url, allowed_hosts):
-    """Only HTTPS to an explicitly configured host; avoids credential SSRF.
+def authorized_origin(raw_url, allowed_hosts, *, admin_proxmox=False):
+    """Validate an HTTPS API origin; never follow redirects with tokens.
 
-    Exact DNS names or IP addresses, optionally with a port, are accepted in
-    the environment allow-list. Never redirect with Authorization headers.
+    For Proxmox only, an administrator-created vault connection or datacenter
+    is sufficient to authorize a constrained HTTPS endpoint when no explicit
+    PROXMOX_ALLOWED_HOSTS is configured. An existing allow-list wins.
     """
-    url = str(raw_url or '').rstrip('/')
-    parsed = urlsplit(url)
-    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('', '/'):
+    url = str(raw_url or '').strip().rstrip('/')
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except (ValueError, TypeError):
+        raise IntegrationError("Port de l'URL Proxmox invalide") from None
+    if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or
+            parsed.password or parsed.query or parsed.fragment or
+            parsed.path not in ('', '/')):
         raise IntegrationError('URL HTTPS racine obligatoire (sans identifiants ni chemin)')
+    host = parsed.hostname.lower().rstrip('.')
+    if admin_proxmox:
+        # This origin is already stored in an admin-controlled Proxmox vault
+        # connection or datacenter. The global env allow-list is not consulted.
+        # Auto-authorization is scoped to the expected HTTPS API ports.
+        if (port not in (None, 443, 8006) or host == 'localhost' or
+                host.endswith('.localhost') or host in ('metadata.google.internal',)):
+            raise IntegrationError('Proxmox : hôte ou port interdit en autorisation automatique')
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+                raise IntegrationError('Proxmox : adresse locale ou spéciale interdite')
+        return url
     if not allowed_hosts:
-        raise IntegrationError('Connecteur désactivé : configurer la liste des hôtes autorisés dans .env')
+        raise IntegrationError("Connecteur désactivé : configurer la liste des hôtes autorisés dans .env")
     allowed = {item.strip().lower() for item in allowed_hosts.split(',') if item.strip()}
-    host = parsed.hostname.lower()
-    effective = (host+':'+str(parsed.port)) if parsed.port else host
+    effective = (host+':'+str(port)) if port else host
     if host not in allowed and effective not in allowed:
-        raise IntegrationError('Serveur absent de la liste des hôtes autorisés')
+        raise IntegrationError(
+            'Hôte Proxmox absent de PROXMOX_ALLOWED_HOSTS (FQDN ou FQDN:8006 à ajouter)'
+        )
     return url
 
 
@@ -86,7 +111,7 @@ def ansible_command(opts):
 
 
 def proxmox_request(origin, cred, path, timeout=20, method='GET', data=None):
-    base=authorized_origin(origin,config.PROXMOX_ALLOWED_HOSTS)
+    base=authorized_origin(origin,config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True)
     ident=str(cred.get('username') or '')
     token=str(cred.get('token') or '')
     if not re.fullmatch(r'[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+![a-zA-Z0-9_.-]+', ident) or not token:

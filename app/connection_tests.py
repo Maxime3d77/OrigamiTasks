@@ -410,7 +410,7 @@ def matrix(values, options=None, credential_id=None):
 def proxmox(values, options=None):
     """Read-only token, node inventory and optional named-node status."""
     options = options or {}
-    base = _allowed_origin(values.get("url"), config.PROXMOX_ALLOWED_HOSTS)
+    base = integrations.authorized_origin(values.get("url"), config.PROXMOX_ALLOWED_HOSTS, admin_proxmox=True)
     try:
         data = integrations.proxmox_request(
             base, values, "/api2/json/access/permissions", timeout=TIMEOUT
@@ -440,9 +440,27 @@ def proxmox(values, options=None):
                   checks)
     except ConnectionTestError:
         raise
-    except (httpx.HTTPError, integrations.IntegrationError, ValueError, KeyError, TypeError) as exc:
+    except integrations.IntegrationError as exc:
+        raise ConnectionTestError("Proxmox : "+str(exc)) from None
+    except httpx.HTTPStatusError as exc:
+        status=exc.response.status_code
+        if status==401:
+            detail="HTTP 401 — token API ou secret refusé"
+        elif status==403:
+            detail="HTTP 403 — token accepté mais permissions insuffisantes pour cet appel"
+        else:
+            detail="HTTP "+str(status)+" — erreur API Proxmox"
+        raise ConnectionTestError("Proxmox : "+detail) from None
+    except httpx.ConnectError:
         raise ConnectionTestError(
-            "Proxmox : refus API/TLS ou token invalide ("+type(exc).__name__+")"
+            "Proxmox : connexion impossible (DNS/TCP ou certificat TLS non vérifiable). "
+            "Contrôler le FQDN et la CA Proxmox."
+        ) from None
+    except httpx.TimeoutException:
+        raise ConnectionTestError("Proxmox : délai dépassé lors de la connexion à l'API") from None
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise ConnectionTestError(
+            "Proxmox : réponse API inattendue ("+type(exc).__name__+")"
         ) from None
 
 

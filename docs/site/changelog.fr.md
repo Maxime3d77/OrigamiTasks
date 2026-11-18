@@ -1,5 +1,12 @@
 # Historique des modifications
 
+## 0.3.10-rc1 — 16 novembre 2026
+
+- **Proxmox :** déclaration des DC et jetons API depuis l'interface web, sans `PROXMOX_ALLOWED_HOSTS` dans `.env` ; recherche parmi de nombreux DC, contrôles de l'URL liée au jeton et diagnostics HTTP 401/403, TLS et réseau distincts.
+- **LDAP :** import des exports PEM OpenSSL contenant des métadonnées de certificats (Bag Attributes, friendlyName, subject, issuer), sans accepter d'autres clés privées ou contenu arbitraire.
+- **E-mails :** rapports HTML + texte automatique à la fin des workflows, objet SUCCÈS / ÉCHEC, SMTP du coffre, choix des événements, journal par étape et extraits d'erreur avec masquage des secrets ; statut d'envoi archivé en base.
+- **Fiabilité :** migrations SQLite conservant les workflows, tests de non-régression et documentation FR/EN.
+
 ## 0.3.9-rc1 — 16 novembre 2026
 
 - **SSH :** nouveau mode par défaut `SSH_HOST_KEY_POLICY=accept-new` : la première clé publique de chaque serveur est mémorisée dans `known_hosts`, sans saisie manuelle ; toute clé modifiée est bloquée. Le mode `strict` reste disponible.
