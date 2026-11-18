@@ -5,7 +5,7 @@ The one-shot `scripts/pra-direct-seed.sh` sends actual QEMU VM backup data from 
 For a disposable VM, execute on the VM's current source node:
 
 ```bash
-bash scripts/pra-direct-seed.sh 100 au-styx.infra.aday.fr 900100 local-zfs --confirm root /root/.ssh/<AUTHORIZED_TECHNICAL_KEY>
+bash scripts/pra-direct-seed.sh 100 pve-dr.example.org 900100 local-zfs --confirm root /root/.ssh/<AUTHORIZED_TECHNICAL_KEY>
 ```
 
 The destination VMID must be free. Use a restricted, preapproved technical SSH identity on the source that can authenticate the destination, and pin the destination server host key. Do **not** copy an administrator's private vault key to a Proxmox node. The script rejects existing target VMs, performs a direct backup stream, restores to a **stopped** VM with fresh MAC addresses, disables autostart and does not use destructive force flags.
