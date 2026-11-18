@@ -1,5 +1,12 @@
 # Historique des modifications
 
+## 0.3.11-rc1 — 17 novembre 2026
+
+- **Proxmox 100 % web pour l'ajout des hôtes :** écran **Serveurs & clusters Proxmox** permettant d'enregistrer un cluster ou un nœud autonome, de saisir directement l'identifiant et le secret du token (chiffrés dans le coffre), d'affecter une CA TLS importée depuis le navigateur et de modifier la configuration existante sans `.env` ni redémarrage.
+- **Certificats :** import PEM/CRT/CER/DER, stockage persistant isolé, choix d'une CA différente par serveur/cluster ou dans le profil Proxmox du coffre. Aucun chemin arbitraire ni clé privée accepté ; HTTPS reste vérifié.
+- **Exploration :** recherche dans la flotte Proxmox, diagnostic API depuis chaque fiche et découverte des nœuds, VM, LXC et stockages. Les contrôles d'autorisation et les permissions du token restent applicables.
+- **Sécurité et compatibilité :** les DC existants sont conservés par migration SQLite, les tokens restent chiffrés, l'URL du token et celle du DC doivent correspondre, et les actions VM restent soumises à leur autorisation explicite.
+
 ## 0.3.10-rc1 — 16 novembre 2026
 
 - **Proxmox :** déclaration des DC et jetons API depuis l'interface web, sans `PROXMOX_ALLOWED_HOSTS` dans `.env` ; recherche parmi de nombreux DC, contrôles de l'URL liée au jeton et diagnostics HTTP 401/403, TLS et réseau distincts.

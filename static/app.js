@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +10,7 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
@@ -261,8 +261,79 @@ function agentEnrollForm(){modal('Enrôlement manuel','<form id="agentEnrollForm
  field('Nom','name')+selectField('Plateforme','platform',[['linux','Linux'],['windows','Windows']],'linux')+
  field('Groupe','group','default')+'</div><p class="hint">Jeton unique valable 15 minutes. Installer agents/linux/agent.py ou agents/windows/agent.ps1 avec config.json sur la machine.</p><button class="btn primary" type="submit">Créer un jeton</button></form>')}
 
-function datacenters(){if(!roleAdmin())return title('DC Proxmox','Administration uniquement.');return title('DC Proxmox','Gérer les clusters et leurs tokens directement depuis l’interface, sans liste d’hôtes dans .env.','<button class="btn primary" data-action="new-datacenter">＋ Déclarer un DC Proxmox</button>')+`<div class="form-grid"><label class="field"><span>Rechercher parmi les ${state.datacenters.length} datacenters</span><input id="proxmoxDcSearch" placeholder="Nom, FQDN, URL..."></label></div><div class="workflow-grid">${state.datacenters.map(d=>`<div class="job-card" data-dc-search="${e((d.name+' '+d.url).toLowerCase())}"><div class="job-card-head"><div class="job-icon">◈</div><span class="chip tag">Proxmox VE</span></div><h3>${e(d.name)}</h3><p>${e(d.url)}</p><div class="muted tinytext">Coffre #${d.credential_id}</div><div class="actions"><button class="btn primary tiny" data-action="discover-datacenter" data-id="${d.id}">⌕ Découvrir les ressources</button><button class="btn tiny danger" data-action="delete-datacenter" data-id="${d.id}">Supprimer</button></div></div>`).join('')||empty('Aucun DC Proxmox','Déclarez votre premier cluster avec un compte API dédié.')}</div><div class="notice">Les opérations sensibles sont désactivées par défaut. Les migrations et réplications entre clusters restent au stade du plan d’architecture.</div>`}
-function openDatacenterForm(){modal('Ajouter un DC Proxmox',`<form id="datacenterForm"><div class="form-grid">${field('Nom','dc_name')}${field('URL HTTPS, ex. https://pve.exemple:8006','dc_url')}${selectField('Token API Proxmox', 'dc_credential',[['','— Sélectionner —'],...state.credentials.filter(c=>c.kind==='proxmox').map(c=>[c.id,c.name])],'')}</div><p class="hint">L’URL HTTPS et le token définissent ce DC dans OrigamiTasks. Aucun ajout au .env nécessaire, même pour des centaines de DC. Le certificat TLS reste vérifié et les actions sensibles restent encadrées.</p><button class="btn primary" type="submit">Enregistrer</button></form>`)}
+function datacenters(){
+ if(!roleAdmin())return title('Proxmox','Administration uniquement.');
+ const list=state.datacenters||[];
+ const cards=list.map(d=>'<div class="job-card" data-dc-search="'+e((d.name+' '+d.url).toLowerCase())+'">'
+   +'<div class="job-card-head"><div class="job-icon">◈</div><span class="chip tag">'+(d.kind==='node'?'Serveur individuel':'Cluster Proxmox')+'</span></div>'
+   +'<h3>'+e(d.name)+'</h3><p>'+e(d.url)+'</p>'
+   +'<div class="muted tinytext">Connexion coffre #'+e(d.credential_id)+(d.ca_cert?' · CA TLS importée':' · CAs système')+'</div>'
+   +'<div class="actions"><button class="btn tiny" data-action="test-datacenter" data-id="'+d.id+'">Tester l’API</button>'
+   +'<button class="btn primary tiny" data-action="discover-datacenter" data-id="'+d.id+'">Découvrir les nœuds/VM</button>'
+   +'<button class="btn tiny" data-action="edit-datacenter" data-id="'+d.id+'">Modifier</button>'
+   +'<button class="btn tiny danger" data-action="delete-datacenter" data-id="'+d.id+'">Supprimer</button></div></div>').join('');
+ return title('Serveurs & clusters Proxmox','Déclare chaque cluster ou serveur autonome dans OrigamiTasks, avec son token et sa CA, sans modifier le .env.',
+     '<button class="btn primary" data-action="new-datacenter">＋ Ajouter un serveur / cluster</button>')
+   +'<div class="form-grid"><label class="field"><span>Rechercher parmi '+list.length+' serveurs et clusters</span>'
+   +'<input id="proxmoxDcSearch" placeholder="Nom, FQDN, URL…"></label></div>'
+   +'<div class="workflow-grid">'+(cards||empty('Aucun Proxmox enregistré','Ajoute un cluster ou un serveur depuis cette page.'))+'</div>'
+   +'<div class="notice">Chaque cluster dévoile ses nœuds et VM via la découverte. Les tokens restent chiffrés dans le coffre. '
+   +'La validation TLS est obligatoire. Les actions sensibles restent soumises à des permissions et validations distinctes.</div>';
+}
+function proxmoxCAChoices(selected=''){
+ const choices=[['','Autorités du système (CA publique)'],
+    ...(state.proxmoxCAs||[]).map(item=>[item.id,item.subject+' · '+item.id.slice(0,12)])];
+ if(selected&&!choices.some(x=>x[0]===selected))choices.push([selected,'CA précédemment importée : '+selected.slice(0,12)]);
+ return choices;
+}
+function openDatacenterForm(id=null){
+ const d=(state.datacenters||[]).find(x=>x.id===Number(id)),existing=!!d;
+ const credentialChoices=[['','— Choisir une connexion Proxmox existante —'],
+     ...state.credentials.filter(x=>x.kind==='proxmox'||x.kind==='api').map(x=>[x.id,x.name+' · '+(x.public?.url||x.public?.base_url||'')])];
+ const content='<form id="datacenterForm" data-id="'+(d?.id||'')+'"><div class="form-grid">'
+   +field('Nom du serveur / cluster','dc_name',d?.name||'')
+   +selectField('Type de cible','dc_kind',[['cluster','Cluster Proxmox VE'],['node','Serveur Proxmox autonome']],d?.kind||'cluster')
+   +field('URL HTTPS Proxmox (ex. https://pve.infra.example.org:8006)','dc_url',d?.url||'')
+   +selectField('Authentification','dc_auth_mode',[['new','Créer un nouveau token dans le coffre'],['existing','Choisir un token déjà enregistré']],existing?'existing':'new')
+   +'</div><div class="form-grid" data-proxmox-auth="new">'
+   +field('ID du token (user@pve!nom)','dc_token_username','','text')
+   +'<label class="field"><span>Secret du token API</span><input name="dc_token_secret" type="password" autocomplete="new-password" placeholder="Secret créé dans Proxmox"></label></div>'
+   +'<div data-proxmox-auth="existing">'+selectField('Connexion du coffre','dc_credential',credentialChoices,d?.credential_id||'')+'</div>'
+   +'<div class="field"><span>Autorité de certification TLS du serveur</span>'
+   +'<select name="dc_ca_cert">'+option(proxmoxCAChoices(d?.ca_cert||''),d?.ca_cert||'')+'</select>'
+   +'<small class="hint">Choisir une CA déjà importée ou fournir un certificat CA PEM/CRT/DER ci-dessous. Les certificats sont conservés dans les données persistantes.</small></div>'
+   +'<label class="field"><span>Importer une nouvelle CA publique (facultatif)</span><input type="file" name="dc_ca_file" accept=".crt,.cer,.pem,.der"></label>'
+   +'<p class="hint">Une même entrée peut représenter un cluster (découverte de tous ses nœuds) ou un serveur isolé. '
+   +'La CA sélectionnée est utilisée immédiatement, sans redémarrage.</p>'
+   +'<div class="tool-row"><button class="btn primary" type="submit">'+(existing?'Enregistrer les modifications':'Ajouter et enregistrer le token')+'</button>'
+   +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal(existing?'Modifier Proxmox · '+d.name:'Ajouter un serveur ou cluster Proxmox',content);
+ updateProxmoxAuthFields();
+}
+function updateProxmoxAuthFields(){
+ const form=document.getElementById('datacenterForm');
+ if(!form)return;
+ const mode=form.elements.namedItem('dc_auth_mode')?.value||'new';
+ form.querySelectorAll('[data-proxmox-auth]').forEach(el=>el.hidden=el.dataset.proxmoxAuth!==mode);
+}
+async function registerProxmoxCA(file){
+ if(!file||file.size===0)return null;
+ if(file.size>131072)throw Error('CA trop volumineuse : 128 Kio maximum');
+ const text=await file.text();
+ let payload;
+ if(text.includes('-----BEGIN CERTIFICATE-----')){
+  payload={pem_text:text};
+ }else{
+  const bytes=new Uint8Array(await file.arrayBuffer());
+  let binary='';
+  for(let i=0;i<bytes.length;i+=8192)
+   binary+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));
+  payload={der_base64:btoa(binary)};
+ }
+ const result=await api('/proxmox/cas','POST',payload);
+ state.proxmoxCAs=(await api('/proxmox/cas')).items;
+ return result;
+}
 function updates(){
  return title('Versions & mises à jour',
    'Comparaison de la version installée avec la branche Git autorisée. Aucun déploiement automatique.')
@@ -521,7 +592,8 @@ const connectionSchemas={
  proxmox:[
   ['url','URL API Proxmox','text','https://pve.example.org:8006'],
   ['username','Utilisateur / ID de token API','text','user@pve!origamitasks'],
-  ['token','Secret du jeton API','password','']
+  ['token','Secret du jeton API','password',''],
+  ['ca_cert','CA TLS importée dans OrigamiTasks','ca-select','']
  ],
  generic:[
   ['username','Utilisateur','text',''],['password','Mot de passe','password',''],
@@ -536,7 +608,8 @@ function credentialProfileFields(kind,credential){
   const existing=profile[key]??'';
   const value=existing===''?fallback:existing;
   let control='';
-  if(typ==='checkbox')control='<input type="checkbox" name="'+key+'" '+((typeof existing==='boolean'?existing:fallback)?'checked':'')+'>';
+  if(typ==='ca-select')control='<select name="'+key+'">'+option(proxmoxCAChoices(existing),existing)+'</select>';
+  else if(typ==='checkbox')control='<input type="checkbox" name="'+key+'" '+((typeof existing==='boolean'?existing:fallback)?'checked':'')+'>';
   else if(typ==='select')control='<select name="'+key+'">'+option(choices,existing||fallback)+'</select>';
   else if(typ==='textarea')control='<textarea name="'+key+'" rows="4" placeholder="'+e(present.includes(key)?'Déjà renseigné · vide = conserver':'Clé privée ou secret')+'"></textarea>';
   else control='<input name="'+key+'" type="'+typ+'" '+(typ==='number'?'min="1" max="65535" ':'')
@@ -547,7 +620,7 @@ function credentialProfileFields(kind,credential){
   return '<label class="'+cls+'" '+(kind==='smtp'&&['username','password'].includes(key)?'data-smtp-auth-field':'')+'><span>'+e(label)+'</span>'+control+'</label>';
  }).join('')+'</div>'
  +(kind==='smtp'?'<div class="notice">Pour le SMTP, configure le serveur, le port, la sécurité et l’authentification. La tâche utilise automatiquement ces paramètres lorsque sa connexion est sélectionnée.</div>':'')
- +(kind==='proxmox'?'<div class="notice">Connexion Proxmox autorisée depuis le coffre : renseigner son URL HTTPS, son identifiant utilisateur@realm!token et son secret. La même URL doit être utilisée au moment de déclarer le DC. Aucun réglage du .env par serveur.</div>':'')
+ +(kind==='proxmox'?'<div class="field"><span>Importer une CA Proxmox publique</span><input type="file" name="proxmox_ca_file" accept=".crt,.cer,.pem,.der"></div><div class="notice">Le coffre conserve l’URL, le token chiffré et la CA TLS sélectionnée. Ajouter les DC directement dans le menu Proxmox : aucun réglage du .env.</div>':'')
  +(kind==='ssh'?'<div class="field full"><span>Importer le fichier de clé privée SSH du compte</span><input id="sshPrivateKeyFile" type="file" accept=".key,.pem,.openssh,.priv,.txt"><small class="hint">Le fichier reste dans le navigateur jusqu’à l’enregistrement du coffre. Formats OpenSSH ou PEM : BEGIN OPENSSH PRIVATE KEY, RSA PRIVATE KEY ou EC PRIVATE KEY. Pas la clé publique ssh-ed25519 ; jamais /etc/ssh/ssh_host_*_key.</small></div><div class="notice">Identité SSH indépendante des serveurs : indique le login et un mot de passe ou une clé privée utilisateur. La clé publique correspondante doit figurer dans authorized_keys sur le serveur cible. Ne jamais publier une clé privée. '+(profile.host?'Un ancien hôte reste enregistré pour compatibilité.':'')+'</div>':'');
 }
 function credentialKindForStep(){
@@ -1116,7 +1189,7 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   const lines=new Set([...area.value.split(/[\r\n,]+/).map(x=>x.trim()).filter(Boolean),...targets]);
   area.value=[...lines].join('\n');
   toast(targets.length+' serveur(s) ajoutés');return
- }if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-failure-step'){
+ }if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='new-datacenter'){openDatacenterForm();return}if(a==='edit-datacenter'){openDatacenterForm(id);return}if(a==='test-datacenter'){const result=await api('/datacenters/'+id+'/test');modal('Diagnostic Proxmox · #'+id,'<div class="notice">'+e(result.message)+'</div>'+(result.checks||[]).map(v=>'<p><b>'+e(v.name)+'</b> : '+e(v.detail)+'</p>').join(''),'<button class="btn primary" data-action="modal-close">Fermer</button>');return}if(a==='discover-datacenter'){const x=await api('/datacenters/'+id+'/discover');let counts={};for(const r of x.resources)counts[r.type]=(counts[r.type]||0)+1;modal('Découverte '+e(x.datacenter),`<p>${Object.entries(counts).map(([k,v])=>e(k)+': '+v).join(' · ')}</p><div class="table-wrap"><table><thead><tr><th>Type</th><th>Nom/VMID</th><th>Nœud</th><th>État</th></tr></thead><tbody>${x.resources.slice(0,300).map(r=>`<tr><td>${e(r.type)}</td><td>${e(r.name||r.vmid||r.id)}</td><td>${e(r.node||'—')}</td><td>${e(r.status||'—')}${r.type==='qemu'?` <button class="btn tiny" data-action="assess-dr" data-id="${id}" data-vmid="${r.vmid}">Évaluer PRA</button>`:''}</td></tr>`).join('')}</tbody></table></div>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='assess-dr'){const vmid=Number(b.dataset.vmid);const data=await api('/datacenters/'+id+'/vms/'+vmid+'/dr-assessment');modal('Évaluation PRA · VM '+vmid,`<p class="notice">Lecture seule : aucune réplication n’a été lancée. Le statut PRA n’est pas validé.</p><p><b>${e(data.name||('VM '+vmid))}</b> — ${e(data.node)} (${e(data.source_status||'inconnu')})</p><h3>Disques / stockages</h3><ul>${data.disks.map(x=>`<li>${e(x.slot)} · ${e(x.storage||'inconnu')} · ${e(x.storage_type)} ${x.shared?'(partagé)':''}</li>`).join('')}</ul><h3>Modes à étudier</h3><ul>${data.options.map(x=>`<li><b>${e(x.engine)}</b> — ${e(x.purpose)}</li>`).join('')}</ul><h3>Risques / prérequis</h3><ul>${data.risks.map(r=>`<li>${e(r)}</li>`).join('')}</ul>`,`<button class="btn" data-action="modal-close">Fermer</button>`,true);return}if(a==='delete-datacenter'){if(!confirm('Supprimer ce datacenter ?'))return;await api('/datacenters/'+id,'DELETE');toast('Datacenter supprimé');await refresh();return}if(a==='filter'){state.filter=b.dataset.value;render();return}if(a==='create'){openEditor();return}if(a==='edit'){openEditor(id);return}if(a==='clone'){openEditor(id,true);return}if(a==='webhook'){await webhookManager(id);return}if(a==='rotate-webhook'){await rotateWebhook(id);return}if(a==='disable-webhook'){await disableWebhook(id);return}if(a==='modal-close'){closeModal();return}if(a==='run-job'){await runJob(id);return}if(a==='run-detail'){await openRun(id);return}if(a==='new-credential'){openCredentialBrowser(null,'new');return}if(a==='save-job'){await saveEditor();return}if(a==='select-step'){captureEditor();state.selectedStep=Number(b.dataset.index);renderEditor();return}if(a==='add-failure-step'){
   captureEditor();
   const step=state.editor.steps_json[state.selectedStep];
   const next=addStep();
@@ -1180,6 +1253,7 @@ async function handleSubmit(ev){
       if(!value)continue;
       payload[key]=typ==='number'?Number(value):value;
     }
+    if(kind==='proxmox'&&f.get('proxmox_ca_file')?.size){const ca=await registerProxmoxCA(f.get('proxmox_ca_file'));payload.ca_cert=ca.id;}
     result=await api(action==='edit'?'/credentials/'+id:'/credentials',action==='edit'?'PUT':'POST',
                      {name:f.get('name'),kind,payload});
    }
@@ -1222,7 +1296,31 @@ async function handleSubmit(ev){
   return
  }
  if(ev.target.id==='agentDeployForm'){ev.preventDefault();const f=new FormData(ev.target);if(!f.get('approved'))return toast('Confirmation requise',false);try{const r=await api('/agents/deploy','POST',{name:f.get('name')||f.get('host'),host:f.get('host'),port:Number(f.get('port')||22),platform:f.get('platform'),group:f.get('group'),credential_id:Number(f.get('credential_id')),approved:true});closeModal();toast('Agent #'+r.id+' : installation envoyée');await refresh()}catch(ex){toast(ex.message,false)}return}
- if(ev.target.id==='datacenterForm'){ev.preventDefault();const f=new FormData(ev.target);try{await api('/datacenters','POST',{name:f.get('dc_name'),url:f.get('dc_url'),credential_id:Number(f.get('dc_credential'))});closeModal();toast('Datacenter ajouté');await refresh()}catch(ex){toast(ex.message,false)}return}if(ev.target.id==='loginForm'){ev.preventDefault();const form=new FormData(ev.target);$('#authError').textContent='';try{await api('/login','POST',{username:form.get('username'),password:form.get('password')});const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#userAvatar').textContent=initials();$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);await refresh();showPage('dashboard')}catch(ex){$('#authError').textContent=ex.message}}else if(ev.target.id==='credentialForm'){ev.preventDefault();const f=new FormData(ev.target);const payload={};for(const k of ['username','password','token','private_key','passphrase'])if(f.get(k)?.trim())payload[k]=f.get(k);try{await api('/credentials','POST',{name:f.get('name'),kind:f.get('kind'),payload});closeModal();toast('Secret chiffré et enregistré');await refresh()}catch(ex){toast(ex.message,false)}}}
+ if(ev.target.id==='datacenterForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id)||0;
+  const submit=ev.target.querySelector('button[type="submit"]');
+  if(submit)submit.disabled=true;
+  try{
+   const payload={name:String(f.get('dc_name')||'').trim(),
+                  kind:String(f.get('dc_kind')||'cluster'),
+                  url:String(f.get('dc_url')||'').trim(),
+                  ca_cert:String(f.get('dc_ca_cert')||'')};
+   const file=f.get('dc_ca_file');
+   if(file&&file.size){
+    const ca=await registerProxmoxCA(file);
+    payload.ca_cert=ca.id;
+   }
+   if(f.get('dc_auth_mode')==='new'){
+    payload.token_username=String(f.get('dc_token_username')||'').trim();
+    payload.token_secret=String(f.get('dc_token_secret')||'');
+   }else payload.credential_id=Number(f.get('dc_credential')||0);
+   await api(id?'/datacenters/'+id:'/datacenters',id?'PUT':'POST',payload);
+   closeModal();toast(id?'Serveur / cluster mis à jour':'Serveur / cluster Proxmox ajouté');
+   await refresh();showPage('datacenters');
+  }catch(ex){toast(ex.message,false);if(submit)submit.disabled=false}
+  return
+ }if(ev.target.id==='loginForm'){ev.preventDefault();const form=new FormData(ev.target);$('#authError').textContent='';try{await api('/login','POST',{username:form.get('username'),password:form.get('password')});const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#userAvatar').textContent=initials();$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);await refresh();showPage('dashboard')}catch(ex){$('#authError').textContent=ex.message}}else if(ev.target.id==='credentialForm'){ev.preventDefault();const f=new FormData(ev.target);const payload={};for(const k of ['username','password','token','private_key','passphrase'])if(f.get(k)?.trim())payload[k]=f.get(k);try{await api('/credentials','POST',{name:f.get('name'),kind:f.get('kind'),payload});closeModal();toast('Secret chiffré et enregistré');await refresh()}catch(ex){toast(ex.message,false)}}}
 function initTheme(){let theme=localStorage.getItem('origami-theme')||'dark';document.body.className='theme-'+theme;$('#themeToggle').textContent={dark:'☾',light:'☀',cyber:'✧'}[theme]||'☾'}
 async function bootstrap(){document.addEventListener('submit',handleSubmit);
  document.addEventListener('pointerdown',graphPanStart);
@@ -1280,5 +1378,5 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  }
  if(ev.target.name==='cfg_connection_mode'&&state.editor){captureEditor();renderEditor();return}
  if(ev.target.name==='job_interval_preset'){applySchedulePreset();return}
- if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config=CONNECTION_STEP_TYPES[newType]?{connection_mode:'vault'}:{};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
+ if(ev.target.name==='dc_auth_mode'&&ev.target.closest('#datacenterForm'))updateProxmoxAuthFields();if(ev.target.name==='job_schedule_mode')showScheduleMode();if(ev.target.name==='step_type'&&state.editor){const s=state.editor.steps_json[state.selectedStep];const newType=ev.target.value;if(s.type!==newType){captureEditor();s.config=CONNECTION_STEP_TYPES[newType]?{connection_mode:'vault'}:{};s.type=newType;renderEditor()}}});$('#themeToggle').addEventListener('click',()=>{const themes=['dark','light','cyber'],current=document.body.className.replace('theme-',''),next=themes[(themes.indexOf(current)+1)%themes.length];localStorage.setItem('origami-theme',next);initTheme()});$('#logoutBtn').addEventListener('click',async()=>{try{await api('/logout','POST')}catch{}state.user=null;$('#application').hidden=true;$('#auth').hidden=false;$('#loginForm').reset();showPage('dashboard')});$('#globalSearch').addEventListener('input',ev=>{state.query=ev.target.value;if(state.page!=='jobs'&&state.query)showPage('jobs');else if(state.page==='jobs')render()});$('#menuToggle').addEventListener('click',()=>$('.sidebar').classList.toggle('visible'));document.addEventListener('keydown',ev=>{if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='k'){ev.preventDefault();$('#globalSearch').focus()}if(ev.key==='Escape'&&document.getElementById('groupLayer')){closeLayer('groupLayer');renderEditor()}else if(ev.key==='Escape'&&document.getElementById('credentialLayer'))closeLayer('credentialLayer');else if(ev.key==='Escape'&&document.getElementById('folderLayer'))closeLayer('folderLayer');else if(ev.key==='Escape'&&$('.modal-overlay'))closeModal()});setInterval(async()=>{if(!state.user||$('.modal-overlay'))return;if(['dashboard','runs','jobs'].includes(state.page)){try{await refresh()}catch{}}},7000)}
 bootstrap();

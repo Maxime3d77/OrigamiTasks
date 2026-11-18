@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas
 
 
 @asynccontextmanager
@@ -332,52 +332,148 @@ def task_catalog(request: Request):
     ],'roadmap_document':'docs/FEATURE-CATALOG.md'}
 
 
+@app.get('/api/proxmox/cas')
+def list_proxmox_cas(request: Request):
+    security.require(request,role='admin')
+    return {'items':proxmox_cas.list_public()}
+
+
+@app.post('/api/proxmox/cas')
+def upload_proxmox_ca(payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)-{'pem_text','der_base64'}:
+        raise HTTPException(422,'Certificat CA Proxmox : données invalides')
+    try:
+        result=proxmox_cas.import_public(
+            pem_text=payload.get('pem_text'),der_base64=payload.get('der_base64')
+        )
+    except proxmox_cas.ProxmoxCAError as exc:
+        raise HTTPException(422,str(exc)) from None
+    db.audit(user['username'],'proxmox.ca.import',result['id'],str(result['certificate_count'])+' CA')
+    return result
+
+
 @app.get('/api/datacenters')
 def list_datacenters(request:Request):
     security.require(request,role='admin')
     with db.session() as con:
-        rows=con.execute('SELECT id,name,url,credential_id,created_at FROM datacenters ORDER BY name').fetchall()
+        rows=con.execute(
+            'SELECT id,name,url,credential_id,kind,ca_cert,created_at FROM datacenters ORDER BY name'
+        ).fetchall()
     return {'items':[dict(row) for row in rows]}
+
+
+def _datacenter_fields(payload, con, *, existing=None):
+    name=str(payload.get('name','')).strip()
+    kind=str(payload.get('kind',existing['kind'] if existing else 'cluster'))
+    if not 1<=len(name)<=100 or kind not in ('cluster','node'):
+        raise HTTPException(422,'Nom (1 à 100 caractères) ou type de cible Proxmox invalide')
+    try:
+        origin=integrations.authorized_origin(
+            payload.get('url'),config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True
+        )
+    except integrations.IntegrationError as exc:
+        raise HTTPException(422,str(exc)) from None
+    ca_id=payload.get('ca_cert','')
+    if not isinstance(ca_id,str):
+        raise HTTPException(422,'Identifiant de CA Proxmox invalide')
+    if ca_id:
+        try:
+            proxmox_cas.filename(ca_id)
+        except proxmox_cas.ProxmoxCAError as exc:
+            raise HTTPException(422,str(exc)) from None
+    username=payload.get('token_username')
+    token=payload.get('token_secret')
+    if username is not None or token is not None:
+        username=str(username or '').strip()
+        token=str(token or '')
+        if (not re.fullmatch(r'[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+![a-zA-Z0-9_.-]+',username)
+                or not 8<=len(token)<=1024 or '\n' in token or '\r' in token):
+            raise HTTPException(
+                422,'Token Proxmox : renseigner user@realm!tokenname et son secret (8 à 1024 caractères)'
+            )
+        payload_credentials=connections.normalize('proxmox',{
+            'url':origin,'username':username,'token':token,'ca_cert':ca_id
+        },is_new=True)
+        # The credentials remain in the encrypted vault; never return the secret.
+        vault_name='Proxmox - '+name[:80]+' - '+secrets.token_hex(4)
+        cursor=con.execute(
+            'INSERT INTO credentials (name,kind,encrypted_payload,created_at,updated_at) VALUES (?,?,?,?,?)',
+            (vault_name,'proxmox',security.encrypt(payload_credentials),db.now(),db.now())
+        )
+        credential_id=cursor.lastrowid
+    else:
+        try:
+            credential_id=int(payload.get('credential_id',existing['credential_id'] if existing else None))
+        except (TypeError,ValueError):
+            raise HTTPException(422,'Choisir un token du coffre ou saisir un nouveau token') from None
+        row=con.execute('SELECT kind,encrypted_payload FROM credentials WHERE id=?',(credential_id,)).fetchone()
+        if not row or row['kind'] not in ('proxmox','api'):
+            raise HTTPException(422,'Connexion Proxmox du coffre introuvable')
+        values=security.decrypt(row['encrypted_payload'])
+        saved_url=values.get('url') or values.get('base_url')
+        if not saved_url:
+            raise HTTPException(422,'Le profil du token doit contenir une URL HTTPS Proxmox')
+        try:
+            saved=integrations.authorized_origin(saved_url,config.PROXMOX_ALLOWED_HOSTS,
+                                                  admin_proxmox=True)
+        except integrations.IntegrationError as exc:
+            raise HTTPException(422,str(exc)) from None
+        if saved.lower().rstrip('/') != origin.lower().rstrip('/'):
+            raise HTTPException(422,
+                'L’URL du datacenter et celle du token du coffre doivent correspondre. '
+                'Choisir un autre token ou en créer un pour ce serveur.')
+    return name,kind,origin,credential_id,ca_id
 
 
 @app.post('/api/datacenters')
 def add_datacenter(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
-    name=str(payload.get('name','')).strip()
-    if not 1<=len(name)<=100: raise HTTPException(422,'Nom du datacenter invalide')
-    try:
-        origin=integrations.authorized_origin(payload.get('url'),config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True)
-        credential_id=int(payload.get('credential_id'))
-    except (integrations.IntegrationError,ValueError,TypeError) as exc:
-        raise HTTPException(422,str(exc))
     with db.session() as con:
-        credential_exists=con.execute(
-            'SELECT kind,encrypted_payload FROM credentials WHERE id=?',(credential_id,)
-        ).fetchone()
-        if not credential_exists or credential_exists['kind'] not in ('proxmox','api'):
-            raise HTTPException(422,'Un jeton Proxmox/API du coffre-fort est obligatoire')
-        vault_values=security.decrypt(credential_exists['encrypted_payload'])
-        source_url=vault_values.get('url') or vault_values.get('base_url')
-        if not source_url:
-            raise HTTPException(422,'Le profil du coffre doit contenir l’URL du DC Proxmox')
+        name,kind,origin,credential_id,ca_id=_datacenter_fields(payload,con)
         try:
-            saved_origin=integrations.authorized_origin(
-                source_url,config.PROXMOX_ALLOWED_HOSTS,admin_proxmox=True)
-        except integrations.IntegrationError as exc:
-            raise HTTPException(422,'URL du token Proxmox invalide : '+str(exc)) from None
-        if saved_origin.rstrip('/').lower()!=origin.rstrip('/').lower():
-            raise HTTPException(
-                422,'L’URL du DC doit correspondre à l’URL du token enregistré dans le coffre '
-                    'pour éviter l’envoi du secret à un autre serveur'
+            cur=con.execute(
+                'INSERT INTO datacenters(name,url,credential_id,kind,ca_cert,created_at) '
+                'VALUES (?,?,?,?,?,?)',
+                (name,origin,credential_id,kind,ca_id,db.now())
             )
-        try:
-            cur=con.execute('INSERT INTO datacenters(name,url,credential_id,created_at) VALUES (?,?,?,?)',
-                            (name,origin,credential_id,db.now()))
-        except __import__('sqlite3').IntegrityError:
-            raise HTTPException(409,'Datacenter déjà enregistré')
+        except db.sqlite3.IntegrityError:
+            raise HTTPException(409,'Nom de datacenter déjà enregistré') from None
         dc_id=cur.lastrowid
-    db.audit(user['username'],'datacenter.create',dc_id,name)
+    db.audit(user['username'],'datacenter.create',dc_id,name+' ('+kind+')')
     return {'id':dc_id}
+
+
+@app.put('/api/datacenters/{dc_id}')
+def edit_datacenter(dc_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    with db.session() as con:
+        old=con.execute('SELECT * FROM datacenters WHERE id=?',(dc_id,)).fetchone()
+        if not old:
+            raise HTTPException(404,'Serveur/cluster Proxmox introuvable')
+        name,kind,origin,credential_id,ca_id=_datacenter_fields(payload,con,existing=old)
+        try:
+            con.execute('UPDATE datacenters SET name=?,url=?,credential_id=?,kind=?,ca_cert=? WHERE id=?',
+                        (name,origin,credential_id,kind,ca_id,dc_id))
+        except db.sqlite3.IntegrityError:
+            raise HTTPException(409,'Nom de datacenter déjà enregistré') from None
+    db.audit(user['username'],'datacenter.update',dc_id,name+' ('+kind+')')
+    return {'ok':True,'id':dc_id}
+
+
+@app.get('/api/datacenters/{dc_id}/test')
+def test_datacenter(dc_id:int,request:Request):
+    security.require(request,role='admin')
+    dc=integrations.configured_datacenter(dc_id)
+    values=engine.executor.credential(dc['credential_id'])
+    values=dict(values,url=dc['url'])
+    if dc.get('ca_cert'):
+        values['ca_cert']=dc['ca_cert']
+    try:
+        return connection_tests.proxmox(values,options={'check_nodes':True})
+    except (connection_tests.ConnectionTestError,integrations.IntegrationError,
+            proxmox_cas.ProxmoxCAError) as exc:
+        raise HTTPException(422,str(exc)) from None
 
 
 @app.get('/api/datacenters/{dc_id}/discover')

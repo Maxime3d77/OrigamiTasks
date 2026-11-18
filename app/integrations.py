@@ -9,7 +9,7 @@ import re
 import shlex
 from urllib.parse import quote, urlsplit
 import httpx
-from . import config, db
+from . import config, db, proxmox_cas
 
 
 class IntegrationError(Exception):
@@ -118,7 +118,9 @@ def proxmox_request(origin, cred, path, timeout=20, method='GET', data=None):
         raise IntegrationError('Coffre Proxmox : username=user@realm!tokenname et token=SECRET')
     if not path.startswith('/api2/json/') or '://' in path or '\\' in path:
         raise IntegrationError('Chemin Proxmox invalide')
-    with httpx.Client(timeout=timeout,follow_redirects=False,trust_env=False,verify=config.PROXMOX_CA_CERT or True) as client:
+    # A CA chosen in the web UI takes priority over the legacy env fallback.
+    tls_verify=proxmox_cas.verify_value(cred.get('ca_cert'))
+    with httpx.Client(timeout=timeout,follow_redirects=False,trust_env=False,verify=tls_verify) as client:
         response=client.request(method,base+path,headers={'Authorization':f'PVEAPIToken={ident}={token}'},data=data)
     response.raise_for_status()
     result=response.json()
@@ -128,6 +130,8 @@ def proxmox_request(origin, cred, path, timeout=20, method='GET', data=None):
 
 
 def discover_datacenter(dc, cred, timeout=20):
+    if dc.get('ca_cert'):
+        cred=dict(cred,ca_cert=dc['ca_cert'])
     resources=proxmox_request(dc['url'],cred,'/api2/json/cluster/resources',timeout)
     if not isinstance(resources,list):
         raise IntegrationError('Inventaire Proxmox indisponible')
@@ -144,7 +148,7 @@ def configured_datacenter(dc_id):
     try: id_=int(dc_id)
     except (ValueError,TypeError): raise IntegrationError('Datacenter ID invalide')
     with db.session() as con:
-        item=con.execute('SELECT id,name,url,credential_id FROM datacenters WHERE id=?',(id_,)).fetchone()
+        item=con.execute('SELECT id,name,url,credential_id,kind,ca_cert FROM datacenters WHERE id=?',(id_,)).fetchone()
     if not item: raise IntegrationError('Datacenter introuvable')
     return dict(item)
 
@@ -152,6 +156,8 @@ def configured_datacenter(dc_id):
 def proxmox_task(opts, load_credential, timeout):
     dc=configured_datacenter(opts.get('datacenter_id'))
     cred=load_credential(dc['credential_id'])
+    if dc.get('ca_cert'):
+        cred=dict(cred,ca_cert=dc['ca_cert'])
     action=opts.get('action','inventory')
     if action=='inventory':
         resources=discover_datacenter(dc,cred,timeout)
@@ -187,6 +193,8 @@ def assess_vm_dr(dc, cred, vmid, timeout=20):
         raise IntegrationError('VMID invalide')
     if not 100 <= vmid <= 999999999:
         raise IntegrationError('VMID invalide')
+    if dc.get('ca_cert'):
+        cred=dict(cred,ca_cert=dc['ca_cert'])
     inventory = discover_datacenter(dc, cred, timeout)
     matches = [r for r in inventory if r.get('type') == 'qemu' and r.get('vmid') == vmid]
     if len(matches) != 1:
