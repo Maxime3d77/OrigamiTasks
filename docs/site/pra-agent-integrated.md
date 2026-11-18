@@ -1,5 +1,7 @@
 # GUI-driven direct PRA — v0.3.30
 
+> **WARNING v0.3.31: the offline incremental component below is disabled. The source must always run; QMP hot-capability checks are available, while actual live incremental export/apply is not yet implemented.**
+
 The Linux agent 0.3.30 now bundles the full-seed, offline differential and authenticated reporting scripts. Deployment and **Update agent** install them automatically in a root-owned private /usr/local/lib/origamitasks/pra directory. The outbound agent service remains unprivileged. There is no manual scp and no new .env toggle.
 
 ## Setup and use
