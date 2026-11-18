@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from fastapi import HTTPException
-from . import config, db, security, agent_modules
+from . import config, db, security, agent_modules, agent_settings
 
 ACTIONS = {'inventory', 'script', 'processes', 'disk', 'service_status',
            'service_start', 'service_stop', 'service_restart'}
@@ -211,7 +211,7 @@ def deploy(body, *, cluster_authorized=False):
     if body.get('approved') is not True:
         raise HTTPException(422, 'Explicit installation confirmation required')
     try:
-        endpoint = ensure_https(config.AGENT_SERVER_URL)
+        endpoint = agent_settings.effective_url()
     except ValueError as exc:
         raise HTTPException(422, str(exc))
     host = str(body.get('host') or '').strip()
@@ -319,6 +319,11 @@ def deploy(body, *, cluster_authorized=False):
         code = stdout.channel.recv_exit_status()
         if code:
             raise RuntimeError('Remote install exited with code '+str(code)+' (verify SSH privileges, PowerShell or systemd prerequisites)')
+        # Record exactly what went into this machine's config.json. Changing
+        # the control-plane URL later must not break verified remote removal.
+        with db.session() as con:
+            con.execute("UPDATE agents SET installed_controller_url=? WHERE id=?",
+                        (endpoint,result['id']))
         return {'id':result['id'], 'name':name, 'platform':platform,
                 'status':'installed_pending_enrollment'}
     except Exception:

@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.18-rc1 — 17 novembre 2026
+
+- **Correction du déploiement groupé :** l'adresse de contrôle des agents n'est plus obligatoirement `AGENT_SERVER_URL` dans le `.env`. Nouveau formulaire **Agents → Paramètres de connexion** pour enregistrer l'origine HTTPS vue par les agents derrière Nginx ; repli vers l'ancienne variable si disponible.
+- **Proxmox :** affichage de l'URL dans l'assistant de déploiement multi-nœuds, et blocage explicite avec raccourci de configuration lorsque celle-ci est manquante. Le module PRA préparatoire n'est plus présélectionné.
+- **Désinstallation :** le bouton **Désinstaller via SSH** reste présent sur Linux et Windows ; la console retient désormais l'URL publique exacte de chaque nouvelle installation pour supprimer un agent même après changement du FQDN de la console. Pour les agents plus anciens, l'administrateur peut fournir l'URL utilisée historiquement.
+- **Windows :** les agents Windows sont réservés au module Standard, pour étendre les workflows Windows ; interdiction des modules Proxmox et PRA dans l'API et l'interface.
+- **Aucune réplication ou bascule effective** n'est incluse dans le module PRA passif. La validation TLS reste obligatoire côté agent.
+
 ## 0.3.17-rc1 — 17 novembre 2026
 
 - **Proxmox → Agents du cluster :** découverte directe des nœuds Linux depuis l'API du cluster ; prévisualisation des FQDN SSH via le domaine de l'endpoint Proxmox (suffixe modifiable), sélection des nœuds, création / synchronisation d'un **groupe SSH dédié lié au cluster**. Le groupe est consultable dans l'inventaire SSH ; les éditions génériques d'un groupe géré sont bloquées pour préserver son lien Proxmox.

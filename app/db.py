@@ -70,6 +70,10 @@ CREATE TABLE IF NOT EXISTS webhooks (
  job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
  token_hash TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS agent_settings (
+ id INTEGER PRIMARY KEY CHECK(id=1),
+ controller_url TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ldap_settings (
  id INTEGER PRIMARY KEY CHECK(id=1), encrypted_config TEXT NOT NULL,
  updated_at TEXT NOT NULL
@@ -165,7 +169,7 @@ CREATE TABLE IF NOT EXISTS agents (
  version TEXT NOT NULL DEFAULT '', enroll_hash TEXT, enroll_expires TEXT,
  token_hash TEXT, enrolled INTEGER NOT NULL DEFAULT 0,
  revoked INTEGER NOT NULL DEFAULT 0, last_seen TEXT,
- cpu_percent REAL, memory_mb REAL, uninstalled_at TEXT,
+ cpu_percent REAL, memory_mb REAL, uninstalled_at TEXT, installed_controller_url TEXT,
  modules_json TEXT NOT NULL DEFAULT '{"standard":true,"proxmox":false,"pra":false}',
  modules_revision INTEGER NOT NULL DEFAULT 1,
  modules_applied_revision INTEGER NOT NULL DEFAULT 0,
@@ -217,6 +221,7 @@ def initialize():
             ("agents", "cpu_percent", "REAL"),
             ("agents", "memory_mb", "REAL"),
             ("agents", "uninstalled_at", "TEXT"),
+            ("agents", "installed_controller_url", "TEXT"),
             ("agents", "modules_json", "TEXT NOT NULL DEFAULT '{\"standard\":true,\"proxmox\":false,\"pra\":false}'"),
             ("agents", "modules_revision", "INTEGER NOT NULL DEFAULT 1"),
             ("agents", "modules_applied_revision", "INTEGER NOT NULL DEFAULT 0"),

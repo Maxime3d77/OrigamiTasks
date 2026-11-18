@@ -1,5 +1,15 @@
 # Linux and Windows agents — v0.3.0-rc1 preview
 
+## Agent-facing HTTPS URL settings and Windows roles (0.3.18-rc1)
+
+Before deployment, navigate to **Linux and Windows Agents → Agent connection settings**, enter the controller's **externally reachable HTTPS URL** and choose **Save**. If no URL has been saved, the browser HTTPS origin is suggested. Example: `https://origamitasks.example.org` served by Nginx and reverse-proxied internally to `http://127.0.0.1:8091`. Do **not** configure the agents with 127.0.0.1:8091, as that points to the agent host itself. The browser-managed URL is used immediately for **new installs**; the legacy `AGENT_SERVER_URL` environment setting is only an optional fallback.
+
+Agents must be able to resolve and reach this URL, and must trust its HTTPS certificate chain (including any internal CA installed in the OS trust store). TLS verification remains enabled. Previously installed agents **keep their original endpoint**. New installs record their exact controller origin for identity-checked remote uninstall. Legacy installs can supply their original URL explicitly during uninstall, where the on-host agent config must match it.
+
+**Proxmox cluster agent wizard:** displays the configured agent URL, blocks starting a rollout if missing, and links to the settings. **Passive DR is no longer selected by default** because it only provides a local heartbeat/state cache and is not an active VM replication or failover engine.
+
+**Windows agents are Standard-only**, for Windows workflow extensions (PowerShell tasks, processes, services, etc). Proxmox and DR roles are rejected by the API and absent from the module form. Install/removal via authorized SSH remains available with platform prerequisites.
+
 ## Unified centrally managed modular agent (0.3.16-rc1)
 
 OrigamiTasks deploys **one agent identity and installation per machine**, configured from **Linux/Windows Agents → Configure modules**. Three role choices are displayed:

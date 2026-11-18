@@ -94,11 +94,14 @@ def test_modules_require_associated_site_and_linux_for_pra():
             'standard':True,'proxmox':True,'pra':True})
         assert result['revision']==2
         refs_win=site_for_agent(win_id)
-        with pytest.raises(HTTPException,match='Linux'):
+        with pytest.raises(HTTPException,match='Windows'):
             agent_modules.set_modules(win_id,{
                 'standard':True,'proxmox':True,'pra':True})
+        with pytest.raises(HTTPException,match='Windows'):
+            agent_modules.set_modules(win_id,{
+                'standard':True,'proxmox':True,'pra':False})
         assert agent_modules.set_modules(win_id,{
-            'standard':True,'proxmox':True,'pra':False})['revision']==2
+            'standard':True,'proxmox':False,'pra':False})['revision']==1
     finally:
         cleanup(agent_id,refs)
         cleanup(win_id,refs_win)

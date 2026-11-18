@@ -8,7 +8,7 @@ are interrupted on control-plane restart, never silently replayed.
 import json
 import threading
 import time
-from . import agents, config, db, ssh_inventory, host_keys
+from . import agents, config, db, ssh_inventory, host_keys, agent_settings
 
 STOP = threading.Event()
 _WORKER = None
@@ -108,9 +108,9 @@ def queue(payload, actor):
         if not allowed or any(host not in allowed for host, _port, _sid in targets):
             raise DeploymentError("Un serveur n'est pas autorisé dans AGENT_DEPLOY_ALLOWED_HOSTS")
     try:
-        agents.ensure_https(config.AGENT_SERVER_URL)
-    except ValueError:
-        raise DeploymentError("AGENT_SERVER_URL doit être une URL HTTPS valide") from None
+        agent_settings.effective_url()
+    except ValueError as exc:
+        raise DeploymentError(str(exc)) from None
     with db.session() as con:
         batch_id = con.execute(
             "INSERT INTO agent_deploy_batches(actor,platform,agent_group,total,status,created_at,"

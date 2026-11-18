@@ -7,7 +7,7 @@ performed only after a successful remote removal.
 import base64
 import shlex
 
-from . import config, db, host_keys, ssh_inventory, agents
+from . import config, db, host_keys, ssh_inventory, agents, agent_settings
 
 
 class AgentUninstallError(ValueError):
@@ -66,7 +66,7 @@ def _windows_command(agent_id, encoded_origin):
 
 
 def uninstall(agent_id, body):
-    if not isinstance(body,dict) or set(body)-{'host','port','credential_id','approved'}:
+    if not isinstance(body,dict) or set(body)-{'host','port','credential_id','approved','installed_controller_url'}:
         raise AgentUninstallError("Paramètres de désinstallation invalides")
     if body.get('approved') is not True:
         raise AgentUninstallError("Confirmation explicite de la désinstallation requise")
@@ -82,7 +82,7 @@ def uninstall(agent_id, body):
 
     with db.session() as con:
         agent=con.execute(
-            'SELECT id,hostname,platform,enrolled,revoked,uninstalled_at FROM agents WHERE id=?',
+            'SELECT id,hostname,platform,enrolled,revoked,uninstalled_at,installed_controller_url FROM agents WHERE id=?',
             (agent_id,)
         ).fetchone()
         cred=con.execute(
@@ -104,10 +104,22 @@ def uninstall(agent_id, body):
             "Le FQDN SSH ne correspond pas au nom d'hôte du dernier enrôlement. "
             "Vérifier la machine cible avant de continuer."
         )
+    saved_origin=str(agent['installed_controller_url'] or '').strip()
+    operator_origin=str(body.get('installed_controller_url') or '').strip()
+    if saved_origin and operator_origin and saved_origin.rstrip('/') != operator_origin.rstrip('/'):
+        raise AgentUninstallError(
+            "URL saisie différente de celle utilisée pour installer cet agent"
+        )
     try:
-        origin=agents.ensure_https(config.AGENT_SERVER_URL)
+        # Legacy installations may predate the persisted per-agent endpoint.
+        # For those, admin can provide the original URL (verified on the host).
+        origin=agent_settings.validate_origin(
+            saved_origin or operator_origin or agent_settings.effective_url()
+        )
     except ValueError:
-        raise AgentUninstallError("Configurer une URL de contrôle HTTPS valide") from None
+        raise AgentUninstallError(
+            "Renseigner l'ancienne URL HTTPS de contrôle de cet agent dans le formulaire"
+        ) from None
     try:
         inspected=host_keys.inspect(host,port)
     except host_keys.HostKeyError:

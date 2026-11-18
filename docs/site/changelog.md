@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.18-rc1 — 2026-11-17
+
+- **Fixed remote rollout:** no longer requires `AGENT_SERVER_URL` in `.env`. Admin-managed **Agents → Connection settings** stores the HTTPS controller origin for agents behind Nginx, with optional legacy env fallback.
+- **PVE cluster wizard:** displays this origin, blocks rollout with a direct settings link when missing, and no longer prechecks the passive DR module.
+- **Agent uninstall:** retained for Linux and Windows. Newly installed agents preserve their original controller HTTPS URL for identity-checked remote removal, even when central settings change. Older installs may specify their original URL during uninstall.
+- **Windows:** Standard-only workflow executors; Proxmox and DR roles are refused in API and hidden in the form.
+- **DR scope:** passive worker remains a local heartbeat and state cache only, **no real VM replication or failover**. Agent HTTPS certificate validation stays enabled.
+
 ## 0.3.17-rc1 — 2026-11-17
 
 - **Proxmox → Cluster agents:** discover Linux nodes through the registered PVE API, review the computed SSH FQDNs (editable DNS suffix), select nodes and create / synchronize a dedicated **SSH inventory group linked to the cluster**. Direct generic edits to cluster-managed groups are blocked.

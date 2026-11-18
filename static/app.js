@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drSimulations:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +10,7 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{}};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
+async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
@@ -276,6 +276,24 @@ const plannedCatalog=[
 ];
 function catalog(){const entries=state.catalog.available||[];const groups=[...new Set(entries.map(x=>x.category))];return title('Catalogue des tâches','Toutes les actions disponibles comme blocs de workflow, et les familles planifiées.')+`<div class="tool-row"><input id="catalogSearch" placeholder="Rechercher un bloc ou une famille de tâches..." style="flex:1;min-width:200px"/><span class="chip tag">${entries.length} blocs actifs</span></div>${groups.map(group=>`<div class="panel" style="margin-top:18px"><div class="panel-title"><h2>${e(group)}</h2><span class="status success">Intégré</span></div><div class="workflow-grid">${entries.filter(x=>x.category===group).map(item=>`<div class="job-card catalog-search-item" data-search="${e((item.name+' '+item.category+' '+item.type).toLowerCase())}"><h3>${e(item.name)}</h3><div class="muted tinytext">${e(item.type)}</div><div class="actions"><button class="btn tiny" data-action="create">＋ Créer un workflow</button></div></div>`).join('')}</div></div>`).join('')}<div class="panel" style="margin-top:18px"><div class="panel-title"><h2>Connecteurs et fonctionnalités prévues</h2><span class="chip folder">Roadmap</span></div><div class="workflow-grid">${plannedCatalog.map(([name,description])=>`<div class="job-card catalog-search-item" data-search="${e((name+' '+description).toLowerCase())}"><h3>${e(name)}</h3><p>${e(description)}</p><span class="chip folder">À développer</span></div>`).join('')}</div><p class="hint">Inventaire complet dans docs/FEATURE-CATALOG.md sur GitHub. « À développer » ne signifie pas que l’exécution est déjà disponible.</p></div>`}
 
+function agentConnectionSettingsPanel(){
+ const settings=state.agentSettings||{};
+ const url=settings.controller_url||(location.protocol==='https:'?location.origin:'');
+ const configured=!!settings.configured;
+ return '<section class="panel agent-settings-panel"><div class="panel-title"><div><h2>Paramètres de connexion des agents</h2>'
+  +'<p class="hint">URL HTTPS de la console accessible depuis les machines Linux et Windows, via le proxy inverse Nginx.</p></div>'
+  +'<span class="chip '+(configured?'tag':'')+'">'+(configured?'Configurée · '+e(settings.source):'URL manquante')+'</span></div>'
+  +'<form id="agentConnectionSettingsForm">'
+  +'<label class="field"><span>Adresse HTTPS utilisée par les agents</span>'
+  +'<input name="controller_url" type="url" autocomplete="url" spellcheck="false" placeholder="https://origamitasks.example.org" value="'+e(url)+'" required></label>'
+  +'<p class="hint">La valeur proposée reprend l’adresse HTTPS du navigateur ; vérifier qu’elle est accessible depuis les hôtes distants. Saisir uniquement le FQDN HTTPS, sans /api, sans 127.0.0.1:8091, sans chemin. '
+  +'L’URL interne d’écoute du conteneur ne doit jamais être écrite dans les agents distants. '
+  +'Les certificats TLS doivent être reconnus par chaque hôte agent (installer la CA interne si nécessaire).</p>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer l’URL des agents</button>'
+  +'<span class="hint">Appliquée immédiatement aux nouveaux déploiements ; les agents déjà installés conservent leur URL précédente.</span></div>'
+  +'</form></section>';
+}
+
 function agentsPage(){
  if(!roleAdmin())return title('Agents','Administration uniquement.');
  const cards=(state.agents||[]).map(agent=>{
@@ -287,8 +305,8 @@ function agentsPage(){
     +'<td>'+e(agent.platform)+' · '+e(agent.version||'Version inconnue')+'</td>'
     +'<td>'+e(agent.group_name)+'</td><td>'+labelStatus(agent.status)+'</td>'
     +'<td><span class="chip">Standard</span>'
-    +(agent.modules?.proxmox?'<span class="chip tag">Proxmox</span>':'')
-    +(agent.modules?.pra?'<span class="chip tag">PRA passif</span>':'')
+    +(agent.platform==='linux'&&agent.modules?.proxmox?'<span class="chip tag">Proxmox</span>':'')
+    +(agent.platform==='linux'&&agent.modules?.pra?'<span class="chip tag">PRA préparatoire</span>':'')
     +'<div class="muted tinytext">'+(agent.modules_in_sync?'Appliqué · révision '+e(agent.modules_revision):'En attente / agent ancien ou hors ligne')+'</div>'
     +(agent.modules_status?.pra?'<small class="hint">PRA local : '+e(agent.modules_status.pra)+'</small>':'')+'</td>'
     +'<td>'+(Number.isFinite(agent.cpu_percent)?e(agent.cpu_percent.toFixed(1))+' %':'—')+'</td>'
@@ -296,10 +314,11 @@ function agentsPage(){
     +'<td>'+dt(agent.last_seen)+'</td>'
     +'<td class="agent-action-buttons">'+(action||'<span class="hint">Désinstallé</span>')+'</td></tr>';
  }).join('');
- return title('Agents Linux et Windows','Une seule installation, modules Standard / Proxmox / PRA passif selon le site.',
+ return title('Agents Linux et Windows','Agent Linux modulaire ; agent Windows dédié aux actions des workflows.',
   '<div class="tool-row"><button class="btn" data-action="agent-enroll-form">＋ Enrôlement manuel</button>'
   +'<button class="btn primary" data-action="agent-deploy-form">⇣ Déployer sur un serveur</button>'
   +'<button class="btn" data-action="agent-deploy-bulk-form">⇣ Plusieurs serveurs</button></div>')
+  +agentConnectionSettingsPanel()
   +'<div class="panel"><div class="panel-title"><h2>Parc d’agents</h2>'
   +'<span class="hint">'+state.agents.length+' agent(s)</span></div>'
   +'<div class="table-wrap"><table><thead><tr><th>Nom / hôte</th><th>OS / version</th><th>Groupe</th>'
@@ -321,7 +340,7 @@ function openAgentModulesForm(agentId){
  const site=(state.drSites||[]).find(x=>(x.agents||[]).some(y=>y.id===a.id));
  const siteLine=site?e(site.name)+' · '+e(site.role)+' · '+(site.datacenters||[]).length+' cluster(s)'
                     :'Aucun site rattaché — associer cet agent dans DC Proxmox → Sites PRA';
- const canPRA=a.platform==='linux';
+ const canInfra=a.platform==='linux';
  const module=(key,label,desc,on,disabled=false)=>
    '<label class="agent-module-choice"><input type="checkbox" name="'+key+'" '+(on?'checked ':'')+(disabled?'disabled ':'')+'>'
    +'<span><strong>'+label+'</strong><small>'+desc+'</small></span></label>';
@@ -333,8 +352,9 @@ function openAgentModulesForm(agentId){
   +'<p><b>Site :</b> '+siteLine+'</p>'
   +'<div class="agent-module-choices">'
   +module('standard','Standard','Workflows et inventaire système (toujours nécessaire)',true,true)
-  +module('proxmox','Proxmox','Association au site et aux clusters ; appels API Proxmox toujours exécutés par la console',m.proxmox)
-  +module('pra','PRA — service passif indépendant','Linux uniquement : surveillance locale sans réplication, fencing ni bascule de VM',m.pra,!canPRA)
+  +(canInfra?module('proxmox','Proxmox','Association au site et aux clusters ; API Proxmox toujours côté console',m.proxmox)
+    +module('pra','PRA — préparation passive','Surveillance locale uniquement : aucune réplication ni bascule VM',m.pra)
+    :'<div class="notice">Agent Windows : uniquement le module Standard pour étendre les actions des workflows (scripts PowerShell, processus et services). Aucun rôle Proxmox ou PRA.</div>')
   +'</div>'
   +'<div class="notice"><b>État réel :</b> '
   +e(a.modules_in_sync?'Configuration appliquée':'Configuration pas encore confirmée')
@@ -363,10 +383,14 @@ function openAgentUninstallForm(id){
   +selectField('Identité SSH du coffre','uninstall_credential',
     [['','— Sélectionner une identité SSH —'],...ssh.map(v=>[v.id,v.name])],'')
   +field('Confirmer en saisissant le nom exact de l’agent','uninstall_confirmation','','text')
+  +field('URL HTTPS configurée lors de son installation','installed_controller_url',
+    a.installed_controller_url||state.agentSettings?.controller_url||'','url')
   +'</div><label class="field checkbox"><input type="checkbox" name="uninstall_approved" required>'
   +'<span>Je confirme que cet agent doit être désinstallé de cette machine.</span></label>'
   +'<p class="hint">La clé d’hôte SSH doit déjà être connue et approuvée. '
-  +'Le serveur distant doit présenter le même agent_id et la même URL de contrôle. Une clé inconnue ou modifiée bloque la suppression.</p>'
+  +'Le serveur distant doit présenter le même agent_id et la même URL de contrôle. '
+  +'Pour un ancien agent sans URL enregistrée dans la base, indiquer son ancienne URL HTTPS exacte. '
+  +'Une clé inconnue ou modifiée bloque la suppression.</p>'
   +'<div class="tool-row"><button class="btn danger" type="submit">Désinstaller cet agent</button>'
   +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
  modal('Désinstaller l’agent '+e(a.name),contents,'',true);
@@ -625,8 +649,15 @@ async function openClusterAgentWizard(dcId, overrideSuffix=''){
   +'<div class="fleet-node-list">'+nodeRows+'</div>'
   +'<div class="tool-row"><button class="btn primary" type="submit">'+(data.group_id?'Synchroniser le groupe SSH':'Créer le groupe SSH lié au cluster')+'</button>'
   +'<small class="hint">L’inventaire SSH sera mis à jour, aucune installation à cette étape.</small></div></form>';
+ const agentURL=state.agentSettings?.controller_url||'';
+ const urlConfigured=!!state.agentSettings?.configured;
  const deploy='<form id="proxmoxFleetDeployForm" data-id="'+dc.id+'">'
   +'<h3>Déployer l’agent unique Linux sur le groupe</h3>'
+  +(urlConfigured
+     ?'<div class="notice">URL HTTPS de la console pour les agents : <strong>'+e(agentURL)+'</strong></div>'
+     :'<div class="notice error"><b>URL HTTPS des agents manquante.</b> '
+       +'Configurer le FQDN public de la console (derrière Nginx) avant le déploiement. '
+       +'<button type="button" class="btn tiny" data-action="agent-settings-open">Configurer l’URL des agents</button></div>')
   +(data.group_id?'<p class="hint">Groupe géré #'+e(data.group_id)+' · '+available.length+' nœud(s) sans agent déjà enregistré.</p>':
     '<p class="notice">Créer ou synchroniser le groupe SSH avant de lancer le déploiement.</p>')
   +'<div class="fleet-node-list">'+(deployRows||'<p class="hint">Aucun nœud éligible : les agents sont déjà enregistrés ou le groupe est vide.</p>')+'</div>'
@@ -637,15 +668,15 @@ async function openClusterAgentWizard(dcId, overrideSuffix=''){
   +'<div class="fleet-modules"><strong>Modules à activer automatiquement après enrôlement</strong>'
   +'<label class="test-wizard-option"><input type="checkbox" name="enable_proxmox" '+(site?'checked':'disabled')+'>'
   +'<span><strong>Proxmox</strong><small>Associe les agents aux clusters du site. Les tokens PVE restent dans la console.</small></span></label>'
-  +'<label class="test-wizard-option"><input type="checkbox" name="enable_pra" '+(site&&['primary','standby'].includes(site.role)?'checked':'disabled')+'>'
-  +'<span><strong>PRA passif Linux</strong><small>Service local autonome de surveillance seulement, sans réplication, fencing ni bascule de VM.</small></span></label>'
+  +'<label class="test-wizard-option"><input type="checkbox" name="enable_pra" '+(site&&['primary','standby'].includes(site.role)?'':'disabled')+'>'
+  +'<span><strong>PRA préparatoire (facultatif)</strong><small>Heartbeat local uniquement : ne réplique aucune VM, ne réalise aucun PRA opérationnel.</small></span></label>'
   +(!site?'<p class="hint">Rattacher d’abord le cluster à un site PRA pour activer ses modules automatiquement.</p>':'')
   +'</div>'
   +'<label class="test-wizard-option"><input type="checkbox" name="approved" required><span>'
   +'<strong>Confirmer l’installation de l’agent sur tous les hôtes cochés</strong>'
   +'<small>Clé SSH approuvée par hôte obligatoire ; les nœuds non approuvés échoueront individuellement sans installation. '
   +'Le module PRA est passif et aucune VM ne sera répliquée ou démarrée.</small></span></label>'
-  +'<div class="tool-row"><button class="btn primary" type="submit" '+(!data.group_id||!available.length?'disabled':'')+'>Déployer les agents sélectionnés</button>'
+  +'<div class="tool-row"><button class="btn primary" type="submit" '+(!data.group_id||!available.length||!urlConfigured?'disabled':'')+'>Déployer les agents sélectionnés</button>'
   +'<button class="btn" data-action="modal-close" type="button">Fermer</button></div></form>';
  modal('Nœuds & agents · '+e(dc.name),
     '<div class="notice">Assistant cluster Proxmox → groupe SSH → déploiement via le coffre. '
@@ -1595,7 +1626,8 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   toast(targets.length+' serveur(s) ajoutés');return
  }if(a==='agent-modules'){openAgentModulesForm(id);return}
  if(a==='agent-uninstall'){openAgentUninstallForm(id);return}
- if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='fleet-open'){await openClusterAgentWizard(id);return}
+ if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='agent-settings-open'){closeModal();showPage('agents');document.querySelector('#agentConnectionSettingsForm input[name="controller_url"]')?.focus();return}
+ if(a==='fleet-open'){await openClusterAgentWizard(id);return}
  if(a==='fleet-preview-refresh'){
    const form=document.getElementById('proxmoxFleetGroupForm');
    await openClusterAgentWizard(id,String(form?.elements.namedItem('domain_suffix')?.value||'').trim());return
@@ -1651,6 +1683,22 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   hydrateAdmins();return
  }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='agentConnectionSettingsForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target);
+  const input=ev.target.querySelector('button[type="submit"]');
+  if(input)input.disabled=true;
+  try{
+   const result=await api('/admin/agent-settings','PUT',{
+    controller_url:String(f.get('controller_url')||'').trim()
+   });
+   state.agentSettings=result;
+   toast('URL HTTPS des agents enregistrée. Les prochains déploiements utiliseront '+result.controller_url);
+   render();
+  }catch(ex){toast(ex.message,false);if(input)input.disabled=false}
+  return
+ }
+
  if(ev.target.id==='proxmoxFleetGroupForm'){
   ev.preventDefault();
   const form=ev.target,f=new FormData(form),dcId=Number(form.dataset.id);
@@ -1675,6 +1723,7 @@ async function handleSubmit(ev){
   const ids=f.getAll('fleet_server').map(Number);
   if(!ids.length)return toast('Sélectionner les nœuds à équiper.',false);
   if(!f.get('credential_id'))return toast('Choisir une clé SSH du coffre.',false);
+  if(!state.agentSettings?.configured)return toast('Configurer d’abord l’URL HTTPS des agents depuis Agents → Paramètres.',false);
   if(!f.has('approved'))return toast('Confirmer explicitement le déploiement.',false);
   if(f.has('enable_pra')&&!f.has('enable_proxmox'))return toast('Activer Proxmox avant le module PRA passif.',false);
   if(!confirm('Installer l’agent unique OrigamiTasks sur '+ids.length+' nœud(s) du cluster '+fleet.datacenter+' ?')){
@@ -1724,7 +1773,8 @@ async function handleSubmit(ev){
   try{
    await api('/agents/'+agentId+'/uninstall','POST',{
     host,port:Number(f.get('uninstall_port')||22),
-    credential_id:Number(f.get('uninstall_credential')||0),approved:true
+    credential_id:Number(f.get('uninstall_credential')||0),
+    installed_controller_url:String(f.get('installed_controller_url')||'').trim(),approved:true
    });
    closeModal();toast('Agent désinstallé sur la cible et token révoqué');
    await refresh();
