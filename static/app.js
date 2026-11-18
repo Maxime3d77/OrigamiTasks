@@ -683,7 +683,7 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  const pools=r.target_storages.filter(x=>x.images);
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
  const engines=[['planning_only','Préparation / simulation uniquement'],
-   ['offline_copy','Copie à froid (transport à développer)'],
+   ['offline_copy','Copie directe + incrémental à froid (VM arrêtées)'],
    ['pbs_backup_restore','PBS : sauvegarde + restauration réelle manuelle (sans bascule)'],
    ['storage_array_replication','Réplication de baie/LUN (à valider)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
