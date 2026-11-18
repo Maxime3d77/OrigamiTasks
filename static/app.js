@@ -587,7 +587,8 @@ let directSyncPollTimer=null;
 function scheduleDirectSyncPoll(){
  if(directSyncPollTimer||state.page!=='protected-vms'||!roleAdmin())return;
  if(!(state.drProtectedVMs||[]).some(x=>x.incremental_sync?.status==='running'||
-       ['queued','running'].includes(x.direct_job?.status)))return;
+       ['queued','running'].includes(x.direct_job?.status)||
+       ['queued','running'].includes(x.hot_generation?.status)))return;
  directSyncPollTimer=setTimeout(async()=>{
    directSyncPollTimer=null;
    if(state.page!=='protected-vms'||!roleAdmin())return;
@@ -616,6 +617,13 @@ function protectedVMsPage(){
    +'<td>'+labelStatus(vm.replication_status)
    +'<div class="muted tinytext">Transfert : '+(vm.direct_job?e(vm.direct_job.kind)+' · '+labelStatus(vm.direct_job.status):'jamais demandé')+'</div>'
    +'<div class="muted tinytext">Dernière copie complète : '+(vm.last_direct_seed?dt(vm.last_direct_seed):'jamais')+'</div>'
+   +'<div class="muted tinytext">Génération à chaud : '
+   +(vm.hot_generation?labelStatus(vm.hot_generation.status)
+     +' · '+(vm.hot_generation.candidate_vmid?'VM AU #'+e(vm.hot_generation.candidate_vmid):'en cours')
+     +' · '+e(vm.hot_generation.transferred_bytes||0)+' octets envoyés'
+     :'jamais tentée')+'</div>'
+   +'<div class="muted tinytext">Dernière AU vérifiée : '
+   +(vm.ready_hot_replica?'VMID '+e(vm.ready_hot_replica.candidate_vmid)+' · '+dt(vm.ready_hot_replica.finished_at):'aucune')+'</div>'
    +'<div class="muted tinytext">Prétest QMP à chaud : '+(vm.hot_preflight
       ?(vm.hot_preflight.source_running?'SD allumée':'SD non confirmée')
        +' · '+(vm.hot_preflight.external_provider_api?'API externe détectée':'API externe absente')
@@ -631,6 +639,8 @@ function protectedVMsPage(){
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +(vm.engine==='offline_copy'?'<button class="btn tiny primary" data-action="dr-vm-direct-seed" data-id="'+vm.id+'">Copie initiale directe</button>'
       +'<button class="btn tiny" data-action="dr-vm-hot-preflight" data-id="'+vm.id+'">Tester la réplication à chaud</button>'
+      +'<button class="btn tiny primary" data-action="dr-vm-hot-generation" data-id="'+vm.id+'">Différentiel à chaud</button>'
+      +'<button class="btn tiny" data-action="dr-vm-hot-history" data-id="'+vm.id+'">Historique des générations</button>'
       +'<button class="btn tiny" data-action="dr-vm-direct-jobs" data-id="'+vm.id+'">Journal des transferts</button>'
       +'<button class="btn tiny" data-action="dr-vm-direct-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button><button class="btn tiny" data-action="dr-vm-pbs-restore-start" data-id="'+vm.id+'">Restaurer sur site de secours</button><button class="btn tiny" data-action="dr-vm-pbs-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
@@ -649,7 +659,7 @@ function protectedVMsPage(){
   +'<div class="notice"><b>Copie directe pilotée par agent :</b> si le moteur « Copie directe » est sélectionné, '
   +'la copie initiale est transmise directement en SSH de SD vers AU à partir de l’agent Linux équipé du moteur PRA ; '
   +'les clés SSH du coffre ne sont utilisées que le temps de l’opération en mémoire. '
-  +'La source SD reste allumée. Le prétest QMP est en lecture seule ; la réplication incrémentale à chaud nécessite encore un fournisseur de deltas cohérents. Aucune bascule automatique.</div>'
+  +'La source SD reste allumée. Le moteur différentiel à chaud crée un snapshot VMA temporaire sur SD, compare les disques et crée une NOUVELLE VM AU éteinte. Ce mode relit tous les disques et exige un volume temporaire dédié sur SD et de la place sur AU ; il ne s’agit pas de CBT QEMU. Aucune bascule automatique.</div>'
   +'<div class="notice dr-safety-notice"><b>PRA manuel limité :</b> le moteur PBS peut sauvegarder la VM source puis '
   +'restaurer une VM <b>éteinte</b> sur le cluster de secours si ce dernier accède au même snapshot PBS '
   +'(stockage partagé ou PBS synchronisé). Aucune synchronisation delta en continu, mise à jour automatique de la VM restaurée, '
@@ -742,6 +752,30 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
   +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer la protection préparatoire</button>'
   +'<button type="button" class="btn" data-action="modal-close">Annuler</button></div></form>';
  modal('VM protégée · '+e(r.source_name)+' → '+e(r.target_name),body,'',true);
+}
+function openPRAHotGenerationForm(id){
+ const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
+ if(!vm)return toast('VM protégée introuvable',false);
+ const keys=state.credentials.filter(x=>x.kind==='ssh').map(x=>[x.id,x.name]);
+ if(!keys.length)return toast('Créer les identités SSH du coffre',false);
+ const html='<div class="notice error"><b>Différentiel à chaud réel :</b> VM SD ALLUMÉE, '
+   +'VM AU ÉTEINTE. Proxmox exporte un snapshot complet sur un stockage de travail dédié SD. '
+   +'Une nouvelle VM AU est clonée intégralement à chaque génération, puis seuls les blocs différents '
+   +'sont transmis par SSH. Espace libre nécessaire sur SD et AU. Aucune suppression automatique '
+   +'des anciennes générations.</div>'
+   +'<form id="drPRAHotGenerationForm" data-id="'+id+'">'
+   +'<p>VM SD #'+e(vm.source_vmid)+' → base AU #'
+   +e(vm.ready_hot_replica?.candidate_vmid||vm.target_vmid)+'</p>'
+   +'<div class="form-grid">'
+   +selectField('Identité SSH nœud SD','source_credential_id',keys,'')
+   +selectField('Identité SSH nœud AU','target_credential_id',keys,'')
+   +field('Répertoire de travail sur partition dédiée SD','scratch_path','/mnt/pra-scratch')
+   +'</div><p class="hint">Le chemin de travail doit disposer au minimum de la taille virtuelle totale des disques + 10 %, '
+   +'sur un système de fichiers autre que /. Ce moteur n’utilise aucun PBS et ne nécessite aucune variable .env.</p>'
+   +'<label class="field checkbox"><input type="checkbox" name="approved" required>'
+   +'<span>Je valide le nouveau clone AU et les coûts de lecture/stockage, sans arrêt de SD.</span></label>'
+   +'<button type="submit" class="btn primary">Démarrer la génération à chaud</button></form>';
+ modal('Différentiel à chaud · VM #'+e(vm.source_vmid),html,'',true);
 }
 function openDirectPRAJobForm(id,kind){
  const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
@@ -1939,6 +1973,27 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    return;
  }
  if(a==='dr-vm-direct-seed'){openDirectPRAJobForm(id,'seed');return}
+ if(a==='dr-vm-hot-generation'){openPRAHotGenerationForm(id);return}
+ if(a==='dr-vm-hot-history'){
+  try{
+   const x=await api('/dr/vms/'+id+'/hot-generations');
+   const rows=(x.items||[]).map(r=>'<tr><td>'+dt(r.created_at)+'</td><td>'
+     +labelStatus(r.status)+'</td><td>'+e(r.base_vmid)+'</td><td>'
+     +e(r.candidate_vmid||'—')+'</td><td>'+e(r.disk_count||0)
+     +'</td><td>'+e(r.scanned_bytes||0)+'</td><td>'
+     +e(r.transferred_bytes||0)+'</td><td>'+e(r.error||'—')+'</td></tr>').join('');
+   modal('Générations PRA à chaud · VM #'+id,
+     '<div class="notice">Chaque génération est une VM AU DISTINCTE, éteinte. '
+     +'Une génération incertaine reste inutilisable. La bascule reste interdite tant que le fencing '
+     +'et la configuration de reprise ne sont pas validés.</div>'
+     +'<div class="table-wrap"><table><thead><tr><th>Début</th><th>État</th><th>Base</th>'
+     +'<th>Nouvelle AU</th><th>Disques</th><th>Octets lus</th><th>Octets transférés</th><th>Erreur</th>'
+     +'</tr></thead><tbody>'+(rows||'<tr><td colspan="8">Aucune génération</td></tr>')
+     +'</tbody></table></div>',
+     '<button class="btn" data-action="dr-vm-hot-history" data-id="'+id+'">Actualiser</button>',true);
+  }catch(ex){toast(ex.message,false)}
+  return;
+ }
  if(a==='dr-vm-hot-preflight'){
    const options=state.credentials.filter(c=>c.kind==='ssh').map(c=>[c.id,c.name]);
    if(!options.length)return toast('Choisir une identité SSH du coffre',false);
@@ -2459,6 +2514,23 @@ async function handleSubmit(ev){
    await refresh();showPage('agents');
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return
+ }
+ if(ev.target.id==='drPRAHotGenerationForm'){
+  ev.preventDefault();
+  const f=new FormData(ev.target),id=Number(ev.target.dataset.id);
+  if(!f.has('approved'))return toast('Confirmation obligatoire',false);
+  if(!confirm('Créer une NOUVELLE VM AU et extraire un snapshot complet sur un volume de travail SD, sans arrêter SD ?'))return;
+  try{
+   const result=await api('/dr/vms/'+id+'/hot-generations','POST',{
+     source_credential_id:Number(f.get('source_credential_id')),
+     target_credential_id:Number(f.get('target_credential_id')),
+     scratch_path:String(f.get('scratch_path')||'').trim(),
+     approved:true
+   });
+   closeModal();state.drProtectedVMs=(await api('/dr/vms')).items;render();
+   toast('Génération à chaud #'+result.job_id+' en file · suivi par VM');
+  }catch(ex){toast(ex.message,false)}
+  return;
  }
  if(ev.target.id==='drHotPreflightForm'){
    ev.preventDefault();
