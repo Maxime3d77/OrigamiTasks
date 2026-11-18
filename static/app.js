@@ -442,12 +442,16 @@ function agentDeployForm(){modal('Déployer un agent via SSH','<form id="agentDe
 let agentBatchPollTimer=null;
 function scheduleAgentBatchPoll(){
  if(agentBatchPollTimer||state.page!=='agents'||!roleAdmin())return;
- if(!(state.agentDeployBatches||[]).some(x=>x.status==='queued'||x.status==='running'))return;
+ if(!(state.agentDeployBatches||[]).some(x=>x.status==='queued'||x.status==='running') &&
+     !(state.agentUpdates?.items||[]).some(x=>['queued','running','awaiting_heartbeat'].includes(x.status)))return;
  agentBatchPollTimer=setTimeout(async()=>{
   agentBatchPollTimer=null;
   if(state.page!=='agents'||!roleAdmin())return;
   try{
    state.agentDeployBatches=(await api('/agents/deploy/batches')).items;
+   state.agentUpdates=await api('/agents/updates');
+   state.agents=(await api('/agents')).items;
+   if(state.page==='agents'){render();return;}
    const panel=document.getElementById('agentBatchList');
    if(panel)panel.innerHTML=agentBatchPanel();
   }catch(ex){console.warn('Statut des déploiements agents non disponible',ex?.message)}
@@ -1910,6 +1914,7 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='fleet-ssh-key'){await inspectClusterSSHKey(b);return}
  if(a==='dr-site-fleet'){await openPRAClusterSelector(id);return}
  if(a==='agents-status-refresh'||a==='agent-status-refresh'){
+  state.agentUpdates=await api('/agents/updates');
   state.agents=(await api('/agents')).items;
   state.drSites=(await api('/dr/sites')).items;
   render();
