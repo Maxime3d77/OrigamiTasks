@@ -106,3 +106,16 @@ Chaque travail a un lease unique, un timeout et une sortie limitée. **Ne pas re
 ## Dépannage
 
 Linux : `systemctl status origamitasks-agent` et `journalctl -u origamitasks-agent -n 100`. Windows : `Get-ScheduledTask OrigamiTasksAgent` et événements Planificateur de tâches. Vérifier HTTPS/certificats, TCP 443 sortant, empreinte SSH, permissions de `config.json`, expiration du jeton et identité de l'agent. Voir [Tâches](tasks.md) et [Sécurité](security.md).
+
+## Mise à jour des agents Linux et Windows (v0.3.23 — recette)
+
+Dans **Administration → Agents Linux / Windows** :
+- **Mettre à jour** à droite d'un agent obsolète : sélectionnez l'identité SSH du coffre, puis confirmez.
+- **Mettre à jour les agents obsolètes en ligne** : sélectionne les agents visibles, en ligne et plus anciens que les sources intégrées à la console. Les mises à jour s'exécutent **une par une**, sans réinscription.
+- L'historique indique **En attente → En cours → Vérification version → Réussi / Échec**. Le succès n'est déclaré qu'après un heartbeat authentifié annonçant la nouvelle version.
+
+Prérequis : serveur cible présent **sans ambiguïté** dans l'inventaire SSH, clé hôte connue et approuvée, identité SSH du coffre avec droits d'installation (sudo non interactif/root sur Linux, administrateur OpenSSH sur Windows). Les agents hors ligne, de version inconnue ou déjà à jour ne sont pas sélectionnés en masse.
+
+La procédure copie uniquement le script de l'agent (et le superviseur PRA passif sous Linux), sauvegarde les fichiers précédents avec le suffixe `.origami-backup` et redémarre le service Linux ou la tâche Windows. Elle **conserve l'agent_id, le token et les fichiers config.json/modules.json**, sans réinitialiser les sites PRA. La confirmation de version ne prouve pas que le module PRA exécute une réplication réelle.
+
+**Sécurité :** aucune relance automatique après incident. Une coupure SSH peut laisser une mise à jour incertaine ; contrôler le service distant et les sauvegardes locales avant de relancer. Faire un test sur un agent non critique avant un lot de serveurs Proxmox.
