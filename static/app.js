@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,drSites:[],drSimulations:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drSimulations:[],agents:[],sshInventory:{servers:[],groups:[]},agentDeployBatches:[],folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -495,6 +495,7 @@ function datacenters(){
    +'<div class="muted tinytext">Connexion coffre #'+e(d.credential_id)+(d.skip_tls_verification?' · ⚠ Certificat TLS non vérifié':d.ca_cert?' · CA TLS importée':' · CAs système')+'</div>'
    +'<div class="actions"><button class="btn tiny" data-action="test-datacenter" data-id="'+d.id+'">Tester l’API</button>'
    +'<button class="btn primary tiny" data-action="discover-datacenter" data-id="'+d.id+'">Découvrir les nœuds/VM</button>'
+   +'<button class="btn tiny" data-action="fleet-open" data-id="'+d.id+'">Agents du cluster</button>'
    +'<button class="btn tiny" data-action="edit-datacenter" data-id="'+d.id+'">Modifier</button>'
    +'<button class="btn tiny danger" data-action="delete-datacenter" data-id="'+d.id+'">Supprimer</button></div></div>').join('');
  return title('Serveurs & clusters Proxmox','Déclare chaque cluster ou serveur autonome dans OrigamiTasks, avec son token et sa CA, sans modifier le .env.')
@@ -516,9 +517,9 @@ function renderDRSitesPanel(){
   const storage={auto:'À détecter',iscsi_lvm:'iSCSI + LVM',zfs:'ZFS',ceph:'Ceph',pbs:'PBS',other:'Autre'}[site.storage_profile]||site.storage_profile;
   return '<div class="job-card dr-site-card"><div class="job-card-head"><span class="chip tag">'+e(role)+'</span><span class="chip">'+e(storage)+'</span></div>'
     +'<h3>'+e(site.name)+'</h3><p>Clusters : '+clusters+'</p><p class="hint">Agents standards associés : '+ags+'</p>'
-    +'<p class="hint"><b>Mode PRA :</b> simulation uniquement ; aucun agent PRA autonome installé.</p>'
+    +'<p class="hint"><b>Mode PRA :</b> agent unique modulaire et superviseur passif ; réplication / bascule non disponibles.</p>'
     +'<div class="actions"><button class="btn tiny" data-action="dr-site-edit" data-id="'+site.id+'">Modifier</button>'
-    +'<button class="btn tiny" data-action="dr-site-deploy-agent" data-id="'+site.id+'">Déployer agent SSH</button>'
+    +'<button class="btn tiny" data-action="dr-site-fleet" data-id="'+site.id+'">Déployer sur les nœuds</button>'
     +'<button class="btn tiny danger" data-action="dr-site-delete" data-id="'+site.id+'">Supprimer</button></div></div>';
  }).join('');
  const history=(state.drSimulations||[]).slice(0,5).map(item=>
@@ -585,6 +586,98 @@ function showDRSimulationResult(result){
   +'<table><thead><tr><th>Contrôle</th><th>Résultat</th><th>Explication</th></tr></thead><tbody>'+lines+'</tbody></table>'
   +'<p class="hint">'+e(result.next_step)+'</p>',
   '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
+}
+
+
+async function openClusterAgentWizard(dcId, overrideSuffix=''){
+ const dc=(state.datacenters||[]).find(x=>x.id===Number(dcId));
+ if(!dc)return toast('Cluster Proxmox introuvable',false);
+ let data;
+ try{
+  data=await api('/datacenters/'+dc.id+'/agent-nodes?domain_suffix='+encodeURIComponent(overrideSuffix));
+ }catch(ex){
+  if(!overrideSuffix){
+   const userSuffix=prompt('Domaine SSH des nœuds du cluster '+dc.name+' (ex. infra.example.org). Le certificat Proxmox ou l’URL peut utiliser une IP.','');
+   if(userSuffix){return openClusterAgentWizard(dcId,userSuffix.trim())}
+  }
+  return toast(ex.message,false);
+ }
+ state.proxmoxFleet=data;
+ const site=(state.drSites||[]).find(x=>(x.datacenters||[]).some(y=>y.id===dc.id));
+ const available=(data.nodes||[]).filter(n=>n.server_id&&!n.already_registered);
+ const credentials=(state.credentials||[]).filter(c=>c.kind==='ssh');
+ const nodeRows=(data.nodes||[]).map(node=>
+   '<label class="fleet-node-row"><input type="checkbox" name="fleet_node" value="'+e(node.node)+'" checked>'
+   +'<span class="fleet-node-main"><strong>'+e(node.node)+'</strong><small>'+e(node.fqdn)+':22</small></span>'
+   +'<span class="chip '+(node.already_registered?'tag':'')+'">'+(node.already_registered?'Agent #'+e(node.agent_id):'Sans agent')+'</span>'
+   +'<button class="btn tiny" data-action="fleet-ssh-key" data-host="'+e(node.fqdn)+'" data-port="22" type="button">Empreinte SSH</button></label>'
+ ).join('');
+ const deployRows=available.map(node=>
+  '<label class="fleet-deploy-row"><input type="checkbox" name="fleet_server" value="'+node.server_id+'" checked>'
+  +'<span>'+e(node.node)+' <small>'+e(node.fqdn)+'</small></span></label>'
+ ).join('');
+ const group='<form id="proxmoxFleetGroupForm" data-id="'+dc.id+'">'
+  +'<div class="form-grid"><label class="field"><span>Domaine DNS SSH des nœuds</span><input name="domain_suffix" value="'+e(data.domain_suffix)+'" required></label>'
+  +'<div class="field"><span>Rôle et association PRA</span><div class="notice">'+e(site?site.name+' · '+site.role:'Cluster non rattaché à un site PRA')+'</div></div></div>'
+  +'<p class="hint">Nœuds identifiés depuis l’API du cluster. Vérifier les FQDN et, si besoin, changer le suffixe puis cliquer « Actualiser » avant de créer le groupe.</p>'
+  +'<div class="tool-row"><button class="btn tiny" type="button" data-action="fleet-preview-refresh" data-id="'+dc.id+'">↻ Actualiser le domaine et les nœuds</button>'
+  +'<span class="chip">'+data.nodes.length+' nœud(s) détecté(s)</span></div>'
+  +'<div class="fleet-node-list">'+nodeRows+'</div>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">'+(data.group_id?'Synchroniser le groupe SSH':'Créer le groupe SSH lié au cluster')+'</button>'
+  +'<small class="hint">L’inventaire SSH sera mis à jour, aucune installation à cette étape.</small></div></form>';
+ const deploy='<form id="proxmoxFleetDeployForm" data-id="'+dc.id+'">'
+  +'<h3>Déployer l’agent unique Linux sur le groupe</h3>'
+  +(data.group_id?'<p class="hint">Groupe géré #'+e(data.group_id)+' · '+available.length+' nœud(s) sans agent déjà enregistré.</p>':
+    '<p class="notice">Créer ou synchroniser le groupe SSH avant de lancer le déploiement.</p>')
+  +'<div class="fleet-node-list">'+(deployRows||'<p class="hint">Aucun nœud éligible : les agents sont déjà enregistrés ou le groupe est vide.</p>')+'</div>'
+  +'<div class="form-grid">'
+  +selectField('Identité SSH avec clé privée (coffre)','credential_id',
+     [['','— Choisir une identité SSH —'],...credentials.map(c=>[c.id,c.name])],'')
+  +'<label class="field"><span>Plateforme installée</span><input value="Linux · agent unique Standard / Proxmox / PRA passif" readonly></label></div>'
+  +'<div class="fleet-modules"><strong>Modules à activer automatiquement après enrôlement</strong>'
+  +'<label class="test-wizard-option"><input type="checkbox" name="enable_proxmox" '+(site?'checked':'disabled')+'>'
+  +'<span><strong>Proxmox</strong><small>Associe les agents aux clusters du site. Les tokens PVE restent dans la console.</small></span></label>'
+  +'<label class="test-wizard-option"><input type="checkbox" name="enable_pra" '+(site&&['primary','standby'].includes(site.role)?'checked':'disabled')+'>'
+  +'<span><strong>PRA passif Linux</strong><small>Service local autonome de surveillance seulement, sans réplication, fencing ni bascule de VM.</small></span></label>'
+  +(!site?'<p class="hint">Rattacher d’abord le cluster à un site PRA pour activer ses modules automatiquement.</p>':'')
+  +'</div>'
+  +'<label class="test-wizard-option"><input type="checkbox" name="approved" required><span>'
+  +'<strong>Confirmer l’installation de l’agent sur tous les hôtes cochés</strong>'
+  +'<small>Clé SSH approuvée par hôte obligatoire ; les nœuds non approuvés échoueront individuellement sans installation. '
+  +'Le module PRA est passif et aucune VM ne sera répliquée ou démarrée.</small></span></label>'
+  +'<div class="tool-row"><button class="btn primary" type="submit" '+(!data.group_id||!available.length?'disabled':'')+'>Déployer les agents sélectionnés</button>'
+  +'<button class="btn" data-action="modal-close" type="button">Fermer</button></div></form>';
+ modal('Nœuds & agents · '+e(dc.name),
+    '<div class="notice">Assistant cluster Proxmox → groupe SSH → déploiement via le coffre. '
+    +'Les agents installés sont associés automatiquement au site PRA si le cluster en possède un.</div>'
+    +group+'<hr class="fleet-divider">'+deploy,'',true);
+}
+function openPRAClusterSelector(siteId){
+ const site=(state.drSites||[]).find(x=>x.id===Number(siteId));
+ if(!site)return toast('Site PRA introuvable',false);
+ if((site.datacenters||[]).length===1)return openClusterAgentWizard(site.datacenters[0].id);
+ if(!(site.datacenters||[]).length)return toast('Associer d’abord un cluster au site',false);
+ modal('Déploiement des agents · '+e(site.name),
+  '<p>Sélectionner le cluster Proxmox concerné :</p><div class="fleet-site-pick">'
+   +(site.datacenters||[]).map(dc=>
+     '<button class="btn" data-action="fleet-open" data-id="'+dc.id+'">'+e(dc.name)+'</button>').join('')
+   +'</div>','',true);
+}
+async function inspectClusterSSHKey(button){
+ const hostname=button.dataset.host,port=Number(button.dataset.port||22);
+ try{
+  const info=await api('/ssh/host-key/inspect','POST',{host:hostname,port});
+  if(info.trusted){toast('Empreinte SSH déjà approuvée : '+hostname);return}
+  if(info.status==='changed')throw Error('Empreinte SSH modifiée : vérifier hors bande avant toute installation.');
+  const typed=prompt('Empreinte publique présentée par '+hostname+':\n'+info.fingerprint+
+    '\n\nComparer cette empreinte à celle obtenue directement sur la console physique/SSH déjà fiable du serveur. '
+    +'Saisir ci-dessous l’empreinte vérifiée (SHA256:...) pour l’approuver. Annuler pour ne pas faire confiance.','');
+  if(!typed)return;
+  if(typed.trim()!==info.fingerprint)throw Error('Empreinte différente : confiance refusée.');
+  await api('/ssh/host-key/approve','POST',
+    {host:hostname,port,fingerprint:typed.trim(),verified_out_of_band:true});
+  toast('Empreinte SSH approuvée pour '+hostname);
+ }catch(ex){toast(ex.message,false)}
 }
 
 function proxmoxCAChoices(selected=''){
@@ -1502,7 +1595,14 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   toast(targets.length+' serveur(s) ajoutés');return
  }if(a==='agent-modules'){openAgentModulesForm(id);return}
  if(a==='agent-uninstall'){openAgentUninstallForm(id);return}
- if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='dr-site-new'){openDRSiteForm();return}
+ if(a==='agent-enroll-form'){agentEnrollForm();return}if(a==='agent-revoke'){if(!confirm('Révoquer cet agent et ses tâches ?'))return;await api('/agents/'+id+'/revoke','POST');toast('Agent révoqué');await refresh();return}if(a==='fleet-open'){await openClusterAgentWizard(id);return}
+ if(a==='fleet-preview-refresh'){
+   const form=document.getElementById('proxmoxFleetGroupForm');
+   await openClusterAgentWizard(id,String(form?.elements.namedItem('domain_suffix')?.value||'').trim());return
+ }
+ if(a==='fleet-ssh-key'){await inspectClusterSSHKey(b);return}
+ if(a==='dr-site-fleet'){await openPRAClusterSelector(id);return}
+ if(a==='dr-site-new'){openDRSiteForm();return}
  if(a==='dr-site-edit'){openDRSiteForm(id);return}
  if(a==='dr-site-delete'){
   if(!confirm('Supprimer cette association PRA ? Les clusters, les agents et les VM ne seront pas modifiés.'))return;
@@ -1551,6 +1651,50 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   hydrateAdmins();return
  }if(a==='refresh-updates'){hydrateAdmins();return}}catch(ex){toast(ex.message,false)}}
 async function handleSubmit(ev){
+ if(ev.target.id==='proxmoxFleetGroupForm'){
+  ev.preventDefault();
+  const form=ev.target,f=new FormData(form),dcId=Number(form.dataset.id);
+  const button=form.querySelector('[type="submit"]');if(button)button.disabled=true;
+  try{
+   const selected=f.getAll('fleet_node').map(String);
+   if(!selected.length)throw Error('Sélectionner au moins un nœud pour le groupe.');
+   const result=await api('/datacenters/'+dcId+'/ssh-group','POST',{
+    domain_suffix:String(f.get('domain_suffix')||'').trim(),nodes:selected
+   });
+   state.sshInventory=await api('/ssh/inventory');
+   toast('Groupe SSH #'+result.group_id+' lié au cluster · '+result.count+' nœud(s)');
+   await openClusterAgentWizard(dcId,String(f.get('domain_suffix')||'').trim());
+  }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
+  return
+ }
+ if(ev.target.id==='proxmoxFleetDeployForm'){
+  ev.preventDefault();
+  const form=ev.target,f=new FormData(form),dcId=Number(form.dataset.id);
+  const fleet=state.proxmoxFleet;
+  if(!fleet||fleet.datacenter_id!==dcId||!fleet.group_id)return toast('Synchroniser le groupe avant installation.',false);
+  const ids=f.getAll('fleet_server').map(Number);
+  if(!ids.length)return toast('Sélectionner les nœuds à équiper.',false);
+  if(!f.get('credential_id'))return toast('Choisir une clé SSH du coffre.',false);
+  if(!f.has('approved'))return toast('Confirmer explicitement le déploiement.',false);
+  if(f.has('enable_pra')&&!f.has('enable_proxmox'))return toast('Activer Proxmox avant le module PRA passif.',false);
+  if(!confirm('Installer l’agent unique OrigamiTasks sur '+ids.length+' nœud(s) du cluster '+fleet.datacenter+' ?')){
+   return
+  }
+  const button=form.querySelector('[type="submit"]');if(button)button.disabled=true;
+  try{
+   const result=await api('/datacenters/'+dcId+'/agents/deploy','POST',{
+    group_id:fleet.group_id,server_ids:ids,
+    credential_id:Number(f.get('credential_id')),
+    enable_proxmox:f.has('enable_proxmox'),enable_pra:f.has('enable_pra'),
+    approved:true
+   });
+   closeModal();
+   toast('Lot #'+result.batch_id+' lancé : '+result.total+' nœud(s).');
+   await refresh();showPage('agents');
+  }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
+  return
+ }
+
  if(ev.target.id==='agentModulesForm'){
   ev.preventDefault();
   const f=new FormData(ev.target),id=Number(ev.target.dataset.id);

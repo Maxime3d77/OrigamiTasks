@@ -296,3 +296,17 @@
 .agent-module-choice small{font-size:11px;color:var(--muted);line-height:1.55;overflow-wrap:anywhere}
 .agent-action-buttons{min-width:280px}
 @media(max-width:760px){.agent-module-choice{padding:11px}.agent-action-buttons{min-width:210px}}
+
+
+/* 0.3.17: clustered PVE node selection and secure SSH agent rollout */
+.fleet-node-list{display:flex;flex-direction:column;gap:7px;margin:12px 0 18px;max-height:360px;overflow:auto;padding:4px}
+.fleet-node-row,.fleet-deploy-row{display:flex;align-items:center;gap:12px;min-width:0;padding:11px 12px;border:1px solid var(--stroke);border-radius:11px;background:var(--panel2)}
+.fleet-node-row input,.fleet-deploy-row input{width:18px;height:18px;flex:0 0 18px;accent-color:var(--yellow)}
+.fleet-node-row .fleet-node-main,.fleet-deploy-row span{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
+.fleet-node-row strong,.fleet-node-row small,.fleet-deploy-row span{overflow-wrap:anywhere}
+.fleet-node-row small,.fleet-deploy-row small{font-size:11px;color:var(--muted)}
+.fleet-node-row .btn{white-space:normal;flex:0 0 auto}
+.fleet-divider{border:0;border-top:1px solid var(--stroke);margin:22px 0}
+.fleet-site-pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:10px;margin:18px 0}
+.fleet-site-pick .btn{min-height:48px;white-space:normal}
+@media(max-width:670px){.fleet-node-row{flex-wrap:wrap}.fleet-node-row .btn{flex:1 1 100%;max-width:100%}.fleet-node-list{max-height:420px}}

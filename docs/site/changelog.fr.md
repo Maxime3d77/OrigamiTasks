@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.17-rc1 — 17 novembre 2026
+
+- **Proxmox → Agents du cluster :** découverte directe des nœuds Linux depuis l'API du cluster ; prévisualisation des FQDN SSH via le domaine de l'endpoint Proxmox (suffixe modifiable), sélection des nœuds, création / synchronisation d'un **groupe SSH dédié lié au cluster**. Le groupe est consultable dans l'inventaire SSH ; les éditions génériques d'un groupe géré sont bloquées pour préserver son lien Proxmox.
+- **Sites PRA → Déployer sur les nœuds :** choisir parmi les clusters du site, créer le groupe et sélectionner les agents Linux manquants à installer via une **identité SSH du coffre**, puis confirmer le lot. Les installations sont traitées individuellement, journalisées, et les nouveaux agents rattachés au site PRA lorsque celui-ci est déclaré.
+- **Autorisation :** ce parcours n'exige **aucun ajout de FQDN dans `AGENT_DEPLOY_ALLOWED_HOSTS` ni activation globale par `.env`**. La liste des cibles provient de l'API Proxmox, des serveurs du groupe liés en base et de la sélection administrateur. Le worker recoupe à nouveau les identifiants, FQDN/ports et **l'empreinte d'hôte SSH déjà approuvée** avant chaque installation. Les déploiements SSH génériques restent protégés par leur ancien réglage global.
+- **Mécanisme d'approbation SSH :** inspection de la clé publique depuis le wizard ; une nouvelle empreinte doit être **comparée sur la console du serveur, puis confirmée textuellement**. Aucune acceptation automatique des clés inconnues. Les hôtes non approuvés échouent individuellement et ne reçoivent pas d'agent.
+- **Limites :** uniquement Linux via SSH/SFTP et sudo/root, 100 nœuds par lot ; associer les agents existants plutôt que les réinstaller. Les modules Proxmox et PRA passif peuvent être préactivés dans l'assistant : la console transmet la configuration après l'enrôlement, sans déclencher de réplication. Ils restent modifiables dans Agents. **Aucune réplication ni bascule de VM n'est déclenchée par ce parcours.**
+
 ## 0.3.16-rc1 — 17 novembre 2026
 
 - **Agent unique modulaire :** chaque agent conserve son identité, son token et son installation, avec modules administrables **Standard** (toujours actif), **Proxmox** (association aux clusters déclarés, requêtes API aujourd'hui côté console) et **PRA passif** (Linux uniquement). Les modules sont activables dans **Agents → Configurer modules**, avec contrôle du site et des clusters associés, version de politique et état réellement accusé réception.

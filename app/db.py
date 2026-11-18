@@ -100,6 +100,19 @@ CREATE TABLE IF NOT EXISTS datacenters (
  skip_tls_verification INTEGER NOT NULL DEFAULT 0,
  created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS proxmox_ssh_groups (
+ datacenter_id INTEGER PRIMARY KEY REFERENCES datacenters(id) ON DELETE CASCADE,
+ group_id INTEGER NOT NULL UNIQUE REFERENCES ssh_server_groups(id) ON DELETE CASCADE,
+ domain_suffix TEXT NOT NULL,
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS proxmox_ssh_nodes (
+ datacenter_id INTEGER NOT NULL REFERENCES datacenters(id) ON DELETE CASCADE,
+ server_id INTEGER NOT NULL REFERENCES ssh_servers(id) ON DELETE CASCADE,
+ node_name TEXT NOT NULL,
+ PRIMARY KEY(datacenter_id,server_id),
+ UNIQUE(datacenter_id,node_name)
+);
 CREATE TABLE IF NOT EXISTS dr_sites (
  id INTEGER PRIMARY KEY,
  name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -208,6 +221,10 @@ def initialize():
             ("agents", "modules_revision", "INTEGER NOT NULL DEFAULT 1"),
             ("agents", "modules_applied_revision", "INTEGER NOT NULL DEFAULT 0"),
             ("agents", "modules_reported_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("agent_deploy_batches", "proxmox_datacenter_id", "INTEGER"),
+            ("agent_deploy_batches", "proxmox_group_id", "INTEGER"),
+            ("agent_deploy_batches", "enable_proxmox", "INTEGER NOT NULL DEFAULT 0"),
+            ("agent_deploy_batches", "enable_pra", "INTEGER NOT NULL DEFAULT 0"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:

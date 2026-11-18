@@ -205,8 +205,8 @@ def revoke(agent_id):
         raise HTTPException(404, 'Agent not found or already revoked')
 
 
-def deploy(body):
-    if not config.ALLOW_AGENT_REMOTE_DEPLOY:
+def deploy(body, *, cluster_authorized=False):
+    if not config.ALLOW_AGENT_REMOTE_DEPLOY and not cluster_authorized:
         raise HTTPException(403, 'Enable ALLOW_AGENT_REMOTE_DEPLOY=true to provision from the UI')
     if body.get('approved') is not True:
         raise HTTPException(422, 'Explicit installation confirmation required')
@@ -216,7 +216,11 @@ def deploy(body):
         raise HTTPException(422, str(exc))
     host = str(body.get('host') or '').strip()
     allowed = {x.strip().lower() for x in config.AGENT_DEPLOY_ALLOWED_HOSTS.split(',') if x.strip()}
-    if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,253}', host) or not allowed or host.lower() not in allowed:
+    if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,253}', host):
+        raise HTTPException(422, 'FQDN de la cible SSH invalide')
+    # A cluster group is an alternate per-target authorization set only for
+    # the *internal* vetted bulk worker, never for the public deploy endpoint.
+    if not cluster_authorized and (not allowed or host.lower() not in allowed):
         raise HTTPException(403, 'Target host not in AGENT_DEPLOY_ALLOWED_HOSTS')
     try:
         port = int(body.get('port') or 22)

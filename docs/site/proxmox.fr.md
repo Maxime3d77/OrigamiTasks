@@ -1,5 +1,17 @@
 # Proxmox VE : découverte et reprise d'activité
 
+### Installer l'agent sur tous les nœuds du cluster depuis Proxmox (0.3.17-rc1)
+
+Sur la fiche du cluster, cliquer **Agents du cluster**, ou depuis un site PRA sur **Déployer sur les nœuds**, puis choisir le cluster si le site en comporte plusieurs.
+
+1. OrigamiTasks découvre via l'API Proxmox les nœuds du cluster. Il construit leur FQDN SSH (ex. `pve01.infra.example.org`) à partir du suffixe DNS de l'URL API, avec possibilité de le corriger dans le formulaire. Le suffixe choisi doit correspondre aux FQDN retournés par Proxmox et au réseau SSH réellement utilisé.
+2. Vérifier la liste, cocher les nœuds, puis **Créer / Synchroniser le groupe SSH**. Cela crée des entrées d'inventaire SSH et le groupe `PVE-<id>-<nom>`, lié durablement au cluster, **sans installer de logiciel**. Une synchronisation explicite remplace les membres du groupe géré. Les mêmes serveurs peuvent appartenir à d'autres groupes SSH indépendants.
+3. Pour chaque nœud non encore approuvé, utiliser **Empreinte SSH**. Comparer le SHA256 affiché à celui obtenu directement sur la console du nœud et saisir l'empreinte exacte pour l'approuver. Les nouveaux hôtes non vérifiés **ne sont jamais autorisés automatiquement**.
+4. Choisir l'identité SSH du **coffre** (clé privée, droits root ou `sudo -n` sur les nœuds), sélectionner seulement les nœuds non encore équipés, cocher l'approbation, puis **Déployer les agents sélectionnés**. La file persistante réalise une installation à la fois ; chaque nœud reçoit l'**agent unique Linux** standard + superviseur PRA passif.
+5. Suivre le résultat sous **Agents → Déploiements groupés**. Quand le cluster appartient à un site PRA, l'agent nouvellement enregistré lui est associé automatiquement. Les modules **Proxmox** et **PRA passif** peuvent être cochés directement dans l'assistant : leurs rôles sont appliqués automatiquement après l'enrôlement. Le module PRA reste sans réplication ni bascule. Les rôles peuvent ensuite être modifiés dans **Agents → Configurer modules**. **Aucune réplication de VM** n'est déclenchée.
+
+**Sécurité :** pas de liste de FQDN à modifier dans le `.env` pour ce parcours. La sélection des cibles passe par le cluster déclaré, la découverte Proxmox, le groupe lié et la confirmation administrateur. Avant chaque installation, le worker recoupe le FQDN, le port, le membre du cluster et la clé d'hôte SSH approuvée. Les déploiements génériques non liés à un cluster continuent d'exiger leurs restrictions de configuration. Il s'agit d'une action privilégiée : tester sur un nœud non critique avant de traiter la totalité des nœuds.
+
 ### Sites PRA nommés, agents et simulation sans risque (0.3.14)
 
 Sous **Serveurs & clusters Proxmox → Sites PRA et agents**, cliquer **Déclarer un site**. Donner son nom (ex. SD, AU), son rôle, sélectionner **un ou plusieurs clusters Proxmox déjà enregistrés** et indiquer le profil de stockage. La valeur **iSCSI + LVM** est pour l'instant une **déclaration à vérifier**, pas une découverte confirmée du stockage. Le groupe de volumes LVM partagé peut héberger plusieurs disques de VM sur une même LUN : la réplication du volume Pure ne produit pas automatiquement une copie indépendante par VM.
