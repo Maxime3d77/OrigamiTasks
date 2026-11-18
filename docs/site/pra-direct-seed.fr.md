@@ -10,7 +10,7 @@ Sur le **nœud qui héberge actuellement** la VM source QEMU (et uniquement pour
 
 ```bash
 # Depuis le dépôt de recette de l'outil :
-bash scripts/pra-direct-seed.sh 100 au-styx.infra.aday.fr 900100 local-zfs --confirm root /root/.ssh/<CLE_AUTORISEE>
+bash scripts/pra-direct-seed.sh 100 pve-dr.example.org 900100 local-zfs --confirm root /root/.ssh/<CLE_AUTORISEE>
 ```
 
 Les arguments sont : VMID source, FQDN SSH cible, VMID cible **libre**, stockage images AU, confirmation, utilisateur SSH cible et chemin de la clé SSH présente sur le **nœud source**. Ne pas copier une clé privée personnelle du coffre vers les nœuds : pour ce prototype CLI, employer une identité technique préconfigurée et restreinte pour le lien source→cible. La clé d'hôte cible doit être préalablement approuvée dans `known_hosts` du compte source. Les nœuds doivent pouvoir joindre le SSH de l'autre site.
