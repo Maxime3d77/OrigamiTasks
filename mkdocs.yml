@@ -14,6 +14,7 @@ nav:
   - Task reference: tasks.md
   - Integrations: integrations.md
   - Proxmox & DR: proxmox.md
+  - PBS backup pilot: pra-pbs-pilot.md
   - Agents: agents.md
   - Operations & Upgrades: operations.md
   - Security: security.md
@@ -64,6 +65,7 @@ plugins:
             Task reference: Catalogue des tâches
             Integrations: Intégrations
             Proxmox & DR: Proxmox et PRA
+            PBS backup pilot: Pilote de sauvegarde PBS
             Agents: Agents
             Operations & Upgrades: Exploitation et mises à jour
             Security: Sécurité
