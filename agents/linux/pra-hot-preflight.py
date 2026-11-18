@@ -13,7 +13,8 @@ import sys
 
 def report(vmid):
     result={"vmid":vmid,"source_running":False,"qmp_available":False,
-            "disks":[],"qmp_commands":[],"hot_incremental_ready":False,
+            "disks":[],"qmp_commands":[],"external_provider_api":False,
+            "hot_incremental_ready":False,
             "reason":"not_checked","source_stopped":False}
     cfg="/etc/pve/nodes/"+socket.gethostname().split(".")[0]+"/qemu-server/"+str(vmid)+".conf"
     if not os.path.isfile(cfg):
@@ -72,10 +73,16 @@ def report(vmid):
         commands=execute("query-commands",3)
         supported={x.get("name") for x in commands if isinstance(x,dict)}
         required=("block-dirty-bitmap-add","blockdev-backup","transaction")
-        result["qmp_commands"]=[name for name in required if name in supported]
-        result["reason"]=("qmp_has_primitives_but_provider_missing"
-                          if all(name in supported for name in required)
-                          else "qmp_incremental_capabilities_missing")
+        provider=("backup-access-setup","backup-access-teardown")
+        result["qmp_commands"]=[name for name in (*required,*provider) if name in supported]
+        result["external_provider_api"]=all(name in supported for name in provider)
+        result["reason"]=(
+            "external_backup_provider_available_implementation_missing"
+            if result["external_provider_api"] else
+            "qmp_has_primitives_but_provider_missing"
+            if all(name in supported for name in required) else
+            "qmp_incremental_capabilities_missing"
+        )
         # Capability presence alone CANNOT prove coherent chain/restore.
         result["hot_incremental_ready"]=False
     return result
