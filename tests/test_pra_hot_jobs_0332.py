@@ -59,6 +59,9 @@ def test_hot_generation_lifecycle_mocked(monkeypatch):
                 "target_credential_id":creds[1],"scratch_path":"/mnt/pra-scratch",
                 "approved":True},headers=headers)
             assert ok.status_code==200,ok.text
+            # Drive the worker synchronously so the test does not depend on
+            # a background polling interval (normally four seconds).
+            assert pra_hot_jobs.process_one() is True
             status=None
             for _ in range(60):
                 r=client.get(path,headers=headers)
