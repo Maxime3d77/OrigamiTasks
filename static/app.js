@@ -1810,6 +1810,16 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='page'){showPage(b.dataset.page);return}if(a==='agent-deploy-form'){agentDeployForm();return}
  if(a==='agent-deploy-bulk-form'){agentBulkDeployForm();return}
  if(a==='agent-batch-refresh'){await refresh();return}
+ if(a==='agent-batch-clean'){
+  if(!confirm('Supprimer les anciens lots terminés ? Les lots actifs et le journal d’audit seront conservés.'))return;
+  try{
+   const result=await api('/agents/deploy/batches/cleanup','POST',{});
+   state.agentDeployBatches=(await api('/agents/deploy/batches')).items;
+   const panel=document.getElementById('agentBatchList');if(panel)panel.innerHTML=agentBatchPanel();
+   toast(result.removed+' lot(s) terminés nettoyé(s)');
+  }catch(ex){toast(ex.message,false)}
+  return;
+ }
  if(a==='agent-bulk-add-group'){
   const sel=document.getElementById('agentBulkInventoryGroup');
   const group=(state.sshInventory.groups||[]).find(g=>String(g.id)===sel?.value);
