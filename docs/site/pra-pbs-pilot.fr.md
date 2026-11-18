@@ -48,3 +48,5 @@ Procédure pour une VM sacrifiable :
 5. Utiliser **Vérifier le résultat** jusqu'à `completed`. Sur le cluster de secours, contrôler `qm status <VMID>`, `qm config <VMID>`, et `pvesm status`.
 
 **Limitations de sécurité :** ne PAS démarrer la VM source et la copie simultanément sur un réseau connecté. L'action restaure une seule génération de sauvegarde et ne met pas à jour automatiquement une copie déjà créée. Aucune synchronisation continue, bascule automatique, témoin indépendant ou fencing côté hyperviseur ne sont fournis. Ne pas utiliser ce pilote comme plan PRA production.
+
+Pour retirer une copie de test : **arrêter et supprimer manuellement** la VM de secours dans Proxmox après vérification qu'elle ne contient aucune donnée utile, puis cliquer sur **Libérer après suppression du clone**. OrigamiTasks contrôle par API que le VMID n'existe plus et libère seulement son historique opérationnel. Il ne supprime aucune VM ni aucun disque lui-même.
