@@ -386,3 +386,36 @@ def start():
     if WORKER is None or not WORKER.is_alive():
         WORKER=threading.Thread(target=loop,name="pra-direct-worker",daemon=True)
         WORKER.start()
+
+
+
+def release_after_manual_clone_removal(vm_id,approved,actor):
+    """Never delete a Proxmox guest. Unbind only after target absence verified."""
+    if approved is not True:
+        raise PRAJobError("Validation explicite requise")
+    vm=dr_protected_vms._one(vm_id)
+    from .executor import credential
+    dc=integrations.configured_datacenter(vm["target_dc_id"])
+    secret=credential(dc["credential_id"])
+    auth=dict(secret,ca_cert=dc.get("ca_cert") or secret.get("ca_cert") or "",
+              skip_tls_verification=bool(dc.get("skip_tls_verification",False)))
+    guests=integrations.discover_datacenter(dc,auth,20)
+    if any(g.get("type")=="qemu" and g.get("vmid")==vm["target_vmid"] for g in guests):
+        raise PRAJobError("Clone AU toujours présent : arrêt et suppression manuelle requis")
+    with db.session() as con:
+        con.execute("BEGIN IMMEDIATE")
+        if con.execute("SELECT 1 FROM pra_direct_jobs WHERE protected_vm_id=? "
+                       "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone():
+            raise PRAJobError("Job actif ou incertain : contrôler les nœuds avant libération")
+        if con.execute("SELECT 1 FROM pra_direct_sync_runs WHERE protected_vm_id=? "
+                       "AND status='running'",(vm_id,)).fetchone():
+            raise PRAJobError("Compte rendu incrémental actif : vérification nécessaire")
+        runs=con.execute(
+            "DELETE FROM pra_direct_sync_runs WHERE protected_vm_id=?",(vm_id,)
+        ).rowcount
+        jobs=con.execute(
+            "DELETE FROM pra_direct_jobs WHERE protected_vm_id=?",(vm_id,)
+        ).rowcount
+    db.audit(actor,"pra.direct.release",vm_id,
+             "cible absente selon API; "+str(jobs)+" jobs et "+str(runs)+" rapports purgés")
+    return {"released":True,"remote_vm_deleted":False,"removed_jobs":jobs,"removed_reports":runs}
