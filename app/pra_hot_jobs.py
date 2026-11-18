@@ -151,14 +151,17 @@ def process_one():
             )
         db.audit(job["actor"],"pra.hot.success",vm["id"],
                  "job="+str(job["id"])+", candidate="+str(candidate))
-    except Exception:
-        # Any failed or ambiguous process may have created a partial AU VM.
-        # NEVER retry automatically and NEVER delete the last good generation.
+    except Exception as exc:
+        # An incomplete clone is never promoted or removed automatically.
+        # Preserve candidate ID if the agent reported creation before failure.
+        candidate=getattr(exc,"candidate_vmid",None)
+        candidate=candidate if type(candidate) is int and 100<=candidate<=999999999 else None
+        info=(str(exc)[:175] if isinstance(exc,(HotPRAError,pra_direct_jobs.PRAJobError))
+              else "Erreur de synchronisation ou perte de contrôle SSH")
         with db.session() as con:
             con.execute(
-                "UPDATE pra_hot_jobs SET status='uncertain',error=? WHERE id=?",
-                ("Génération indéterminée : inspecter manuellement les VM AU. "
-                 "Aucun redémarrage ou retrait automatique.",job["id"])
+                "UPDATE pra_hot_jobs SET status='uncertain',candidate_vmid=?,error=? WHERE id=?",
+                (candidate,"Génération incertaine : "+info+" ; inspecter AU avant relance",job["id"])
             )
         db.audit(job["actor"],"pra.hot.uncertain",job["protected_vm_id"],
                  "job="+str(job["id"]))
