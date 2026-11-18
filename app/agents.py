@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from fastapi import HTTPException
-from . import config, db, security, agent_modules, agent_settings
+from . import config, db, security, agent_modules, agent_settings, agent_updates
 
 ACTIONS = {'inventory', 'script', 'processes', 'disk', 'service_status',
            'service_start', 'service_stop', 'service_restart'}
@@ -108,6 +108,7 @@ def poll(agent, body):
                     "version=?,cpu_percent=?,memory_mb=? WHERE id=?",
                     (db.now(),hostname,hostname,version,cpu,memory,agent['id']))
         agent_modules.report(agent['id'],body,con)
+        agent_updates.reconcile(agent['id'],version,con)
         modules_bundle=agent_modules.bundle(agent['id'],con)
         task = con.execute(
             "SELECT * FROM agent_tasks WHERE agent_id=? AND status='queued' ORDER BY id LIMIT 1", (agent['id'],)).fetchone()
