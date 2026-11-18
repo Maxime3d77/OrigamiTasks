@@ -106,3 +106,16 @@ Each task has a unique lease, bounded execution time and capped output. **Never 
 ## Troubleshooting
 
 Linux: `systemctl status origamitasks-agent`, `journalctl -u origamitasks-agent -n 100`. Windows: `Get-ScheduledTask OrigamiTasksAgent`, Task Scheduler Operational log. Check HTTPS trust, outbound 443, SSH known-hosts, restricted `config.json`, token expiration and agent identity. See [Tasks](tasks.md) and [Security](security.md).
+
+## Updating Linux and Windows agents (v0.3.23 staging)
+
+In **Administration → Linux / Windows Agents**:
+- **Update** on a single outdated agent: select a vault SSH identity, then explicitly approve.
+- **Update all outdated online agents** selects only online agents reporting a known lower version; jobs run **serially**, without re-enrollment.
+- Job history progresses **Queued → Running → Awaiting heartbeat → Success / Failure**. Only a fresh authenticated heartbeat reporting the target version confirms success.
+
+Prerequisites: an unambiguous matching SSH inventory server, trusted pinned host key, vault SSH identity with system installation permissions (root/passwordless sudo on Linux, administrative OpenSSH on Windows). Offline agents, unknown versions and current agents are not bulk-selected.
+
+The updater saves old agent executables as `.origami-backup`, replaces only the agent script and passive Linux PRA worker, and restarts the agent. It **preserves agent_id, token, config.json, modules.json and site assignments**. Agent update success does not imply that inter-cluster DR replication is operational.
+
+**Safety:** ambiguous failures are not automatically retried; inspect the local service/task and backup before retrying. Pilot on a non-critical host before upgrading Proxmox nodes.
