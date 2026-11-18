@@ -127,6 +127,18 @@ def hot_preflight(vm_id,source_ssh_id):
     vm=dr_protected_vms._one(vm_id)
     if vm["engine"]!="offline_copy":
         raise PRAJobError("Protection de copie directe requise")
+    # The VM on AU must remain powered off; inspect real cluster state,
+    # not a stale record or the desired state in OrigamiTasks.
+    from .executor import credential
+    dest=integrations.configured_datacenter(vm["target_dc_id"])
+    key=credential(dest["credential_id"])
+    auth=dict(key,ca_cert=dest.get("ca_cert") or key.get("ca_cert") or "",
+              skip_tls_verification=bool(dest.get("skip_tls_verification",False)))
+    items=integrations.discover_datacenter(dest,auth,20)
+    target=[x for x in items if x.get("type")=="qemu" and x.get("vmid")==vm["target_vmid"]]
+    if len(target)>1 or (target and (target[0].get("node")!=vm["target_node"] or
+                                     target[0].get("status")!="stopped")):
+        raise PRAJobError("La VM secours AU doit être arrêtée sur son nœud prévu")
     node=_vm_owner(vm)
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}",node):
         raise PRAJobError("Nœud Proxmox invalide")
