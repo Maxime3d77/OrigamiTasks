@@ -33,11 +33,18 @@ if [[ -n "${PRA_PINNED_KNOWN_HOSTS:-}" ]]; then
 fi
 dest="$user@$targethost"
 preflight="set -eu; command -v qmrestore; pvesm status | awk '\$1 == \"$storage\" {found=1} END {exit !found}'; if qm config '$targetvmid' >/dev/null 2>&1; then echo 'TARGET VMID EXISTS' >&2; exit 40; fi"
-ssh "${sshargs[@]}" "$dest" "$preflight" || { echo 'Destination preflight failed' >&2; exit 4; }
+remote_command(){
+  if [[ "$user" == root ]]; then
+    printf '%s' "$1"
+  else
+    printf 'sudo -n sh -c %q' "$1"
+  fi
+}
+ssh "${sshargs[@]}" "$dest" "$(remote_command "$preflight")" || { echo 'Destination preflight failed' >&2; exit 4; }
 exec 9>"/run/lock/origami-seed-${vmid}.lock"
 flock -n 9 || { echo 'Backup already in progress on source node' >&2; exit 5; }
 # Restore refuses existing VMID, unique network MACs, no autostart.
 restore="set -eu; if qm config '$targetvmid' >/dev/null 2>&1; then exit 40; fi; qmrestore - '$targetvmid' --storage '$storage' --unique 1 --start 0 --ha-managed 0; qm set '$targetvmid' --onboot 0; test \"\$(qm status '$targetvmid')\" = 'status: stopped'; echo ORIGAMI_SEED_COMPLETED"
 echo 'Starting initial direct SD -> AU backup stream; no PBS used'
-vzdump "$vmid" --mode snapshot --stdout --compress 0 | ssh "${sshargs[@]}" "$dest" "$restore"
+vzdump "$vmid" --mode snapshot --stdout --compress 0 | ssh "${sshargs[@]}" "$dest" "$(remote_command "$restore")"
 echo 'Seed complete, standby is stopped. This is NOT continuous replication.'
