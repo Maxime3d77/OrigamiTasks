@@ -108,6 +108,10 @@ def test_hot_generation_lifecycle_mocked(monkeypatch):
         finally:
             if vmid is not None:
                 with db.session() as con:
+                    con.execute(
+                        "DELETE FROM pra_hot_resolutions WHERE job_id IN "
+                        "(SELECT id FROM pra_hot_jobs WHERE protected_vm_id=?)",(vmid,)
+                    )
                     con.execute("DELETE FROM pra_hot_jobs WHERE protected_vm_id=?",(vmid,))
                     con.execute("DELETE FROM pra_direct_jobs WHERE protected_vm_id=?",(vmid,))
                 assert client.delete(f"/api/dr/vms/{vmid}",headers=headers).status_code==200
