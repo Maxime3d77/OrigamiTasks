@@ -616,10 +616,10 @@ function protectedVMsPage(){
    +'<td>'+labelStatus(vm.replication_status)
    +'<div class="muted tinytext">Transfert : '+(vm.direct_job?e(vm.direct_job.kind)+' · '+labelStatus(vm.direct_job.status):'jamais demandé')+'</div>'
    +'<div class="muted tinytext">Dernière copie complète : '+(vm.last_direct_seed?dt(vm.last_direct_seed):'jamais')+'</div>'
-   +'<div class="muted tinytext">Delta : '+(vm.incremental_sync?e(vm.incremental_sync.status)
+   +'<div class="muted tinytext">Ancien delta à froid : '+(vm.incremental_sync?e(vm.incremental_sync.status)
      +' · '+e(vm.incremental_sync.disks_done)+'/'+e(vm.incremental_sync.disks_total)+' disques'
      :'jamais exécuté')+'</div>'
-   +'<div class="muted tinytext">Dernier incrémental réussi : '+(vm.last_incremental_success?dt(vm.last_incremental_success):'jamais')+'</div></td>'
+   +'<div class="muted tinytext">Dernier ancien incrémental : '+(vm.last_incremental_success?dt(vm.last_incremental_success):'jamais')+'</div></td>'
    +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
@@ -1969,8 +1969,8 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
       +labelStatus(r.status)+(r.stale?'<div class="hint">Aucune remontée depuis plus de 20 min</div>':'')+'</td><td>'+e(r.disks_done)+' / '+e(r.disks_total)+'</td><td>'
       +e(r.scanned_bytes)+' octets parcourus</td><td>'+e(r.elapsed_seconds||'—')
       +' s · '+e(r.transferred_bytes)+' octets envoyés</td><td>'+e(r.error||'—')+'</td></tr>').join('');
-     modal('Historique des deltas · VM protégée #'+id,
-       '<div class="notice">Synchronisations incrémentales à froid uniquement. État fourni par les agents source ; aucune promotion automatique autorisée.</div>'
+     modal('Historique des anciens deltas à froid · VM protégée #'+id,
+       '<div class="notice">Ancien moteur à froid désactivé. Historique conservé pour audit : la source SD doit toujours rester allumée.</div>'
        +'<div class="table-wrap"><table><thead><tr><th>Début</th><th>État</th><th>Disques</th><th>Volume examiné</th><th>Durée</th><th>Erreur</th></tr></thead><tbody>'
        +(rows||'<tr><td colspan="6">Aucune synchronisation enregistrée</td></tr>')
        +'</tbody></table></div>',
