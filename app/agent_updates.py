@@ -170,7 +170,9 @@ def _remote(job):
             base=sftp.normalize(".").rstrip("/")
             stage=base+"/origami_upgrade_"+secrets.token_hex(12)
             stage_name=stage
-            names=["agent.ps1"] if job["platform"]=="windows" else ["agent.py","pra_worker.py"]
+            names=["agent.ps1"] if job["platform"]=="windows" else [
+                "agent.py","pra_worker.py","pra-direct-seed.sh",
+                "pra-incremental-cold.sh","pra-sync-report.py"]
             for name in names:
                 src=ROOT/("windows" if job["platform"]=="windows" else "linux")/name
                 try:
@@ -189,20 +191,34 @@ def _remote(job):
                 "if test -f /opt/origamitasks-agent/pra_worker.py.origami-backup; then "
                 "cp -p /opt/origamitasks-agent/pra_worker.py.origami-backup /opt/origamitasks-agent/pra_worker.py || true; fi; "
                 "systemctl restart origamitasks-agent.service >/dev/null 2>&1 || true; "
-                "systemctl try-restart origamitasks-agent-pra.service >/dev/null 2>&1 || true"
+                "systemctl try-restart origamitasks-agent-pra.service >/dev/null 2>&1 || true; "
+                "for p in pra-direct-seed.sh pra-incremental-cold.sh pra-sync-report.py; do "
+                "if test -f /usr/local/lib/origamitasks/pra/$p.origami-backup; then "
+                "cp -p /usr/local/lib/origamitasks/pra/$p.origami-backup /usr/local/lib/origamitasks/pra/$p; fi; done"
             )
             script=(
                 "set -eu; python3 -c "+shlex.quote(check)+"; "
                 "cp -p /opt/origamitasks-agent/agent.py /opt/origamitasks-agent/agent.py.origami-backup; "
                 "if test -f /opt/origamitasks-agent/pra_worker.py; then cp -p /opt/origamitasks-agent/pra_worker.py /opt/origamitasks-agent/pra_worker.py.origami-backup; fi; "
                 "trap "+shlex.quote(rollback)+" EXIT; "
+                "install -d -m 700 -o root -g root /usr/local/lib/origamitasks/pra; "
+                "for p in pra-direct-seed.sh pra-incremental-cold.sh pra-sync-report.py; do "
+                "if test -f /usr/local/lib/origamitasks/pra/$p; then "
+                "cp -p /usr/local/lib/origamitasks/pra/$p /usr/local/lib/origamitasks/pra/$p.origami-backup; fi; done; "
+                +''.join(
+                    "install -m 500 -o root -g root "+shlex.quote(stage+"_"+name)+
+                    " /usr/local/lib/origamitasks/pra/"+name+"; "
+                    for name in ("pra-direct-seed.sh","pra-incremental-cold.sh","pra-sync-report.py")
+                )+
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_agent.py")+" /opt/origamitasks-agent/agent.py; "
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_pra_worker.py")+" /opt/origamitasks-agent/pra_worker.py; "
                 "systemctl restart origamitasks-agent.service; "
                 "if systemctl is-enabled --quiet origamitasks-agent-pra.service 2>/dev/null; then systemctl restart origamitasks-agent-pra.service; fi; "
                 "systemctl is-active --quiet origamitasks-agent.service; "
                 "trap - EXIT; "
-                "rm -f "+shlex.quote(stage+"_agent.py")+" "+shlex.quote(stage+"_pra_worker.py")+"; "
+                "rm -f "+' '.join(shlex.quote(stage+"_"+name) for name in (
+                    "agent.py","pra_worker.py","pra-direct-seed.sh",
+                    "pra-incremental-cold.sh","pra-sync-report.py"))+"; "
                 "echo ORIGAMI_AGENT_UPDATED"
             )
             inner='if [ "$(id -u)" -eq 0 ]; then exec sh -c '+shlex.quote(script)+'; else exec sudo -n sh -c '+shlex.quote(script)+'; fi'
