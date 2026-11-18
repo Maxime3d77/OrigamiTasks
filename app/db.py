@@ -187,7 +187,7 @@ CREATE TABLE IF NOT EXISTS dr_vm_tests (
 CREATE INDEX IF NOT EXISTS idx_dr_vm_tests_vm ON dr_vm_tests(protected_vm_id,id);
 CREATE TABLE IF NOT EXISTS pra_pbs_backups (
  id INTEGER PRIMARY KEY,
- protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE RESTRICT,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
  storage TEXT NOT NULL, node TEXT NOT NULL,
  status TEXT NOT NULL CHECK(status IN ('starting','submitted','running','uncertain','completed','failed')),
  upid TEXT,actor TEXT NOT NULL,created_at TEXT NOT NULL,finished_at TEXT
