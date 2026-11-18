@@ -58,6 +58,7 @@ def test_restore_creates_stopped_vm_without_overwrite(monkeypatch):
                     assert data['ha-managed']=='0'
                     assert data['unique']=='1'
                     assert data['vmid']=='321'
+                    assert data['name']=='REP_vm-ci-database'
                     assert data['archive']==archive
                     target_resources.append({'type':'qemu','node':'dstnode','vmid':321,'status':'stopped'})
                     return 'UPID:dstnode:0001:0001:test:qmrestore:321:ci@pve:'
