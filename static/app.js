@@ -586,7 +586,8 @@ function datacenters(){
 let directSyncPollTimer=null;
 function scheduleDirectSyncPoll(){
  if(directSyncPollTimer||state.page!=='protected-vms'||!roleAdmin())return;
- if(!(state.drProtectedVMs||[]).some(x=>x.incremental_sync?.status==='running'))return;
+ if(!(state.drProtectedVMs||[]).some(x=>x.incremental_sync?.status==='running'||
+       ['queued','running'].includes(x.direct_job?.status)))return;
  directSyncPollTimer=setTimeout(async()=>{
    directSyncPollTimer=null;
    if(state.page!=='protected-vms'||!roleAdmin())return;
@@ -613,6 +614,8 @@ function protectedVMsPage(){
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
    +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
    +'<td>'+labelStatus(vm.replication_status)
+   +'<div class="muted tinytext">Transfert : '+(vm.direct_job?e(vm.direct_job.kind)+' · '+labelStatus(vm.direct_job.status):'jamais demandé')+'</div>'
+   +'<div class="muted tinytext">Dernière copie complète : '+(vm.last_direct_seed?dt(vm.last_direct_seed):'jamais')+'</div>'
    +'<div class="muted tinytext">Delta : '+(vm.incremental_sync?e(vm.incremental_sync.status)
      +' · '+e(vm.incremental_sync.disks_done)+'/'+e(vm.incremental_sync.disks_total)+' disques'
      :'jamais exécuté')+'</div>'
@@ -621,6 +624,9 @@ function protectedVMsPage(){
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
+   +(vm.engine==='offline_copy'?'<button class="btn tiny primary" data-action="dr-vm-direct-seed" data-id="'+vm.id+'">Copie initiale directe</button>'
+      +'<button class="btn tiny" data-action="dr-vm-direct-incremental" data-id="'+vm.id+'">Synchronisation incrémentale à froid</button>'
+      +'<button class="btn tiny" data-action="dr-vm-direct-jobs" data-id="'+vm.id+'">Journal des transferts</button>':'')
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button><button class="btn tiny" data-action="dr-vm-pbs-restore-start" data-id="'+vm.id+'">Restaurer sur site de secours</button><button class="btn tiny" data-action="dr-vm-pbs-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
@@ -634,6 +640,10 @@ function protectedVMsPage(){
  return title('VM protégées PRA','Protection par VM, backup PBS réel et restauration cible arrêtée (bascule automatique indisponible).',
    '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
    +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
+  +'<div class="notice"><b>Copie directe pilotée par agent :</b> si le moteur « Copie directe » est sélectionné, '
+  +'la copie initiale est transmise directement en SSH de SD vers AU à partir de l’agent Linux équipé du moteur PRA ; '
+  +'les clés SSH du coffre ne sont utilisées que le temps de l’opération en mémoire. '
+  +'La synchronisation incrémentale actuelle exige les deux VM arrêtées, et aucune bascule n’est automatique.</div>'
   +'<div class="notice dr-safety-notice"><b>PRA manuel limité :</b> le moteur PBS peut sauvegarder la VM source puis '
   +'restaurer une VM <b>éteinte</b> sur le cluster de secours si ce dernier accède au même snapshot PBS '
   +'(stockage partagé ou PBS synchronisé). Aucune synchronisation delta en continu, mise à jour automatique de la VM restaurée, '
@@ -726,6 +736,34 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
   +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer la protection préparatoire</button>'
   +'<button type="button" class="btn" data-action="modal-close">Annuler</button></div></form>';
  modal('VM protégée · '+e(r.source_name)+' → '+e(r.target_name),body,'',true);
+}
+function openDirectPRAJobForm(id,kind){
+ const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
+ if(!vm)return toast('VM protégée introuvable',false);
+ const options=state.credentials.filter(x=>x.kind==='ssh').map(x=>[x.id,x.name]);
+ if(!options.length)return toast('Créer au moins une identité SSH dans le coffre-fort',false);
+ const isCold=kind==='offline_incremental';
+ const textNotice=isCold
+  ?'Synchronisation incrémentale réelle : les DEUX VM doivent être ARRÊTÉES et hors HA pendant toute la copie. '
+    +'Leurs disques LVM doivent avoir une topologie et une taille identiques. Aucune bascule automatique.'
+  :'Copie initiale réelle : export snapshot de la VM source vers une VM de secours ÉTEINTE. '
+    +'Le VMID cible doit être libre. Aucun arrêt de la source et aucun PBS.';
+ const body='<form id="drDirectPRAForm" data-id="'+id+'" data-kind="'+e(kind)+'">'
+  +'<div class="notice error"><b>Opération sur les baies Proxmox :</b> '+e(textNotice)+'</div>'
+  +'<p>VM '+e(vm.source_vmid)+' → '+e(vm.target_vmid)+' · '+e(vm.source_dc_name)+' → '+e(vm.target_dc_name)+'</p>'
+  +'<div class="form-grid">'
+  +selectField('Identité SSH du nœud SD (root ou sudo -n)','source_credential_id',options,'')
+  +selectField('Identité SSH du nœud AU (root)','target_credential_id',options,'')
+  +'</div><p class="hint">Les identités sont sélectionnées dans le coffre OrigamiTasks. '
+  +'L’agent embarque les scripts PRA automatiquement après sa mise à jour en v0.3.30. '
+  +'Le transfert est direct entre les nœuds, la clé cible est transmise en mémoire seulement. '
+  +'Aucune clé privée n’est enregistrée sur le disque des hyperviseurs.</p>'
+  +'<label class="field checkbox"><input type="checkbox" name="approved" required>'
+  +'<span>Je confirme l’opération réelle sur les VM et leurs disques.</span></label>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">Démarrer '
+  +(isCold?'l’incrémental à froid':'la copie initiale')+'</button>'
+  +'<button class="btn" type="button" data-action="modal-close">Annuler</button></div></form>';
+ modal('PRA direct · VM #'+e(vm.source_vmid),body,'',true);
 }
 function showProtectedVMTest(report){
  const rows=(report.checks||[]).map(x=>
@@ -1888,6 +1926,25 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   }catch(ex){toast(ex.message,false)}
   return;
  }
+ if(a==='dr-vm-direct-seed'){openDirectPRAJobForm(id,'seed');return}
+ if(a==='dr-vm-direct-incremental'){openDirectPRAJobForm(id,'offline_incremental');return}
+ if(a==='dr-vm-direct-jobs'){
+   try{
+     const x=await api('/dr/vms/'+id+'/direct-jobs');
+     const rows=(x.items||[]).map(j=>'<tr><td>'+dt(j.created_at)+'</td><td>'
+       +e(j.kind)+'</td><td>'+labelStatus(j.status)+'</td><td>'
+       +e(j.source_node)+'</td><td>'+e(j.elapsed_seconds??'—')+
+       ' s</td><td>'+e(j.error||'—')+'</td></tr>').join('');
+     modal('Historique des copies directes · Protection #'+id,
+       '<div class="notice">Copie initiale réelle et synchronisation incrémentale à froid, '
+       +'sans bascule automatique.</div><div class="table-wrap"><table><thead>'
+       +'<tr><th>Début</th><th>Opération</th><th>État</th><th>Nœud</th><th>Durée</th><th>Erreur</th></tr></thead><tbody>'
+       +(rows||'<tr><td colspan="6">Aucun transfert réalisé</td></tr>')
+       +'</tbody></table></div>',
+       '<button class="btn" data-action="dr-vm-direct-jobs" data-id="'+id+'">Actualiser</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+ }
  if(a==='dr-vm-direct-history'){
    try{
      const x=await api('/dr/vms/'+id+'/direct-sync');
@@ -2380,6 +2437,25 @@ async function handleSubmit(ev){
    await refresh();showPage('agents');
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return
+ }
+ if(ev.target.id==='drDirectPRAForm'){
+   ev.preventDefault();
+   const f=new FormData(ev.target),id=Number(ev.target.dataset.id),kind=ev.target.dataset.kind;
+   if(!f.has('approved'))return toast('Confirmation obligatoire',false);
+   const text=kind==='offline_incremental'
+       ?'Les DEUX VM sont-elles réellement arrêtées et sorties de la HA ?'
+       :'Lancer une copie complète réelle vers un nouveau VMID sur AU ?';
+   if(!confirm(text))return;
+   try{
+     const result=await api('/dr/vms/'+id+'/direct-jobs','POST',{
+       kind,source_credential_id:Number(f.get('source_credential_id')),
+       target_credential_id:Number(f.get('target_credential_id')),approved:true
+     });
+     closeModal();
+     state.drProtectedVMs=(await api('/dr/vms')).items;render();
+     toast('PRA direct : job #'+result.job_id+' en file · suivi dans la fiche VM');
+   }catch(ex){toast(ex.message,false)}
+   return;
  }
  if(ev.target.id==='drPBSRestoreForm'){
   ev.preventDefault();const f=new FormData(ev.target);
