@@ -209,6 +209,17 @@ def list_agent_updates(request:Request):
     return agent_updates.jobs()
 
 
+@app.post('/api/agents/updates/preflight')
+def preflight_agent_updates(payload:dict[str,Any],request:Request):
+    security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'agent_ids','credential_id'}:
+        raise HTTPException(422,'Agents et identité SSH requis')
+    try:
+        return agent_updates.preflight(payload['agent_ids'],payload['credential_id'])
+    except agent_updates.UpdateError as exc:
+        raise HTTPException(422,str(exc)) from None
+
+
 @app.post('/api/agents/updates')
 def queue_agent_updates(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)

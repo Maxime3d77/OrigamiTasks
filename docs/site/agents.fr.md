@@ -134,3 +134,7 @@ systemctl status origamitasks-agent.service origamitasks-agent-pra.service --no-
 journalctl -u origamitasks-agent.service -n 30 --no-pager
 python3 -c "import ast; p=ast.parse(open('/opt/origamitasks-agent/agent.py').read()); print(next(n.value.value for n in p.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='VERSION' for t in n.targets)))"
 ```
+
+### Tester la clé SSH avant une mise à jour (v0.3.25)
+
+Sélectionner l'identité SSH **du coffre-fort** utilisée pour le déploiement initial puis cliquer « Tester la clé SSH sélectionnée ». Le prévol teste la clé publique du serveur (known_hosts), l'authentification par clé privée SSH enregistrée au coffre, SFTP et les droits sudo non interactifs sous Linux. Aucun fichier n'est remplacé. Ne pas confondre la clé privée de connexion et la clé publique d'identité du serveur. Une clé d'hôte modifiée continue de bloquer l'opération.

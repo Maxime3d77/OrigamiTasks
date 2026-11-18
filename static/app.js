@@ -314,7 +314,8 @@ function openAgentUpdateForm(ids){
  +'<p>'+e(targets.length)+' agent(s) : '+e(targets.map(a=>a.name).join(', '))+'</p>'
  +selectField('Identité SSH (coffre)','credential_id',[['','— Choisir une identité SSH —'],...options],'')
  +'<label class="field checkbox"><input type="checkbox" name="approved" required><span>Je confirme la mise à jour et le redémarrage de ces agents.</span></label>'
- +'<div class="tool-row"><button class="btn primary" type="submit">Lancer les mises à jour</button><button class="btn" data-action="modal-close" type="button">Annuler</button></div></form>';
+ +'<div id="agentUpdatePreflightResult" class="hint"></div>'
+ +'<div class="tool-row"><button class="btn" data-action="agent-update-preflight" type="button">Tester la clé SSH sélectionnée</button><button class="btn primary" type="submit">Lancer les mises à jour</button><button class="btn" data-action="modal-close" type="button">Annuler</button></div></form>';
  modal('Mettre à jour les agents',body,'',true);
 }
 function agentsPage(){
@@ -1874,6 +1875,17 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
     '<button class="btn primary" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+e(b.dataset.job)+'">Actualiser le statut</button>',true);
   }catch(ex){toast(ex.message,false)}
   return;
+ }
+ if(a==='agent-update-preflight'){
+   const form=document.getElementById('agentUpdateForm');if(!form)return;
+   const f=new FormData(form),ids=String(f.get('agent_ids')||'').split(',').map(Number);
+   const out=document.getElementById('agentUpdatePreflightResult');
+   if(out)out.textContent='Vérification SSH, SFTP et sudo…';
+   try{
+     const result=await api('/agents/updates/preflight','POST',{agent_ids:ids,credential_id:Number(f.get('credential_id'))});
+     if(out)out.innerHTML=result.items.map(i=>'<div>'+e(i.host)+' : '+(i.status==='ok'?'✓ Clé SSH et prérequis validés':'✗ '+e(i.detail||i.stage))+'</div>').join('');
+   }catch(ex){if(out)out.textContent=ex.message}
+   return;
  }
  if(a==='agent-update'){openAgentUpdateForm([id]);return}
  if(a==='agent-update-all'){
