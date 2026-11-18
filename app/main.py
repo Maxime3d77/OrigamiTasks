@@ -775,6 +775,17 @@ def get_hot_generations(vm_id:int,request:Request):
         raise HTTPException(404,str(exc)) from None
 
 
+@app.post('/api/dr/vms/{vm_id}/hot-generations/{job_id}/resolve')
+def resolve_hot_generation(vm_id:int,job_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'}:
+        raise HTTPException(422,'Confirmation requise')
+    try:
+        return pra_hot_jobs.resolve_uncertain(vm_id,job_id,payload['approved'],user['username'])
+    except (pra_hot_jobs.HotPRAError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
 @app.post('/api/dr/vms/{vm_id}/hot-generations')
 def queue_hot_generation(vm_id:int,payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
