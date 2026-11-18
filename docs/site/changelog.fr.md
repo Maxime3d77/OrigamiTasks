@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## v0.3.31-rc1 — Prétest PRA exclusivement à chaud
+
+- La VM principale SD doit rester allumée ; la copie initiale directe refuse désormais une source éteinte et la réplique AU reste arrêtée.
+- Ancien incrémental à froid désactivé dans l'interface, l'API et le paquet agent : aucune tâche PRA ne demande l'arrêt de la source.
+- Prétest QMP en lecture seule depuis l'identité SSH du coffre, avec détection du fournisseur externe Proxmox, des commandes de sauvegarde et des dirty bitmaps ; aucune écriture sur les disques ou modification de VM.
+- Le moteur réel de deltas cohérents à chaud n'est pas encore implémenté : il ne faut pas interpréter ce prétest comme un succès de réplication ou autoriser une bascule.
+
+
 ## 0.3.30-rc1 — Moteur PRA embarqué dans les agents
 
 - Les agents Linux déploient et mettent à jour automatiquement le moteur PRA (copie initiale, incrémental à froid, remontée de statistiques), sous une arborescence privilégiée appartenant à root.
