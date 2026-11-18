@@ -625,7 +625,7 @@ function protectedVMsPage(){
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +(vm.engine==='offline_copy'?'<button class="btn tiny primary" data-action="dr-vm-direct-seed" data-id="'+vm.id+'">Copie initiale directe</button>'
-      +'<button class="btn tiny" data-action="dr-vm-direct-incremental" data-id="'+vm.id+'">Synchronisation incrémentale à froid</button>'
+      +'<button class="btn tiny" data-action="dr-vm-hot-preflight" data-id="'+vm.id+'">Tester la réplication à chaud</button>'
       +'<button class="btn tiny" data-action="dr-vm-direct-jobs" data-id="'+vm.id+'">Journal des transferts</button>'
       +'<button class="btn tiny" data-action="dr-vm-direct-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button><button class="btn tiny" data-action="dr-vm-pbs-restore-start" data-id="'+vm.id+'">Restaurer sur site de secours</button><button class="btn tiny" data-action="dr-vm-pbs-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
@@ -644,7 +644,7 @@ function protectedVMsPage(){
   +'<div class="notice"><b>Copie directe pilotée par agent :</b> si le moteur « Copie directe » est sélectionné, '
   +'la copie initiale est transmise directement en SSH de SD vers AU à partir de l’agent Linux équipé du moteur PRA ; '
   +'les clés SSH du coffre ne sont utilisées que le temps de l’opération en mémoire. '
-  +'La synchronisation incrémentale actuelle exige les deux VM arrêtées, et aucune bascule n’est automatique.</div>'
+  +'La source SD reste allumée. Le prétest QMP est en lecture seule ; la réplication incrémentale à chaud nécessite encore un fournisseur de deltas cohérents. Aucune bascule automatique.</div>'
   +'<div class="notice dr-safety-notice"><b>PRA manuel limité :</b> le moteur PBS peut sauvegarder la VM source puis '
   +'restaurer une VM <b>éteinte</b> sur le cluster de secours si ce dernier accède au même snapshot PBS '
   +'(stockage partagé ou PBS synchronisé). Aucune synchronisation delta en continu, mise à jour automatique de la VM restaurée, '
@@ -709,7 +709,7 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  const pools=r.target_storages.filter(x=>x.images);
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
  const engines=[['planning_only','Préparation / simulation uniquement'],
-   ['offline_copy','Copie directe + incrémental à froid (VM arrêtées)'],
+   ['offline_copy','Copie directe à chaud (incrémental non encore disponible)'],
    ['pbs_backup_restore','PBS : sauvegarde + restauration réelle manuelle (sans bascule)'],
    ['storage_array_replication','Réplication de baie/LUN (à valider)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
@@ -1937,7 +1937,17 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    return;
  }
  if(a==='dr-vm-direct-seed'){openDirectPRAJobForm(id,'seed');return}
- if(a==='dr-vm-direct-incremental'){openDirectPRAJobForm(id,'offline_incremental');return}
+ if(a==='dr-vm-hot-preflight'){
+   const options=state.credentials.filter(c=>c.kind==='ssh').map(c=>[c.id,c.name]);
+   if(!options.length)return toast('Choisir une identité SSH du coffre',false);
+   modal('Prétest QMP à chaud — VM #'+id,
+    '<div class="notice">Ce test ne stoppe pas la VM SD et ne modifie pas les disques. '
+    +'Il vérifie les capacités QEMU mais ne lance pas encore de delta.</div>'
+    +'<form id="drHotPreflightForm" data-id="'+id+'">'
+    +selectField('Identité SSH du nœud source','source_credential_id',options,'')
+    +'<button type="submit" class="btn primary">Vérifier QMP en lecture seule</button></form>','',true);
+   return;
+ }
  if(a==='dr-vm-direct-jobs'){
    try{
      const x=await api('/dr/vms/'+id+'/direct-jobs');
@@ -2447,6 +2457,23 @@ async function handleSubmit(ev){
    await refresh();showPage('agents');
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return
+ }
+ if(ev.target.id==='drHotPreflightForm'){
+   ev.preventDefault();
+   const f=new FormData(ev.target);
+   try{
+     const x=await api('/dr/vms/'+Number(ev.target.dataset.id)+'/hot-preflight?source_credential_id='
+       +encodeURIComponent(Number(f.get('source_credential_id'))));
+     modal('Compatibilité réplication à chaud','<div class="notice">'
+       +'VM source allumée : '+(x.source_running?'oui':'non')+' · QMP disponible : '+(x.qmp_available?'oui':'non')
+       +' · Périphériques détectés : '+e(x.disks?.length||0)
+       +' · Fonctions QEMU disponibles : '+e((x.qmp_commands||[]).join(', ')||'aucune')
+       +'</div><p><b>État du moteur :</b> '+e(x.reason||'indéterminé')
+       +'. La présence des primitives QMP ne garantit pas encore la création et l’application de deltas cohérents.</p>'
+       +'<div class="notice error">Aucune synchronisation incrémentale à chaud n’a été exécutée. '
+       +'VM source jamais arrêtée par cette opération.</div>','',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
  }
  if(ev.target.id==='drDirectPRAForm'){
    ev.preventDefault();
