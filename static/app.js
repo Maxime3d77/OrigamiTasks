@@ -306,7 +306,7 @@ function agentsPage(){
   return '<tr><td class="name-cell">'+e(agent.name)+'<div class="muted tinytext">'+e(agent.hostname||'Non enrôlé')+'</div></td>'
     +'<td>'+e(agent.platform)+' · '+e(agent.version||'Version inconnue')+'</td>'
     +'<td>'+e(agent.group_name)+'</td><td>'+labelStatus(agent.status)+'</td>'
-    +'<td><span class="chip">Standard</span>'
+    +'<td><span class="hint">Base intégrée</span>'
     +(agent.platform==='linux'&&agent.modules?.proxmox?'<span class="chip tag">Proxmox</span>':'')
     +(agent.platform==='linux'&&agent.modules?.pra?'<span class="chip tag">PRA préparatoire</span>':'')
     +'<div class="muted tinytext">'+(agent.modules_in_sync?'Appliqué · révision '+e(agent.modules_revision):'En attente / agent ancien ou hors ligne')+'</div>'
@@ -328,7 +328,7 @@ function agentsPage(){
   +'<th>État</th><th>Modules & synchronisation</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
   +'<tbody>'+(cards||'<tr><td colspan="9">Aucun agent installé.</td></tr>')+'</tbody></table></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Déploiements groupés</h2>'
-  +'<button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button></div>'
+  +'<button class="btn tiny" data-action="agent-batch-refresh">↻ Actualiser</button><button class="btn tiny danger" data-action="agent-batch-clean">Nettoyer les lots terminés</button></div>'
   +'<div id="agentBatchList">'+agentBatchPanel()+'</div></div>'
   +'<div class="notice"><b>Révoquer ≠ Désinstaller.</b> La révocation invalide le token sans retirer le programme sur le serveur.'
   +' La désinstallation vérifie la cible et le fichier d’identité de l’agent, supprime uniquement les éléments OrigamiTasks puis révoque son token.'
@@ -354,7 +354,7 @@ function openAgentModulesForm(agentId){
   +'<p><b>Agent :</b> '+e(a.name)+' · '+e(a.platform)+' · '+e(a.hostname||'—')+'</p>'
   +'<p><b>Site :</b> '+siteLine+'</p>'
   +'<div class="agent-module-choices">'
-  +module('standard','Standard','Workflows et inventaire système (toujours nécessaire)',true,true)
+  +'<div class="notice">Base Standard intégrée à tous les agents ; aucune activation séparée nécessaire.</div>'
   +(canInfra?module('proxmox','Proxmox','Association au site et aux clusters ; API Proxmox toujours côté console',m.proxmox)
     +module('pra','PRA — préparation passive','Surveillance locale uniquement : aucune réplication ni bascule VM',m.pra)
     :'<div class="notice">Agent Windows : uniquement le module Standard pour étendre les actions des workflows (scripts PowerShell, processus et services). Aucun rôle Proxmox ou PRA.</div>')
