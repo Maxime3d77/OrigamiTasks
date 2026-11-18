@@ -77,6 +77,12 @@ echo "PRA HOT: extracting point-in-time backup while source remains running"
 vzdump "$sid" --mode snapshot --stdout --compress 0 | vma extract - "$unpacked"
 running
 [[ -f "$unpacked/qemu-server.conf" ]] || die 'Snapshot config missing'
+if grep -Eq '^(efidisk|tpmstate|unused|hostpci|usb|ide[0-9]+: .*cloudinit)' "$unpacked/qemu-server.conf"; then
+ die 'Snapshot unexpectedly contains unsupported special devices'
+fi
+snapshot_slots=$(awk -F ': ' '/^(scsi|virtio|sata|ide)[0-9]+: /{print $1}' "$unpacked/qemu-server.conf" | sort)
+current_slots=$(qm config "$sid" | awk -F ': ' '/^(scsi|virtio|sata|ide)[0-9]+: /{print $1}' | sort)
+[[ "$snapshot_slots" == "$slots" && "$current_slots" == "$slots" ]] || die 'Disk topology changed during snapshot'
 for slot in $slots; do
  [[ -f "$unpacked/disk-drive-$slot.raw" && ! -L "$unpacked/disk-drive-$slot.raw" ]] || die "Snapshot missing disk $slot"
 done
