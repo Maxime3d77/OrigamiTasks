@@ -15,6 +15,7 @@ nav:
   - Integrations: integrations.md
   - Proxmox & DR: proxmox.md
   - PBS backup pilot: pra-pbs-pilot.md
+  - Live QMP replication pilot: pra-qmp.md
   - Agents: agents.md
   - Operations & Upgrades: operations.md
   - Security: security.md
@@ -66,6 +67,7 @@ plugins:
             Integrations: Intégrations
             Proxmox & DR: Proxmox et PRA
             PBS backup pilot: Pilote de sauvegarde PBS
+            Live QMP replication pilot: Pilote de réplication QMP
             Agents: Agents
             Operations & Upgrades: Exploitation et mises à jour
             Security: Sécurité
