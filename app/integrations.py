@@ -229,6 +229,8 @@ def assess_vm_dr(dc, cred, vmid, timeout=20):
         if not re.fullmatch(r'(?:scsi|virtio|sata|ide)\d+', key) or not isinstance(value,str):
             continue
         volume = value.split(',', 1)[0]
+        if "media=cdrom" in value or volume=="none":
+            continue
         # Disk entries may reference a storage pool or special values like cdrom/none.
         pool = volume.split(':', 1)[0] if ':' in volume else ''
         meta = types.get(pool, {'type': 'unknown', 'shared': False})
