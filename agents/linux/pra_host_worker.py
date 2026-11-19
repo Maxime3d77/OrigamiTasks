@@ -122,6 +122,10 @@ def source_probe(data):
             # Device aliases may differ from graph node names in PVE builds.
             nodes[slot] = inserted.get("node-name") or node
         named = qmp.execute("query-named-block-nodes")
+        active_jobs = [{"id": str(item.get("id") or ""),
+                        "status": str(item.get("status") or "")}
+                       for item in qmp.execute("query-jobs")
+                       if str(item.get("id") or "").startswith("origami-bak-")]
         named_by_name = {r.get("node-name"): r for r in named}
         for slot in slots:
             node = nodes[slot]
@@ -133,6 +137,7 @@ def source_probe(data):
             }
     return {"source_vm_uuid": _source_generation(ident),
             "slots": slots, "sizes": sizes, "nodes": nodes, "bitmaps": bitmaps,
+            "active_jobs": active_jobs,
             "config": {k: configured[k] for k in ("name", "memory", "cores", "sockets", "bios", "scsihw", "cpu")
                        if k in configured}}
 
