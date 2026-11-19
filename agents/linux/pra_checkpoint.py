@@ -60,7 +60,10 @@ def _command(*args):
 
 
 class CheckpointStore:
-    def __init__(self, root):
+    def __init__(self, root, target_vmid=None):
+        if target_vmid is not None and (type(target_vmid) is not int or not 100 <= target_vmid <= 999999999):
+            raise CheckpointError("Invalid target VMID")
+        self.target_vmid = target_vmid
         self.root = Path(root)
         # Never create or chase an unexpected filesystem path as root.
         if not self.root.is_absolute() or self.root.is_symlink() or not self.root.is_dir():
@@ -126,8 +129,10 @@ class CheckpointStore:
             disks = {}
             created = []
             try:
-                for slot, size in sorted(sizes.items()):
-                    filename = "checkpoint-" + token + "-" + slot + ".qcow2"
+                for index, (slot, size) in enumerate(sorted(sizes.items())):
+                    filename = ("vm-" + str(self.target_vmid) + "-disk-" +
+                                str(int(token[:12], 16) + index) + ".qcow2") if self.target_vmid is not None else (
+                                "checkpoint-" + token + "-" + slot + ".qcow2")
                     path = self.root / filename
                     if mode == "full":
                         _command("qemu-img", "create", "-f", "qcow2",
@@ -136,7 +141,8 @@ class CheckpointStore:
                         base_name = previous["disks"][slot]["file"]
                         if (not isinstance(base_name, str)
                                 or Path(base_name).name != base_name
-                                or not base_name.startswith("checkpoint-")
+                                or not (base_name.startswith("checkpoint-") or
+                                        (self.target_vmid is not None and base_name.startswith("vm-" + str(self.target_vmid) + "-disk-")))
                                 or not base_name.endswith(".qcow2")):
                             raise CheckpointError("Invalid base image in manifest")
                         base = self.root / base_name
@@ -148,6 +154,7 @@ class CheckpointStore:
                     disks[slot] = {"file": filename, "size": size}
                 document = {
                     "token": token, "status": "staging", "mode": mode,
+                    "target_vmid": self.target_vmid,
                     "source_vm_uuid": source_vm_uuid,
                     "previous_token": previous.get("token") if previous else None,
                     "disks": disks, "created_at": int(time.time())
@@ -185,8 +192,10 @@ class CheckpointStore:
             for details in pending["disks"].values():
                 filename = details["file"]
                 if (not isinstance(filename, str) or
-                        not filename.startswith("checkpoint-" + token + "-") or
-                        Path(filename).name != filename):
+                        (not filename.startswith("checkpoint-" + token + "-") and
+                         not (self.target_vmid is not None and
+                              filename.startswith("vm-" + str(self.target_vmid) + "-disk-")))
+                        or Path(filename).name != filename):
                     raise CheckpointError("Unexpected staging disk; refusing to delete")
                 path = self.root / filename
                 if path.is_symlink():
