@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS pra_live_runs (
  status TEXT NOT NULL CHECK(status IN ('queued','running','completed','failed','uncertain')),
  mode TEXT NOT NULL DEFAULT '',
  checkpoint_token TEXT,
+ point_at TEXT,
  details TEXT NOT NULL DEFAULT '',
  actor TEXT NOT NULL,
  created_at TEXT NOT NULL,
@@ -310,6 +311,7 @@ def initialize():
             ("agent_deploy_batches", "proxmox_group_id", "INTEGER"),
             ("agent_deploy_batches", "enable_proxmox", "INTEGER NOT NULL DEFAULT 0"),
             ("agent_deploy_batches", "enable_pra", "INTEGER NOT NULL DEFAULT 0"),
+            ("pra_live_runs", "point_at", "TEXT"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:
