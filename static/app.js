@@ -693,7 +693,9 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
   +selectField('Nœud Proxmox cible','target_node',
     nodes.map(x=>[x.name,x.name]),current?.target_node||nodes[0].name)
   +selectField('Stockage cible','target_storage',
-    pools.map(x=>[x.storage,x.storage+' · '+x.type+(x.shared?' (partagé)':'')]),
+    pools.map(x=>[x.storage,x.storage+' · '+x.type+(x.shared?' (partagé)':'')+
+      (x.snapshot_as_volume_chain?' · chaînes QCOW2 (preview; adaptateur PRA indisponible)':'')+
+      (x.qmp_receiver_available?' · cible pilote QMP DIR':'')]),
     current?.target_storage||pools[0].storage)
   +selectField('Moteur de réplication','engine',engines,current?.engine||'planning_only')
   +selectField('Fréquence automatique après amorçage','interval_minutes',
