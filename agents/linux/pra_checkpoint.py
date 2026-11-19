@@ -193,7 +193,18 @@ class CheckpointStore:
 
 
     def garbage_collect(self, protected_files=()):
-        """Delete ONLY OrigamiTasks-owned QCOW2 no longer in the committed chain."""
+        """Disabled until full PVE snapshot, backup and storage reference audit.
+
+        A guest's current qm configuration is NOT an exhaustive inventory of
+        all references to old images. Never delete a checkpoint based only on
+        the current active chain or a single VM's running configuration.
+        """
+        raise CheckpointError(
+            "Automatic checkpoint garbage collection disabled: "
+            "external PVE snapshot references cannot yet be proven absent")
+
+    def _legacy_garbage_collect_unreachable(self, protected_files=()):
+        """Historical algorithm retained for audit only: NEVER invoke."""
         with self._exclusive():
             if self.pending.exists():
                 raise CheckpointError("Cannot GC while staging")
