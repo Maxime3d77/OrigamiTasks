@@ -193,6 +193,21 @@ CREATE TABLE IF NOT EXISTS pra_pbs_backups (
  upid TEXT,actor TEXT NOT NULL,created_at TEXT NOT NULL,finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pra_pbs_backup_vm ON pra_pbs_backups(protected_vm_id,id);
+CREATE TABLE IF NOT EXISTS pra_live_runs (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
+ status TEXT NOT NULL CHECK(status IN ('queued','running','completed','failed','uncertain')),
+ mode TEXT NOT NULL DEFAULT '',
+ checkpoint_token TEXT,
+ point_at TEXT,
+ details TEXT NOT NULL DEFAULT '',
+ actor TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ started_at TEXT,
+ finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pra_live_runs_vm ON pra_live_runs(protected_vm_id,id DESC);
+
 
 CREATE TABLE IF NOT EXISTS runs (
  id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
@@ -296,6 +311,7 @@ def initialize():
             ("agent_deploy_batches", "proxmox_group_id", "INTEGER"),
             ("agent_deploy_batches", "enable_proxmox", "INTEGER NOT NULL DEFAULT 0"),
             ("agent_deploy_batches", "enable_pra", "INTEGER NOT NULL DEFAULT 0"),
+            ("pra_live_runs", "point_at", "TEXT"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:

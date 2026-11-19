@@ -334,3 +334,7 @@
 #drVMPlanFilter{max-width:270px}
 @media(max-width:950px){.dr-vm-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dr-vm-actions{min-width:185px}}
 @media(max-width:540px){.dr-vm-stat-grid{grid-template-columns:1fr}.agent-batch summary .dr-batch-summary{justify-content:flex-start}}
+
+/* PRA live replication state: verified, in progress, needs reconciliation */
+.status.completed{color:var(--success);background:color-mix(in srgb,var(--success) 13%,transparent);border:1px solid color-mix(in srgb,var(--success) 25%,transparent)}
+.status.uncertain{color:var(--yellow);background:color-mix(in srgb,var(--yellow) 16%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 32%,transparent)}

@@ -11,7 +11,7 @@ jobs:
       - name: Install application and documentation dependencies
         run: python -m pip install -r requirements.txt -r requirements-docs.txt pytest
       - name: Run API and integration tests
-        run: node --check static/app.js && node --check static/login.js && node tests/login_smoke.cjs && python -m compileall -q app agents/linux/agent.py && python -m pytest -q
+        run: node --check static/app.js && node --check static/login.js && node tests/login_smoke.cjs && python -m compileall -q app agents/linux && python -m pytest -q
       - name: Verify bilingual documentation parity and task coverage
         run: python tools/check_docs.py
       - name: Build bilingual documentation (strict)

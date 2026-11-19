@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, agent_updates
 
 
 @asynccontextmanager
@@ -26,11 +26,13 @@ async def lifespan(app):
     scheduler.start()
     agent_deployments.start()
     agent_updates.start()
+    pra_live.initialize()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
     agent_deployments.STOP.set()
     agent_updates.STOP.set()
+    pra_live.STOP.set()
 
 
 app = FastAPI(title='OrigamiTasks', version=config.APP_VERSION, docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -643,16 +645,50 @@ def simulate_protected_vm(vm_id:int,payload:dict[str,Any],request:Request):
     return result
 
 
-@app.post('/api/dr/vms/{vm_id}/replicate')
-def replicate_protected_vm_not_available(vm_id:int,request:Request):
+@app.get('/api/dr/vms/{vm_id}/replications')
+def get_live_replication_history(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_live.list_runs(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/replication-preflight')
+def live_replication_preflight(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_live.preflight(vm_id)
+    except (pra_live.LiveReplicationError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Prévol de réplication : API ou agent inaccessible') from None
+
+
+@app.post('/api/dr/vms/{vm_id}/replications/{run_id}/reconcile')
+def reconcile_live_replication(vm_id:int,run_id:int,request:Request,payload:dict[str,Any]):
     user=security.require(request,role='admin',mutate=True)
-    # Explicitly fail closed: no API or SSH requests are made for copying.
-    dr_protected_vms.history(vm_id,limit=1)
-    db.audit(user['username'],'dr.vm.replication.blocked',vm_id,
-             'Moteur iSCSI/LVM/PBS non validé ; aucune copie lancée')
-    raise HTTPException(409,
-        'Réplication réelle indisponible : définir et valider un transport '
-        'cohérent (baie/PBS), la gestion du stockage et le fencing avant copie.')
+    if not isinstance(payload,dict) or set(payload)!={'approved'} or payload['approved'] is not True:
+        raise HTTPException(422,'Validation explicite requise')
+    try:
+        return pra_live.reconcile(vm_id,run_id,user['username'],approved=True)
+    except (pra_live.LiveReplicationError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Réconciliation non confirmée : vérifier les jobs QMP et NBD sur les deux nœuds') from None
+
+
+@app.post('/api/dr/vms/{vm_id}/replicate')
+def replicate_protected_vm(vm_id:int,request:Request,payload:dict[str,Any]|None=None):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'} or payload.get('approved') is not True:
+        raise HTTPException(409,'Répliquer requiert une validation explicite')
+    try:
+        return pra_live.start(vm_id,user['username'],approved=True)
+    except (pra_live.LiveReplicationError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Lancement PRA impossible : vérifier les agents, stockages et API') from None
 
 
 @app.post('/api/dr/vms/{vm_id}/pbs/backup')

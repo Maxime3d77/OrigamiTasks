@@ -230,6 +230,7 @@ def backup(qmp, disks, mode, timeout=3600):
             actions.append({"type": "blockdev-backup", "data": params})
         # Transaction establishes one cross-disk backup point. It does NOT
         # provide guest application-consistency without fsfreeze/VSS.
+        snapshot_epoch = time.time()
         qmp.execute("transaction", {
             "actions": actions,
             "properties": {"completion-mode": "grouped"}
@@ -240,6 +241,7 @@ def backup(qmp, disks, mode, timeout=3600):
             "transport": "qmp-nbd",
             "mode": mode, "disks": len(disks),
             "qmp_jobs_completed": True,
+            "snapshot_epoch": snapshot_epoch,
             "target_checkpoint_committed": False,
             "standby_vm_started": False
         }
