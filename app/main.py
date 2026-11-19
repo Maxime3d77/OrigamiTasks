@@ -665,6 +665,19 @@ def live_replication_preflight(vm_id:int,request:Request):
         raise HTTPException(503,'Prévol de réplication : API ou agent inaccessible') from None
 
 
+@app.post('/api/dr/vms/{vm_id}/replications/{run_id}/reconcile')
+def reconcile_live_replication(vm_id:int,run_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'} or payload['approved'] is not True:
+        raise HTTPException(422,'Validation explicite requise')
+    try:
+        return pra_live.reconcile(vm_id,run_id,user['username'],approved=True)
+    except (pra_live.LiveReplicationError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Réconciliation non confirmée : vérifier les jobs QMP et NBD sur les deux nœuds') from None
+
+
 @app.post('/api/dr/vms/{vm_id}/replicate')
 def replicate_protected_vm(vm_id:int,request:Request,payload:dict[str,Any]|None=None):
     user=security.require(request,role='admin',mutate=True)
