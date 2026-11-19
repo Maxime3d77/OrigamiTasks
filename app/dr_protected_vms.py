@@ -84,11 +84,8 @@ def _storages(dc, cred):
         name=item["storage"]
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}",name):
             continue
-        contents=str(item.get("content") or "")
-        result.append({"storage":name,"type":str(item.get("type") or "unknown"),
-                       "shared":bool(item.get("shared",False)),
-                       "images":"images" in contents.split(","),
-                       "content":contents})
+        from .pra_storage_capabilities import describe_storage
+        result.append(describe_storage(item))
     return result
 
 
@@ -101,7 +98,7 @@ def options(plan_id, source_dc_id, target_dc_id):
     source_site_id,target_site_id=_sites(plan_id,source_dc_id,target_dc_id)
     # discover_datacenter uses the cluster-wide /cluster/resources endpoint,
     # not /nodes/{node}; count excluded containers for troubleshooting.
-    source_dc,_,source_resources=_inventory(source_dc_id)
+    source_dc,source_cred,source_resources=_inventory(source_dc_id)
     target_dc,target_cred,target_resources=_inventory(target_dc_id)
     vms=[{"vmid":r["vmid"],"name":r.get("name") or ("VM "+str(r["vmid"])),
           "node":r.get("node") or "","status":r.get("status") or "unknown"}
@@ -119,6 +116,7 @@ def options(plan_id, source_dc_id, target_dc_id):
             "vms":vms,"source_vm_total":len(vms),
             "source_lxc_excluded":sum(r.get("type")=="lxc" for r in source_resources),
             "target_nodes":nodes,"target_vmids_in_use":used,
+            "source_storages":_storages(source_dc,source_cred),
             "target_storages":_storages(target_dc,target_cred),
             "note":"Découverte API en lecture seule ; pas de copie ni de synchronisation."}
 

@@ -100,3 +100,20 @@ near-zero RPO or production readiness. Validate QMP command compatibility,
 storage layout, NIC/boot mapping, and chain size on actual PVE versions.
 
 Official background: [QEMU dirty bitmap and incremental backup](https://www.qemu.org/docs/master/interop/bitmaps.html).
+
+## Read-only LVM storage capability discovery
+
+The console discovers storage through the Proxmox API, without assuming a
+storage vendor, VG name or transport. For `lvm` storage,
+`snapshot-as-volume-chain=1` is reported as a **technology-preview QCOW2
+snapshot-chain capability**, **not** as a working PRA replication receiver.
+This setting does not automatically make pre-existing `raw` disks eligible;
+each disk must be evaluated separately.
+
+In v0.3.24, the QMP transport receiver still requires a writable Proxmox
+`dir` storage. A future LVM receiver adapter must implement PVE-backed
+allocation, per-VM independent volumes, atomic publication and cross-cluster
+acceptance testing. Read-only capability discovery does not activate
+replication, install agents on production or authorize failover.
+
+Official reference: [Proxmox LVM storage](https://github.com/proxmox/pve-docs/blob/master/pve-storage-lvm.adoc).

@@ -96,3 +96,21 @@ données. Le RPO affiché correspond au **dernier point réellement validé**,
 pas à une promesse de temps réel.
 
 Documentation de référence : [QEMU dirty bitmap / sauvegarde incrémentale](https://www.qemu.org/docs/master/interop/bitmaps.html).
+
+## Découverte des capacités LVM (pilote)
+
+La console découvre les stockages via l'API Proxmox, sans supposer le
+constructeur de la baie, le nom du VG ou le type de transport. Pour les
+stockages `lvm`, `snapshot-as-volume-chain=1` est affiché comme une capacité
+de **snapshots QCOW2 en chaîne en préversion**, et non comme un moteur de
+réplication PRA opérationnel. L'option ne rend pas automatiquement éligibles
+les anciens disques `raw` : chaque disque doit être inspecté individuellement.
+
+La réception du transport QMP en v0.3.24 demeure limitée au stockage Proxmox
+`dir` inscriptible. Le futur adaptateur LVM nécessitera allocation Proxmox,
+gestion de volumes indépendants par VM, publication atomique et recette
+source→destination sur clusters différents. Aucun changement de la politique
+de bascule, du fencing ou des agents en production n'est impliqué par cette
+simple découverte de capacités.
+
+Documentation officielle : [Proxmox LVM](https://github.com/proxmox/pve-docs/blob/master/pve-storage-lvm.adoc).
