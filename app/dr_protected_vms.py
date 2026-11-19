@@ -532,3 +532,63 @@ def run_readonly_test(vm_id, scenario, actor):
         report["test_id"]=cur.lastrowid
         report["checked_at"]=now
     return report
+
+def storage_readiness(vm_id):
+    """Read-only per-protection storage capability report.
+
+    This is deliberately separate from the QMP replication preflight:
+    a positive LVM snapshot-chain probe does NOT authorize replication.
+    Never return credentials, storage device paths or secrets to the UI.
+    """
+    vm = _one(vm_id)
+    source_dc, source_cred, _ = _inventory(vm["source_dc_id"])
+    target_dc, target_cred, resources = _inventory(vm["target_dc_id"])
+    storages = _storages(target_dc, target_cred)
+    target = next((x for x in storages if x["storage"] == vm["target_storage"]), None)
+    if target is None:
+        raise ProtectedVMError("Stockage cible introuvable")
+    nodes = [x for x in resources if x.get("type") == "node" and
+             x.get("node") == vm["target_node"]]
+    node_online = len(nodes) == 1 and nodes[0].get("status") == "online"
+    runtime = _node_storage(target_dc, target_cred,
+                            vm["target_node"], vm["target_storage"]) if node_online else None
+    source = integrations.assess_vm_dr(source_dc, source_cred,
+                                      vm["source_vmid"], timeout=18)
+    disks = [{"slot": x.get("slot"), "storage": x.get("storage"),
+              "storage_type": x.get("storage_type"),
+              "snapshot_capability": x.get("snapshot_capability")}
+             for x in source.get("disks", [])]
+    blockers = []
+    if not node_online:
+        blockers.append("Nœud destination indisponible")
+    if not runtime or not runtime.get("active"):
+        blockers.append("Stockage non confirmé actif sur le nœud destination")
+    if target["disabled"] or not target["images"]:
+        blockers.append("Stockage désactivé ou ne permettant pas les disques VM")
+    if target["type"] == "lvm":
+        if not target["snapshot_as_volume_chain"]:
+            blockers.append("Chaînes QCOW2 désactivées sur ce stockage LVM")
+        blockers.append("Récepteur LVM en préparation : checkpoint partagé, publication et restauration non validés")
+        backend = "lvm-qcow2-staging"
+    elif target["qmp_receiver_available"]:
+        blockers.append("Récepteur DIR : prévol agent/QMP encore obligatoire")
+        backend = "dir-qcow2-cow"
+    else:
+        blockers.append("Aucun récepteur QMP validé pour ce type de stockage")
+        backend = "not_implemented"
+    return {
+        "vm_id": vm_id, "source_vmid": vm["source_vmid"],
+        "target_vmid": vm["target_vmid"],
+        "target_node": vm["target_node"],
+        "target_storage": target,
+        "source_disks": disks,
+        "backend": backend,
+        "node_online": node_online,
+        "node_storage_active": bool(runtime and runtime.get("active")),
+        "available_bytes": runtime.get("available_bytes") if runtime else None,
+        "target_replication_authorized": False,
+        "target_failover_authorized": False,
+        "checks": blockers,
+        "note": "Découverte des capacités uniquement : aucun volume, snapshot ou démarrage créé."
+    }
+
