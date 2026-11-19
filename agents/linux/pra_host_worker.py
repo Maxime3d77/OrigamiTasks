@@ -226,6 +226,9 @@ def _kill_export(store, slot, strict=False):
         else:
             if strict:
                 raise HostError("NBD export did not terminate")
+    except FileNotFoundError:
+        # Stale PID file from a daemon already exited.
+        pidfile.unlink(missing_ok=True)
     except (ValueError, OSError) as exc:
         if strict:
             raise HostError("NBD process cannot be stopped safely") from exc
@@ -384,6 +387,21 @@ def target_publish(data):
             "vmid": ident, "checkpoint": token, "slots": slots}
 
 
+
+def source_dismiss(data):
+    """Only discard concluded Origami QMP jobs after an operator reconciliation."""
+    ident = vmid(data["vmid"])
+    slots = _slots(data)
+    with QMP(_qmp_path(ident)) as qmp:
+        jobs = [j for j in qmp.execute("query-jobs")
+                if str(j.get("id") or "").startswith("origami-bak-")]
+        if any(j.get("status") != "concluded" for j in jobs):
+            raise HostError("QMP still executing a backup; refusing reconciliation")
+        for job in jobs:
+            qmp.execute("job-dismiss", {"id": job["id"]})
+    return {"dismissed": len(jobs), "vm_started": False}
+
+
 def source_copy(data):
     ident = vmid(data["vmid"])
     slots = _slots(data)
@@ -404,6 +422,7 @@ def source_copy(data):
 
 
 ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
+           "source_dismiss": source_dismiss,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
            "target_publish": target_publish}
