@@ -194,6 +194,28 @@ def proxmox_task(opts, load_credential, timeout):
     return json.dumps({'datacenter':dc['name'],'vmid':vmid,'action':action,'upid':upid},ensure_ascii=False)
 
 
+def _disk_size_bytes(value):
+    """Parse declared PVE disk sizes; unknown is NOT the same as zero bytes."""
+    from decimal import Decimal, InvalidOperation, ROUND_CEILING
+    if not isinstance(value, str):
+        return None
+    declared = [p[5:] for p in value.split(",")[1:] if p.startswith("size=")]
+    if len(declared) != 1:
+        return None
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]{1,4})?)([KMGTPE]?)",
+                         declared[0], re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        amount = Decimal(match.group(1))
+        suffix = match.group(2).upper()
+        factor = 1024 ** ("KMGTPE".index(suffix) + 1) if suffix else 1
+        result = int((amount * factor).to_integral_value(rounding=ROUND_CEILING))
+    except (InvalidOperation, OverflowError):
+        return None
+    return result if 1024 <= result <= 1 << 60 else None
+
+
 def assess_vm_dr(dc, cred, vmid, timeout=20):
     """Read-only storage-aware assessment, never a replication plan or failover approval.
 
@@ -236,6 +258,7 @@ def assess_vm_dr(dc, cred, vmid, timeout=20):
         meta = types.get(pool, {'type': 'unknown', 'shared': False})
         drives.append({'slot': key, 'storage': pool or None,
                        'storage_type': meta['type'], 'shared': meta['shared'],
+                       'size_bytes': _disk_size_bytes(value),
                        'snapshot_capability': 'not_verified'})
     unique_types = sorted({d['storage_type'] for d in drives})
     risks = ['No source fencing check, destination disk mapping, write-order guarantee or DR validation has been performed.',
