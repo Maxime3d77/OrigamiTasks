@@ -602,6 +602,7 @@ function protectedVMsPage(){
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
+   +'<button class="btn tiny" data-action="dr-vm-storage-readiness" data-id="'+vm.id+'">Compatibilité stockage</button>'
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
    +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
@@ -1942,7 +1943,31 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='protect-vm-resource'){
   closeModal();openProtectedVMWizard(null,id,Number(b.dataset.vmid));return
  }
- if(a==='dr-vm-edit'){openProtectedVMWizard(id);return}
+ if(a==='dr-vm-storage-readiness'){
+   toast('Analyse des capacités de stockage en lecture seule…');
+   const r=await api('/dr/vms/'+id+'/storage-readiness');
+   const t=r.target_storage||{};
+   const rows=(r.source_disks||[]).map(x=>'<tr><td>'+e(x.slot||'—')+'</td><td>'+e(x.storage||'—')
+     +'</td><td>'+e(x.storage_type||'—')+'</td></tr>').join('');
+   const issues=(r.checks||[]).map(x=>'<p class="hint">• '+e(x)+'</p>').join('');
+   const avail=Number.isFinite(r.available_bytes)?Math.round(r.available_bytes/1073741824)+' Gio':'non vérifié';
+   modal('Compatibilité stockage PRA · VM #'+e(r.source_vmid),
+     '<div class="notice"><b>Lecture seule.</b> Aucune réplication, aucun disque ni démarrage déclenché. '
+     +'Un snapshot compatible ne signifie pas que le PRA est opérationnel.</div>'
+     +'<p><b>Destination :</b> '+e(t.storage||'—')+' · '+e(t.type||'—')
+     +' · '+(t.shared?'partagé':'non partagé')+'</p>'
+     +'<p><b>Adaptateur :</b> '+e(r.backend)+' · <b>Nœud :</b> '+e(r.target_node)
+     +' · '+(r.node_online?'en ligne':'hors ligne')
+     +' · <b>Stockage actif :</b> '+(r.node_storage_active?'oui':'non confirmé')+'</p>'
+     +'<p><b>Espace disponible :</b> '+e(avail)+' · <b>Chaînes QCOW2 LVM :</b> '
+     +(t.snapshot_as_volume_chain?'activées (préversion)':'non détectées')+'</p>'
+     +'<div class="table-wrap"><table><thead><tr><th>Disque source</th><th>Stockage</th><th>Type</th></tr></thead><tbody>'
+     +rows+'</tbody></table></div>'
+     +'<div class="notice error"><b>Réplication LVM non activée. Bascule interdite.</b>'+issues+'</div>',
+     '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
+   return;
+  }
+  if(a==='dr-vm-edit'){openProtectedVMWizard(id);return}
  if(a==='dr-vm-preflight'||a==='dr-vm-failover'||a==='dr-vm-failback'){
   const scenario=a==='dr-vm-preflight'?'replication_preflight':
                  a==='dr-vm-failback'?'failback_simulation':'failover_simulation';
