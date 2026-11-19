@@ -91,7 +91,7 @@ def _remote(job):
         try:
             base=sftp.normalize(".").rstrip("/")
             stage=base+"/origami_upgrade_"+secrets.token_hex(12)
-            names=["agent.ps1"] if job["platform"]=="windows" else ["agent.py","pra_worker.py"]
+            names=["agent.ps1"] if job["platform"]=="windows" else ["agent.py","pra_worker.py","pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py"]
             for name in names:
                 src=ROOT/("windows" if job["platform"]=="windows" else "linux")/name
                 with sftp.file(stage+"_"+name,"xb") as f:
@@ -116,11 +116,15 @@ def _remote(job):
                 "trap "+shlex.quote(rollback)+" EXIT; "
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_agent.py")+" /opt/origamitasks-agent/agent.py; "
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_pra_worker.py")+" /opt/origamitasks-agent/pra_worker.py; "
+                "install -d -m 700 -o root -g root /opt/origamitasks-agent/privileged; "
+                +''.join("install -m 500 -o root -g root "+shlex.quote(stage+"_"+h)+" /opt/origamitasks-agent/privileged/"+h+"; "
+                         for h in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py"))+
                 "systemctl restart origamitasks-agent.service; "
                 "if systemctl is-enabled --quiet origamitasks-agent-pra.service 2>/dev/null; then systemctl restart origamitasks-agent-pra.service; fi; "
                 "systemctl is-active --quiet origamitasks-agent.service; "
                 "trap - EXIT; "
-                "rm -f "+shlex.quote(stage+"_agent.py")+" "+shlex.quote(stage+"_pra_worker.py")+"; "
+                "rm -f "+shlex.quote(stage+"_agent.py")+" "+shlex.quote(stage+"_pra_worker.py")+" "
+                + " ".join(shlex.quote(stage+"_"+h) for h in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py"))+"; "
                 "echo ORIGAMI_AGENT_UPDATED"
             )
             inner='if [ "$(id -u)" -eq 0 ]; then exec sh -c '+shlex.quote(script)+'; else exec sudo -n sh -c '+shlex.quote(script)+'; fi'
