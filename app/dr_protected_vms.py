@@ -276,7 +276,12 @@ def list_vms(plan_id=None):
         item["replication_status"]=latest.get("replication_status","not_configured")
         item["last_successful_sync"]=latest.get("last_successful_sync")
         item["last_replication_run"]=latest.get("last_replication_run")
-        item["replica_verified"]=item["replication_status"]=="completed"
+        # An old 'completed' run predating structural verification is NOT
+        # evidence of an intact standby or a safe incremental base.
+        item["offline_image_verified"]=bool(latest.get("offline_image_verified", False))
+        item["boot_verified"]=False
+        item["application_consistency_verified"]=False
+        item["replica_verified"]=item["offline_image_verified"]
         # Disk sync alone must never authorize a failover.
         item["failover_available"]=False
         result.append(item)
