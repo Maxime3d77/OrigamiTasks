@@ -168,3 +168,21 @@ setting is required.
 The LVM receiver remains staging-only and is NOT wired to the live QMP
 transport in this release.
 
+## LVM capacity and cluster ownership checks (v0.3.27-rc1)
+
+**Compatibilité stockage** now displays virtual disk sizes whenever the
+PVE VM configuration exposes them as `size=` properties. For thick QCOW2
+volume-chain LVM targets, it estimates **total virtual disk sizes plus at
+least 5 % or 512 MiB reserved capacity** for each checkpoint generation.
+Even a tiny incremental delta requires another thick LV generation.
+Missing disk sizes are **unknown**, never assumed to be zero.
+
+The dormant LVM staging adapter now checks real node-local PVE storage
+availability and the VMID inventory across the **entire target cluster**.
+It rejects VMIDs belonging to another node/CT and existing targets without
+the matching protection marker, or with onboot enabled. Initial staging
+for a VMID that does not exist yet is supported by the planning checks.
+
+**Limit:** These checks do not enable LVM QMP replication, failover, or
+failback. They are mock-tested only, pending Proxmox lab validation.
+
