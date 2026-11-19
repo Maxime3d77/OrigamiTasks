@@ -126,7 +126,8 @@ def _run_helper(ssh, action, data, timeout=60):
                       "target_finish", "target_abort", "target_publish"}:
         raise LiveReplicationError("Action PRA non autorisée")
     encoded = base64.b64encode(json.dumps(data, separators=(",", ":")).encode()).decode()
-    command = "sudo -n /usr/bin/python3 " + shlex.quote(_HELPER) + " " + action + " " + shlex.quote(encoded)
+    invoke = "/usr/bin/python3 " + shlex.quote(_HELPER) + " " + action + " " + shlex.quote(encoded)
+    command = 'if [ "$(id -u)" -eq 0 ]; then exec ' + invoke + '; else exec sudo -n ' + invoke + '; fi'
     stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
     channel = stdout.channel
     channel.settimeout(timeout)
