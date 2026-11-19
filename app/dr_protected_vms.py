@@ -560,9 +560,17 @@ def storage_readiness(vm_id):
     source = integrations.assess_vm_dr(source_dc, source_cred,
                                       vm["source_vmid"], timeout=18)
     disks = [{"slot": x.get("slot"), "storage": x.get("storage"),
-              "storage_type": x.get("storage_type"),
+              "storage_type": x.get("storage_type"), "size_bytes": x.get("size_bytes"),
               "snapshot_capability": x.get("snapshot_capability")}
              for x in source.get("disks", [])]
+    all_sizes = [x.get("size_bytes") for x in disks]
+    known_sizes = bool(all_sizes) and all(type(x) is int and x >= 1024 for x in all_sizes)
+    virtual_total = sum(all_sizes) if known_sizes else None
+    # Shared LVM volume-chain checkpoints allocate thick volumes per
+    # generation. A tiny incremental delta still needs space for the whole
+    # virtual disk set plus margin, not only the number of changed bytes.
+    min_lvm_generation = (virtual_total + max(512 * 1024 * 1024, virtual_total // 20)
+                          if target["type"] == "lvm" and virtual_total is not None else None)
     blockers = []
     if not node_online:
         blockers.append("Nœud destination indisponible")
@@ -571,6 +579,11 @@ def storage_readiness(vm_id):
     if target["disabled"] or not target["images"]:
         blockers.append("Stockage désactivé ou ne permettant pas les disques VM")
     if target["type"] == "lvm":
+        if min_lvm_generation is None:
+            blockers.append("Capacité requise non estimable : taille d'un ou plusieurs disques inconnue")
+        elif (runtime and type(runtime.get("available_bytes")) is int and
+              runtime["available_bytes"] < min_lvm_generation):
+            blockers.append("Espace LVM insuffisant pour une génération complète de checkpoint")
         if not target["snapshot_as_volume_chain"]:
             blockers.append("Chaînes QCOW2 désactivées sur ce stockage LVM")
         blockers.append("Récepteur LVM en préparation : checkpoint partagé, publication et restauration non validés")
@@ -591,6 +604,8 @@ def storage_readiness(vm_id):
         "node_online": node_online,
         "node_storage_active": bool(runtime and runtime.get("active")),
         "available_bytes": runtime.get("available_bytes") if runtime else None,
+        "source_total_virtual_bytes": virtual_total,
+        "estimated_lvm_generation_bytes": min_lvm_generation,
         "target_replication_authorized": False,
         "target_failover_authorized": False,
         "checks": blockers,
