@@ -90,7 +90,7 @@ def test_check_failure_never_publishes(store, monkeypatch):
 
 def test_invalid_slot_or_nonwritable_root_rejected(store):
     s, _ = store
-    with pytest.raises(cp.CheckpointError, match="Invalid disk identifiers"):
+    with pytest.raises(cp.CheckpointError, match="Invalid disk slot"):
         s.begin("full", {"../../foo": 2048}, "vm-001")
     with pytest.raises(cp.CheckpointError, match="Invalid disk sizes"):
         s.begin("full", {"scsi0": -10}, "vm-001")
