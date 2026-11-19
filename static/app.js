@@ -596,7 +596,8 @@ function protectedVMsPage(){
    +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
    +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
-   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point validé : '+(vm.last_successful_sync?dt(vm.last_successful_sync):'aucun')+'</div>'
+   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point QCOW2 vérifié hors ligne : '+(vm.last_successful_sync?dt(vm.last_successful_sync):'aucun')+'</div>'
+   +'<div class="muted tinytext">Validation du dernier transfert : '+(vm.offline_image_verified?'structurelle, hors ligne':'non vérifiée ou sans transfert')+' · Démarrage non testé</div>'
    +'<div class="muted tinytext">'+e(vm.last_replication_run?.details||'')+'</div></td>'
    +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
@@ -618,7 +619,8 @@ function protectedVMsPage(){
    +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
   +'<div class="notice dr-safety-notice"><b>QMP expérimental :</b> une synchronisation approuvée peut créer une VM REP_ arrêtée sur stockage DIR inscriptible ; source toujours allumée. '
   +'Stockage LVM brut et réplique Pure en lecture seule refusés. Première copie complète, puis deltas. '
-  +'Les tests de bascule et de retour restent des simulations : aucune promotion automatique.</div>'
+  +'Une vérification QCOW2 hors ligne ne garantit pas le démarrage ni la cohérence applicative. '
+   +'Les tests de bascule et de retour restent des simulations : aucune promotion automatique.</div>'
   +'<div class="stats-grid dr-vm-stat-grid">'
   +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Politiques PRA</div></div>'
   +'<div class="stat-card"><span class="label">Politiques actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Tâches programmées après amorçage</div></div>'
