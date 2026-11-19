@@ -415,6 +415,93 @@ def target_publish(data):
 
 
 
+def target_verify(data):
+    """Verify a committed, attached standby *without ever starting it*.
+
+    This is a disk-format/configuration verification. It cannot establish
+    guest bootability or application consistency; a real isolated restore
+    test remains mandatory before permitting failover.
+    """
+    ident = vmid(data["vmid"])
+    token = data["token"]
+    protected = data["protected_vm_id"]
+    storage = data["storage"]
+    if (not isinstance(token, str) or not _TOKEN.fullmatch(token)
+            or type(protected) is not int or protected <= 0):
+        raise HostError("Invalid checkpoint verification identity")
+    if not _is_target_stopped(ident):
+        raise HostError("Cannot verify an unconfigured standby")
+    store = _store(data)
+    if store.pending.exists():
+        raise HostError("Unresolved checkpoint staging prevents verification")
+    checkpoint = store.current()
+    if (not checkpoint or checkpoint.get("status") != "committed"
+            or checkpoint.get("token") != token
+            or checkpoint.get("target_vmid") != ident):
+        raise HostError("No matching committed checkpoint on destination")
+    disks = checkpoint.get("disks")
+    if not isinstance(disks, dict) or not 1 <= len(disks) <= 32:
+        raise HostError("Checkpoint has no validated disk set")
+    config = _vm_config(ident)
+    if ("ORIGAMITASKS_PRA_" + str(protected)) not in config.get("description", ""):
+        raise HostError("Standby VM ownership marker missing")
+    if config.get("onboot", "0") not in ("0", "false"):
+        raise HostError("Standby automatic start must be disabled")
+    if any(re.fullmatch(r"net[0-9]{1,2}", key) for key in config):
+        raise HostError("Standby has a network adapter; isolated standby required")
+    if "status: stopped" not in cmd("qm", "status", str(ident)):
+        raise HostError("Destination VM unexpectedly active during verification")
+    checked = []
+    for slot, item in sorted(disks.items()):
+        if (not isinstance(slot, str) or not _NODE.fullmatch(slot)
+                or not isinstance(item, dict)):
+            raise HostError("Invalid committed disk metadata")
+        name = item.get("file")
+        if (not isinstance(name, str) or
+                not re.fullmatch("vm-" + str(ident) + r"-disk-[0-9]+\\.qcow2", name)):
+            raise HostError("Invalid committed disk name")
+        expected = storage + ":" + str(ident) + "/" + name
+        actual = config.get(slot, "").split(",", 1)[0]
+        if actual != expected:
+            raise HostError("Standby disk does not match committed checkpoint")
+        image = store.root / name
+        if image.is_symlink() or not image.is_file():
+            raise HostError("Checkpoint disk missing or unsafe")
+        chain_output = cmd("qemu-img", "info", "--backing-chain",
+                           "--output=json", "-f", "qcow2", str(image), timeout=120)
+        try:
+            chain = json.loads(chain_output)
+        except (ValueError, TypeError) as exc:
+            raise HostError("Invalid image backing-chain report") from exc
+        if not isinstance(chain, list) or not chain:
+            raise HostError("No backing chain for committed checkpoint")
+        for entry in chain:
+            if not isinstance(entry, dict):
+                raise HostError("Malformed image backing-chain record")
+            path = entry.get("filename")
+            if not isinstance(path, str) or not path.startswith("/"):
+                raise HostError("Unverifiable backing-chain path")
+            dep = Path(path)
+            if dep.is_symlink() or dep.resolve(strict=True).parent != store.root:
+                raise HostError("Backing chain points outside managed storage")
+            if not dep.is_file():
+                raise HostError("Backing image is not a regular file")
+        cmd("qemu-img", "check", "-f", "qcow2", str(image), timeout=120)
+        checked.append(slot)
+    if "status: stopped" not in cmd("qm", "status", str(ident)):
+        raise HostError("Destination VM changed power state during verification")
+    return {
+        "checkpoint_token": token, "disks": checked,
+        "verified_offline": True, "disk_format_checked": True,
+        "standby_configured": True, "source_vm_stopped": False,
+        "vm_started": False, "boot_tested": False,
+        "application_consistency_verified": False,
+        "failover_authorized": False,
+        "note": "Proxmox config and qcow2 backing chains checked; no boot or application-level test"
+    }
+
+
+
 def source_dismiss(data):
     """Only discard concluded Origami QMP jobs after an operator reconciliation."""
     ident = vmid(data["vmid"])
@@ -452,7 +539,7 @@ ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "source_dismiss": source_dismiss,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
-           "target_publish": target_publish}
+           "target_publish": target_publish, "target_verify": target_verify}
 
 
 def main():
