@@ -114,3 +114,28 @@ de bascule, du fencing ou des agents en production n'est impliqué par cette
 simple découverte de capacités.
 
 Documentation officielle : [Proxmox LVM](https://github.com/proxmox/pve-docs/blob/master/pve-storage-lvm.adoc).
+
+## Adaptateur LVM générique : étape de développement (v0.3.25-rc1)
+
+Un premier composant `agents/linux/pra_lvm_target.py` prépare l'utilisation
+de volumes LVM gérés **par Proxmox**, indépendamment d'une marque de SAN ou du
+nom du VG. Il détecte en lecture seule `snapshot-as-volume-chain`, refuse les
+stockages désactivés et calcule la capacité minimale **épaisse** requise par
+génération, même pour une copie incrémentale. Il inclut une procédure
+d'allocation de staging nécessitant une approbation explicite et journalise
+les commandes avant et après leur exécution. Un résultat incertain ne libère
+**jamais** de volumes automatiquement.
+
+Cette procédure de staging n'est **pas** accessible depuis le moteur de
+réplication, ni depuis le bouton « Synchroniser à chaud ». Il manque un
+manifeste de checkpoint durable visible entre les nœuds, la validation du
+chaînage QCOW2 sur périphérique bloc, la publication atomique des disques,
+le contrôle de restauration et la sécurisation du démarrage. Tant que ces
+prérequis ne sont pas validés sur une plateforme de recette, l'adaptateur
+LVM reste volontairement **désactivé pour les synchronisations réelles**.
+
+Dans **VM protégées PRA**, le bouton **Compatibilité stockage** fournit un
+rapport en lecture seule sur le stockage cible, le nœud, l'espace disponible
+et les disques source. Il n'alloue pas de volume et ne déclenche ni
+synchronisation ni bascule. Aucun ajout de paramètre `.env` n'est requis.
+

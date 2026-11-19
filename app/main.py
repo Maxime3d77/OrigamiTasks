@@ -657,6 +657,17 @@ def get_live_replication_history(vm_id:int,request:Request):
         raise HTTPException(404,str(exc)) from None
 
 
+@app.get('/api/dr/vms/{vm_id}/storage-readiness')
+def get_vm_storage_readiness(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return dr_protected_vms.storage_readiness(vm_id)
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Découverte du stockage : API Proxmox indisponible ou non autorisée') from None
+
+
 @app.get('/api/dr/vms/{vm_id}/replication-preflight')
 def live_replication_preflight(vm_id:int,request:Request):
     security.require(request,role='admin')
