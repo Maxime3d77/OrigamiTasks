@@ -84,11 +84,8 @@ def _storages(dc, cred):
         name=item["storage"]
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}",name):
             continue
-        contents=str(item.get("content") or "")
-        result.append({"storage":name,"type":str(item.get("type") or "unknown"),
-                       "shared":bool(item.get("shared",False)),
-                       "images":"images" in contents.split(","),
-                       "content":contents})
+        from .pra_storage_capabilities import describe_storage
+        result.append(describe_storage(item))
     return result
 
 
