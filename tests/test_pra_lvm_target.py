@@ -14,22 +14,33 @@ spec.loader.exec_module(mod)
 
 
 @pytest.fixture
-def adapter(tmp_path):
+def adapter(tmp_path, monkeypatch):
     calls = []
+    monkeypatch.setattr(mod.socket, "gethostname", lambda: "node-a.example.invalid")
     config = {"storage": "any-lvm", "type": "lvm", "vgname": "vg-customer",
               "content": "images,rootdir", "shared": 1, "snapshot-as-volume-chain": 1}
+    state = {"available": 8 * 1024**4, "active": 1,
+             "resources": [{"vmid":301,"type":"qemu","node":"node-a","status":"stopped"}],
+             "vm_config": "description: ORIGAMITASKS_PRA_17\\nonboot: 0"}
     def runner(*args):
         calls.append(args)
-        if args[:2] == ("pvesh", "get"):
+        if args == ("pvesh", "get", "/storage/any-lvm", "--output-format", "json"):
             return json.dumps(config)
+        if args == ("pvesh", "get", "/nodes/node-a/storage", "--output-format", "json"):
+            return json.dumps([{"storage":"any-lvm","active":state["active"],
+                                "avail":state["available"]}])
+        if args == ("pvesh", "get", "/cluster/resources", "--type", "vm",
+                    "--output-format", "json"):
+            return json.dumps(state["resources"])
         if args[:2] == ("qm", "status"):
             return "status: stopped"
         if args[:2] == ("qm", "config"):
-            return "onboot: 0"
+            return state["vm_config"]
         if args[:2] == ("pvesm", "alloc"):
             return "created"
         raise AssertionError(f"Unexpected command: {args}")
-    obj = mod.PveLvmTarget("any-lvm", 301, runner, tmp_path)
+    obj = mod.PveLvmTarget("any-lvm", 301, runner, tmp_path, protected_vm_id=17)
+    obj._mock_state = state
     return obj, config, calls, tmp_path
 
 
@@ -174,3 +185,55 @@ def test_staging_rejects_running_or_autostart_target(adapter):
     with pytest.raises(mod.LvmTargetError,match="onboot"):
         obj.stage_allocations(plan,approved=True)
     assert not any(x[:2]==("pvesm","alloc") for x in calls)
+
+
+def test_insufficient_lvm_space_blocks_allocation(adapter):
+    obj, _, calls, root = adapter
+    obj._mock_state["available"] = 1024
+    with pytest.raises(mod.LvmTargetError, match="Insufficient free space"):
+        obj.plan({"scsi0":1024**3}, "full")
+    assert not any(x[:2]==("pvesm","alloc") for x in calls)
+    assert not (root/"any-lvm").exists()
+
+
+def test_disabled_node_storage_is_rejected(adapter):
+    obj, _, calls, root = adapter
+    obj._mock_state["active"] = 0
+    with pytest.raises(mod.LvmTargetError, match="not active"):
+        obj.plan({"scsi0":1024**3}, "full")
+    assert not any(x[:2]==("pvesm","alloc") for x in calls)
+
+
+@pytest.mark.parametrize("other", [
+    [{"vmid":301,"type":"qemu","node":"other-node","status":"stopped"}],
+    [{"vmid":301,"type":"lxc","node":"node-a","status":"stopped"}],
+    [{"vmid":301,"type":"qemu","node":"node-a","status":"stopped"},
+     {"vmid":301,"type":"qemu","node":"node-b","status":"running"}],
+])
+def test_clusterwide_vmid_collision_refuses_staging(adapter, other):
+    obj, _, calls, root = adapter
+    obj._mock_state["resources"] = other
+    plan = obj.plan({"scsi0": 1024**3}, "full")
+    with pytest.raises(mod.LvmTargetError, match="another cluster resource"):
+        obj.stage_allocations(plan, approved=True)
+    assert not any(x[:2]==("pvesm","alloc") for x in calls)
+    assert not (root/"any-lvm").exists()
+
+
+def test_existing_standby_must_belong_to_same_protection(adapter):
+    obj, _, calls, root = adapter
+    obj._mock_state["vm_config"] = "description: ORIGAMITASKS_PRA_42\\nonboot: 0"
+    plan = obj.plan({"scsi0": 1024**3}, "full")
+    with pytest.raises(mod.LvmTargetError,match="not owned"):
+        obj.stage_allocations(plan, approved=True)
+    assert not any(x[:2]==("pvesm","alloc") for x in calls)
+
+
+def test_initial_seed_can_stage_when_vmid_absent_clusterwide(adapter):
+    obj, _, calls, root = adapter
+    obj._mock_state["resources"] = []
+    plan = obj.plan({"scsi0": 1024**3}, "full")
+    result = obj.stage_allocations(plan, approved=True)
+    assert result["status"] == "staged_only"
+    assert len([x for x in calls if x[:2] == ("pvesm","alloc")]) == 1
+    assert result["vm_started"] is False
