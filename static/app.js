@@ -1949,8 +1949,9 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    toast('Analyse des capacités de stockage en lecture seule…');
    const r=await api('/dr/vms/'+id+'/storage-readiness');
    const t=r.target_storage||{};
+   const fmtGiB=n=>Number.isFinite(n)?(n/1073741824).toFixed(1)+' Gio':'inconnue';
    const rows=(r.source_disks||[]).map(x=>'<tr><td>'+e(x.slot||'—')+'</td><td>'+e(x.storage||'—')
-     +'</td><td>'+e(x.storage_type||'—')+'</td></tr>').join('');
+     +'</td><td>'+e(x.storage_type||'—')+'</td><td>'+e(fmtGiB(x.size_bytes))+'</td></tr>').join('');
    const issues=(r.checks||[]).map(x=>'<p class="hint">• '+e(x)+'</p>').join('');
    const avail=Number.isFinite(r.available_bytes)?Math.round(r.available_bytes/1073741824)+' Gio':'non vérifié';
    modal('Compatibilité stockage PRA · VM #'+e(r.source_vmid),
@@ -1963,7 +1964,10 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
      +' · <b>Stockage actif :</b> '+(r.node_storage_active?'oui':'non confirmé')+'</p>'
      +'<p><b>Espace disponible :</b> '+e(avail)+' · <b>Chaînes QCOW2 LVM :</b> '
      +(t.snapshot_as_volume_chain?'activées (préversion)':'non détectées')+'</p>'
-     +'<div class="table-wrap"><table><thead><tr><th>Disque source</th><th>Stockage</th><th>Type</th></tr></thead><tbody>'
+     +'<p><b>Disques virtuels :</b> '+e(fmtGiB(r.source_total_virtual_bytes))
+     +' · <b>Réserve minimale pour un nouveau checkpoint LVM :</b> '
+     +e(fmtGiB(r.estimated_lvm_generation_bytes))+' (LV épaisses, estimation)</p>'
+     +'<div class="table-wrap"><table><thead><tr><th>Disque source</th><th>Stockage</th><th>Type</th><th>Taille</th></tr></thead><tbody>'
      +rows+'</tbody></table></div>'
      +'<div class="notice error"><b>Réplication LVM non activée. Bascule interdite.</b>'+issues+'</div>',
      '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
