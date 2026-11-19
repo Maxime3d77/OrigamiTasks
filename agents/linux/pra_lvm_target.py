@@ -68,12 +68,17 @@ def _atomic(path, record):
 class PveLvmTarget:
     """PVE-managed volume allocation, with no implicit VM or LV mutations."""
 
-    def __init__(self, storage, vmid, runner, journal_root="/var/lib/origamitasks-pra/lvm"):
+    def __init__(self, storage, vmid, runner, journal_root="/var/lib/origamitasks-pra/lvm",
+                 protected_vm_id=None):
         if not isinstance(storage, str) or not STORAGE.fullmatch(storage):
             raise LvmTargetError("Invalid storage identifier")
         if type(vmid) is not int or not VMID.fullmatch(str(vmid)):
             raise LvmTargetError("Invalid target VMID")
+        if (protected_vm_id is not None and
+                (type(protected_vm_id) is not int or protected_vm_id <= 0)):
+            raise LvmTargetError("Invalid PRA protection identity")
         self.storage, self.vmid = storage, vmid
+        self.protected_vm_id = protected_vm_id
         self.run = runner
         self.journal = Path(journal_root) / storage / str(vmid)
 
@@ -101,6 +106,27 @@ class PveLvmTarget:
                 "phase": "allocation_staging_only", "replication_enabled": False,
                 "failover_enabled": False,
                 "requires_shared_checkpoint_journal": True}
+
+    def _node_capacity(self):
+        """Query actual storage status on this node; never trust VG name alone."""
+        node = socket.gethostname().split(".", 1)[0]
+        if not STORAGE.fullmatch(node):
+            raise LvmTargetError("Untrusted Proxmox node identity")
+        try:
+            rows = json.loads(self.run("pvesh", "get", "/nodes/" + node + "/storage",
+                                      "--output-format", "json"))
+        except (ValueError, TypeError) as exc:
+            raise LvmTargetError("Invalid PVE node storage status") from exc
+        if not isinstance(rows, list):
+            raise LvmTargetError("PVE node storage inventory unavailable")
+        found = [r for r in rows if isinstance(r, dict)
+                 and r.get("storage") == self.storage]
+        if len(found) != 1 or not _flag(found[0].get("active")):
+            raise LvmTargetError("Target LVM storage is not active on this node")
+        available = found[0].get("avail")
+        if type(available) is not int or available < 0:
+            raise LvmTargetError("Target available space cannot be verified")
+        return node, available
 
     @staticmethod
     def validate_sizes(sizes):
@@ -130,8 +156,12 @@ class PveLvmTarget:
         # *full virtual disk* plus qcow2 overhead must fit for each generation.
         estimate = sum(sizes.values())
         reserve = max(512 * 1024 * 1024, estimate // 20)
+        node, available = self._node_capacity()
+        if available < estimate + reserve:
+            raise LvmTargetError("Insufficient free space for thick LVM checkpoint allocation")
         return {"storage": self.storage, "vmid": self.vmid, "mode": mode,
-                "disks": sizes, "required_bytes_lower_bound": estimate + reserve,
+                "disks": sizes, "target_node": node, "available_bytes": available,
+                "required_bytes_lower_bound": estimate + reserve,
                 "allocation_is_thick": True,
                 "published": False, "can_failover": False,
                 "note": "Estimate only: reserve includes a 5% margin, actual PVE allocation may require more."}
@@ -147,16 +177,44 @@ class PveLvmTarget:
             raise LvmTargetError("Unsafe staging journal")
 
     def _target_stopped(self):
-        """Staging never allocates for a live or auto-start standby VM."""
+        """Check cluster-wide VMID ownership, not merely local qm status."""
+        node, _ = self._node_capacity()
+        try:
+            rows = json.loads(self.run("pvesh", "get", "/cluster/resources",
+                                      "--type", "vm", "--output-format", "json"))
+        except (ValueError, TypeError) as exc:
+            raise LvmTargetError("Invalid cluster-wide VMID inventory") from exc
+        if not isinstance(rows, list):
+            raise LvmTargetError("Cluster-wide VMID inventory unavailable")
+        owners = [r for r in rows if isinstance(r, dict)
+                  and str(r.get("vmid")) == str(self.vmid)
+                  and r.get("type") in ("qemu", "lxc")]
+        if not owners:
+            # First seed may prepare volumes before the standby VM is created.
+            return False
+        if len(owners) != 1 or owners[0].get("type") != "qemu" or owners[0].get("node") != node:
+            raise LvmTargetError("Destination VMID is owned by another cluster resource")
+        if self.protected_vm_id is None:
+            raise LvmTargetError("Cannot stage into an existing VM without protection identity")
         state = self.run("qm", "status", str(self.vmid)).strip()
         if state != "status: stopped":
             raise LvmTargetError("Destination VM must be explicitly stopped before staging")
         config = self.run("qm", "config", str(self.vmid), "--current")
+        attrs = {}
         for line in config.splitlines():
-            if line.startswith("onboot: ") and line.split(": ", 1)[1] not in ("0", "false"):
-                raise LvmTargetError("Destination VM must have onboot disabled")
+            if ": " in line:
+                k, val = line.split(": ", 1)
+                attrs[k] = val
+        if attrs.get("onboot", "0") not in ("0", "false"):
+            raise LvmTargetError("Destination VM must have onboot disabled")
+        if "ORIGAMITASKS_PRA_" + str(self.protected_vm_id) not in attrs.get("description", ""):
+            raise LvmTargetError("Destination VM is not owned by this protection")
+        if any(re.fullmatch(r"net[0-9]{1,2}", key) for key in attrs):
+            raise LvmTargetError("Destination standby has a network interface")
+        return True
 
-    def stage_allocations(self, plan, *, approved=False):
+
+    def stage_allocations(self, plan, *, approved=False, previous=None):
         """Operator-only staging, deliberately absent from production agent API.
 
         Record intent *before* PVE alloc and persist each successful LV. After
@@ -168,7 +226,7 @@ class PveLvmTarget:
             raise LvmTargetError("Explicit staging approval required")
         if not isinstance(plan, dict) or plan.get("storage") != self.storage or plan.get("vmid") != self.vmid:
             raise LvmTargetError("Plan does not match destination")
-        validated = self.plan(plan.get("disks"), plan.get("mode"))
+        validated = self.plan(plan.get("disks"), plan.get("mode"), previous=previous)
         if plan != validated:
             raise LvmTargetError("Plan changed since preflight")
         self._target_stopped()

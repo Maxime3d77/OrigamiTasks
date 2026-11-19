@@ -168,3 +168,49 @@ setting is required.
 The LVM receiver remains staging-only and is NOT wired to the live QMP
 transport in this release.
 
+## LVM capacity and cluster ownership checks (v0.3.27-rc1)
+
+**Compatibilité stockage** now displays virtual disk sizes whenever the
+PVE VM configuration exposes them as `size=` properties. For thick QCOW2
+volume-chain LVM targets, it estimates **total virtual disk sizes plus at
+least 5 % or 512 MiB reserved capacity** for each checkpoint generation.
+Even a tiny incremental delta requires another thick LV generation.
+Missing disk sizes are **unknown**, never assumed to be zero.
+
+The dormant LVM staging adapter now checks real node-local PVE storage
+availability and the VMID inventory across the **entire target cluster**.
+It rejects VMIDs belonging to another node/CT and existing targets without
+the matching protection marker, or with onboot enabled. Initial staging
+for a VMID that does not exist yet is supported by the planning checks.
+
+**Limit:** These checks do not enable LVM QMP replication, failover, or
+failback. They are mock-tested only, pending Proxmox lab validation.
+
+## Production DR acceptance matrix
+
+Mock-based CI is not a substitute for the following tests on **two
+non-production Proxmox clusters and an independent witness**:
+
+1. Seed an online source VM without stopping it, then verify restored disk
+   and guest data integrity.
+2. Run successive incremental copies after writes and confirm only changed
+   blocks are transmitted.
+3. Migrate or restart the source: lost bitmap must force a FULL reseed.
+4. Interrupt network, kill an agent, stop the target, exhaust storage:
+   never publish an unverified checkpoint.
+5. Test `dir`, NFS, LVM `raw`/QCOW2, LVM-thin, ZFS and RBD target
+   adapters without overwriting any guest-owned disk.
+6. Boot an **isolated copy** and validate OS and application health; test
+   BIOS, UEFI and TPM cases separately.
+7. Partition the source site: prove independent witness quorum and
+   fencing before allowing any standby activation.
+8. Perform controlled network mapping, promotion, reverse sync and
+   failback while proving no concurrent writes occur.
+9. Lose the central controller: agents must maintain local protection
+   without unauthorized promotion.
+10. Measure actual RPO/RTO, data throughput, free capacity and recovery
+    or reconciliation time.
+
+Until steps **6 through 9** are implemented and verified, failover/failback
+remain simulations and are not enabled in production.
+

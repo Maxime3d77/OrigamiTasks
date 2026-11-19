@@ -171,3 +171,55 @@ synchronisation ni bascule. Aucun ajout de paramètre `.env` n'est requis.
 Le moteur de destination LVM n'est toujours pas raccordé au transfert QMP
 et le stockage `lvm` ne doit pas être présenté comme un récepteur opérationnel.
 
+## Capacité et propriété du stockage LVM (v0.3.27-rc1)
+
+Le diagnostic **Compatibilité stockage** expose désormais la taille virtuelle
+de chaque disque lorsque Proxmox la fournit sous la forme `size=` dans sa
+configuration. Pour une cible LVM classique avec chaînes QCOW2, il estime
+l'espace nécessaire à une génération : **somme des tailles virtuelles
++ réserve d'au moins 5 % (minimum 512 Mio)**. Une chaîne QCOW2 sur LVM utilise
+des volumes logiques **épais**, y compris lorsqu'un incrément ne contient que
+quelques blocs modifiés. L'absence d'une taille de disque est représentée
+comme **inconnue**, jamais comme zéro.
+
+L'adaptateur de préparation LVM vérifie directement le statut et l'espace
+libre du stockage sur le nœud Proxmox cible, ainsi que les VMID du **cluster
+entier**. Il refuse un VMID utilisé par un autre nœud/CT, une destination
+active, dotée du démarrage automatique ou appartenant à une autre protection.
+Le cas d'une première copie dont la VM cible n'existe pas est pris en compte.
+
+**Limite :** ces vérifications n'activent ni le transfert QMP vers LVM ni
+la bascule. Elles n'ont été évaluées qu'avec des tests automatisés simulés,
+et doivent être confirmées en recette sur les versions Proxmox voulues.
+
+## Matrice de qualification PRA avant mise en production
+
+Aucun test de CI simulé ne remplace les essais suivants sur **deux clusters
+Proxmox de recette et un témoin indépendant** :
+
+1. Copie initiale d'une VM en activité, avec vérification du disque et de
+   l'intégrité des données restaurées, sans arrêt de la source.
+2. Deux synchronisations successives avec modifications de fichiers et
+   vérification que seuls les blocs modifiés ont été transmis.
+3. Source migrée ou redémarrée : perte de bitmap détectée, incrémental
+   refusé, nouvelle copie complète imposée.
+4. Interruption du réseau, arrêt brutal de l'agent, cible hors ligne,
+   stockage saturé : aucun checkpoint invalide publié.
+5. Stockages `dir`, NFS, LVM `raw`/QCOW2, LVM-thin, ZFS et RBD :
+   adapter chaque cible selon ses capacités réelles, sans écrire dans un
+   volume appartenant à une autre VM.
+6. Démarrage d'une **copie isolée** avec validation des disques, du système
+   et des services applicatifs. Tester séparément BIOS, UEFI et TPM.
+7. Perte du site principal et partition réseau : témoin indépendant,
+   preuve de fencing et interdiction des deux VM simultanées.
+8. Promotion contrôlée, mappage réseau, résolution DNS, puis failback
+   avec synchronisation inverse et absence d'écritures concurrentes.
+9. Perte de la console OrigamiTasks : maintien des protections par les
+   agents autonomes, sans promotion non autorisée.
+10. Mesure réelle du RPO/RTO, de la bande passante, de la réserve de
+    stockage et des délais de réconciliation.
+
+Tant que les étapes **6 à 9** ne sont pas implémentées et validées, les
+commandes de bascule et de retour restent des simulations interdites
+d'exécution sur la production.
+
