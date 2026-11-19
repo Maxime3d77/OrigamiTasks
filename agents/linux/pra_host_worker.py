@@ -99,8 +99,12 @@ def source_probe(data):
     # Do not protect only a subset of data disks accidentally.
     if sorted(actual) != sorted(slots):
         raise HostError("The request does not cover every source disk")
-    if any(x in configured for x in ("efidisk0", "tpmstate0", "unused0")):
-        raise HostError("EFI/TPM/unused disk requires an explicit specialized recovery profile")
+    if (configured.get("bios", "seabios") != "seabios"
+            or any(x in configured for x in ("efidisk0", "tpmstate0"))
+            or any(x.startswith("unused") for x in configured)
+            or any(x.startswith("hostpci") for x in configured)):
+        raise HostError(
+            "OVMF/TPM/unused disk/PCI passthrough requires an explicit, tested recovery profile")
     if any("media=cdrom" in configured[s] for s in slots):
         raise HostError("Optical drives cannot be included as backup disks")
     if "running" not in cmd("qm", "status", str(ident)).split():
@@ -309,6 +313,9 @@ def target_begin(data):
 
 
 def target_finish(data):
+    ident = vmid(data["vmid"])
+    # Re-check the destination after the potentially hours-long QMP copy.
+    _is_target_stopped(ident)
     store = _store(data)
     token = data["token"]
     if not isinstance(token, str) or not _TOKEN.fullmatch(token):
@@ -325,6 +332,9 @@ def target_finish(data):
 
 
 def target_abort(data):
+    ident = vmid(data["vmid"])
+    # Never unlink staging images if a target VM is now active.
+    _is_target_stopped(ident)
     store = _store(data)
     token = data["token"]
     pending = store._read(store.pending)
