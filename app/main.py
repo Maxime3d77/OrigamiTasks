@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, agent_updates
@@ -55,7 +55,10 @@ async def browser_security(request, call_next):
 
 @app.get('/')
 def frontend():
-    return FileResponse(STATIC / 'index.html')
+    # Always serve the effective backend version in the UI and asset URLs.
+    # Keep app version in config.APP_VERSION as the single source of truth.
+    template=(STATIC / 'index.html').read_text(encoding='utf-8')
+    return HTMLResponse(template.replace('__APP_VERSION__', config.APP_VERSION))
 
 
 @app.get('/api/health')
