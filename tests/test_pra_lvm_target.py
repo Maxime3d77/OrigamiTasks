@@ -22,6 +22,10 @@ def adapter(tmp_path):
         calls.append(args)
         if args[:2] == ("pvesh", "get"):
             return json.dumps(config)
+        if args[:2] == ("qm", "status"):
+            return "status: stopped"
+        if args[:2] == ("qm", "config"):
+            return "onboot: 0"
         if args[:2] == ("pvesm", "alloc"):
             return "created"
         raise AssertionError(f"Unexpected command: {args}")
@@ -101,7 +105,7 @@ def test_journal_written_before_each_pve_allocation_and_never_auto_free(adapter)
     with pytest.raises(mod.LvmTargetError, match="Unresolved"):
         obj.stage_allocations(p,approved=True)
     assert not any(x[:2] == ("pvesm","free") for x in calls)
-    assert not any(x[0]=="qm" for x in calls)
+    assert not any(x[:2] in (("qm","start"),("qm","stop"),("qm","set")) for x in calls)
 
 
 def test_ambiguous_allocation_failure_requires_manual_reconciliation(adapter,monkeypatch):
@@ -146,3 +150,27 @@ def test_reject_invalid_vmid():
     for value in (0, 99, "301", 1000000000, True):
         with pytest.raises(mod.LvmTargetError):
             mod.PveLvmTarget("test",value,lambda *args: "")
+
+
+def test_staging_rejects_running_or_autostart_target(adapter):
+    obj, _, calls, root = adapter
+    plan=obj.plan({"scsi0": 1048576},"full")
+    real=obj.run
+    def running(*args):
+        if args[:2]==("qm","status"):
+            return "status: running"
+        return real(*args)
+    obj.run=running
+    with pytest.raises(mod.LvmTargetError,match="stopped"):
+        obj.stage_allocations(plan,approved=True)
+    assert not any(x[:2]==("pvesm","alloc") for x in calls)
+    assert not (root/"any-lvm").exists()
+
+    def onboot(*args):
+        if args[:2]==("qm","config"):
+            return "onboot: 1"
+        return real(*args)
+    obj.run=onboot
+    with pytest.raises(mod.LvmTargetError,match="onboot"):
+        obj.stage_allocations(plan,approved=True)
+    assert not any(x[:2]==("pvesm","alloc") for x in calls)
