@@ -485,8 +485,8 @@ def target_verify(data):
             chain = json.loads(chain_output)
         except (ValueError, TypeError) as exc:
             raise HostError("Invalid image backing-chain report") from exc
-        if not isinstance(chain, list) or not chain:
-            raise HostError("No backing chain for committed checkpoint")
+        if not isinstance(chain, list) or not 1 <= len(chain) <= 128:
+            raise HostError("Missing or excessive backing chain for committed checkpoint")
         for entry in chain:
             if not isinstance(entry, dict):
                 raise HostError("Malformed image backing-chain record")
@@ -494,6 +494,10 @@ def target_verify(data):
             if not isinstance(path, str) or not path.startswith("/"):
                 raise HostError("Unverifiable backing-chain path")
             dep = Path(path)
+            if (entry.get("format") not in (None, "qcow2")
+                    or not re.fullmatch("vm-" + str(ident) +
+                                        r"-disk-[0-9]+\.qcow2", dep.name)):
+                raise HostError("Unsupported or foreign QCOW2 backing image")
             if dep.is_symlink() or dep.resolve(strict=True).parent != store.root:
                 raise HostError("Backing chain points outside managed storage")
             if not dep.is_file():
