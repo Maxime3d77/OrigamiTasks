@@ -39,12 +39,14 @@ def _stub_live(monkeypatch, *, proof_ok):
     def helper(ssh, action, data, timeout=60):
         calls.append(action)
         if action == "source_probe":
-            return {"source_vm_uuid":"vm-stable-process",
+            return {"pra_protocol":2, "source_vm_uuid":"vm-stable-process",
                     "active_jobs": [], "bitmaps":{"scsi0":{}},
                     "sizes":{"scsi0":1024**3},
                     "config":{"bios":"seabios","memory":"2048","cores":"2","sockets":"1"}}
         if action == "target_probe":
-            return {"pending":None, "checkpoint":None}
+            return {"pra_protocol":2, "offline_structural_verify":True,
+                    "checkpoint_retention":"manual_only",
+                    "pending":None, "checkpoint":None}
         if action == "target_begin":
             return {"token":token,"ports":{"scsi0":10809}}
         if action == "source_copy":
@@ -105,5 +107,28 @@ def test_unverified_checkpoint_is_uncertain_and_cannot_be_replicated_again(monke
             else:
                 raise AssertionError("Must refuse to overwrite an uncertain checkpoint")
             assert source.closed and target.closed
+        finally:
+            _remove(client,h,vid,sites,clusters,plans)
+
+
+def test_obsolete_host_helper_is_rejected_before_target_allocation(monkeypatch):
+    with TestClient(app) as client:
+        h=login(client)
+        vid,sites,clusters,plans=_setup(client,h,monkeypatch)
+        try:
+            calls, source, target=_stub_live(monkeypatch, proof_ok=True)
+            original=pra_live._run_helper
+            def legacy(ssh, action, data, timeout=60):
+                result=original(ssh,action,data,timeout=timeout)
+                if action=="target_probe":
+                    result.pop("offline_structural_verify",None)
+                return result
+            monkeypatch.setattr(pra_live, "_run_helper", legacy)
+            run=pra_live.start(vid,"ci",approved=True)
+            pra_live._perform(run["run_id"])
+            assert pra_live.latest_status(vid)["replication_status"]=="failed"
+            assert "target_begin" not in calls
+            assert "source_copy" not in calls
+            assert "target_publish" not in calls
         finally:
             _remove(client,h,vid,sites,clusters,plans)
