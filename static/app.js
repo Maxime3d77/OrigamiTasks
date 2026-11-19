@@ -603,7 +603,7 @@ function protectedVMsPage(){
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
-   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>':'')
+   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
@@ -1948,6 +1948,18 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   const result=await api('/dr/vms/'+id+'/simulate','POST',{scenario});
   state.drProtectedVMs=(await api('/dr/vms')).items;
   showProtectedVMTest(result);return;
+ }
+ if(a==='dr-vm-qmp-reconcile'){
+  const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
+  if(!vm || vm.replication_status!=='uncertain' || !vm.last_replication_run?.id)return;
+  if(!confirm('Réconcilier la synchronisation incertaine de '+vm.source_name+' ? Un checkpoint INCOMPLET peut être abandonné après contrôle des jobs QMP. La prochaine copie sera complète. Aucune VM ne démarrera.'))return;
+  try{
+   const result=await api('/dr/vms/'+id+'/replications/'+vm.last_replication_run.id+'/reconcile','POST',{approved:true});
+   state.drProtectedVMs=(await api('/dr/vms')).items;
+   render();
+   toast('Réconciliation confirmée. Prochaine synchronisation complète requise.');
+  }catch(ex){toast(ex.message,false)}
+  return;
  }
  if(a==='dr-vm-qmp-preflight'){
   try{
