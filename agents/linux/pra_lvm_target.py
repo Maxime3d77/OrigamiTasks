@@ -25,7 +25,7 @@ from pathlib import Path
 STORAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$")
 SLOT = re.compile(r"^(?:scsi|virtio|sata|ide)[0-9]{1,2}$")
 VMID = re.compile(r"^[1-9][0-9]{2,8}$")
-VOLUME = re.compile(r"^vm-([1-9][0-9]{2,8})-disk-([0-9]{1,18})\\.qcow2$")
+VOLUME = re.compile(r"^vm-([1-9][0-9]{2,8})-disk-([0-9]{1,18})\.qcow2$")
 
 
 class LvmTargetError(ValueError):
