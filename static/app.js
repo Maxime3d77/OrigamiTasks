@@ -596,12 +596,14 @@ function protectedVMsPage(){
    +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
    +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
-   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point : jamais vérifié</div></td>'
+   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point validé : '+(vm.last_successful_sync?dt(vm.last_successful_sync):'aucun')+'</div>'
+   +'<div class="muted tinytext">'+e(vm.last_replication_run?.details||'')+'</div></td>'
    +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
+   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>':'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
@@ -610,18 +612,17 @@ function protectedVMsPage(){
    +'<button class="btn tiny danger" data-action="dr-vm-delete" data-id="'+vm.id+'">Retirer</button>'
    +'</td></tr>';
  }).join('');
- return title('VM protégées PRA','Choix manuel par VM, destination, stockage et tests de reprise sans action sur les hyperviseurs.',
+ return title('VM protégées PRA','Réplication QEMU à chaud sur stockage DIR inscriptible ; bascule PRA toujours désactivée.',
    '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
    +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
-  +'<div class="notice dr-safety-notice"><b>Protection encore préparatoire :</b> une entrée REP_ est un nom réservé dans OrigamiTasks, '
-  +'pas une VM réellement créée. Le mode PBS peut déclencher une sauvegarde réelle approuvée, si configuré ; '
-  +'cela ne restaure pas de VM sur le cluster cible et ne constitue ni une réplication temps réel ni une bascule. '
-  +'Les tests de reprise restent des simulations en lecture seule.</div>'
+  +'<div class="notice dr-safety-notice"><b>QMP expérimental :</b> une synchronisation approuvée peut créer une VM REP_ arrêtée sur stockage DIR inscriptible ; source toujours allumée. '
+  +'Stockage LVM brut et réplique Pure en lecture seule refusés. Première copie complète, puis deltas. '
+  +'Les tests de bascule et de retour restent des simulations : aucune promotion automatique.</div>'
   +'<div class="stats-grid dr-vm-stat-grid">'
-  +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Protections déclaratives</div></div>'
-  +'<div class="stat-card"><span class="label">Préparations actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Aucune copie lancée</div></div>'
+  +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Politiques PRA</div></div>'
+  +'<div class="stat-card"><span class="label">Politiques actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Tâches programmées après amorçage</div></div>'
   +'<div class="stat-card"><span class="label">En pause</span><div class="value">'+current.filter(x=>x.state==='paused').length+'</div><div class="sub">Enregistrements conservés</div></div>'
-  +'<div class="stat-card"><span class="label">Répliques vérifiées</span><div class="value">0</div><div class="sub">Moteur non disponible</div></div></div>'
+  +'<div class="stat-card"><span class="label">Dernières synchros réussies</span><div class="value">'+current.filter(x=>x.replication_status==='completed').length+'</div><div class="sub">Sans validation de bascule PRA</div></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Inventaire des VM sélectionnées</h2>'
   +'<div class="tool-row"><label class="field">Groupe PRA'
   +'<select id="drVMPlanFilter">'+option([['all','Tous les groupes'],...plans.map(p=>[p.id,p.name])],selected)+'</select>'
@@ -675,12 +676,13 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  const pools=r.target_storages.filter(x=>x.images);
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
  const engines=[['planning_only','Préparation / simulation uniquement'],
-   ['offline_copy','Copie à froid (transport à développer)'],
-   ['pbs_backup_restore','PBS : sauvegarde réelle manuelle (restauration à intégrer)'],
-   ['storage_array_replication','Réplication de baie/LUN (à valider)']];
+   ['qmp_live_incremental','QEMU à chaud : complet puis incrémental (pilote DIR)'],
+   ['offline_copy','Copie à froid (non disponible)'],
+   ['pbs_backup_restore','PBS : sauvegarde réelle manuelle (restauration à intégrer)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
-  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Aucune copie ni VM REP_ ne sera créée lors de l’enregistrement. '
-  +'Le stockage cible doit accepter des images VM ; un VG iSCSI/LVM peut contenir plusieurs disques sur une même LUN.</div>'
+  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Enregistrer seul ne copie rien. '
+  +'Le moteur QMP exige une cible Proxmox DIR inscriptible, pas un volume Pure RO ni un VG LVM partagé. '
+  +'La première synchronisation est manuelle et crée REP_ arrêtée après contrôle du checkpoint.</div>'
   +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)
   +' · '+e(r.source_vm_total??r.vms.length)+' VM QEMU visibles'
   +' · '+e(r.source_lxc_excluded??0)+' conteneur(s) LXC exclus. Si des VM manquent, contrôler les ACL du token Proxmox sur le cluster.</p>'
@@ -693,14 +695,14 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
   +selectField('Stockage cible','target_storage',
     pools.map(x=>[x.storage,x.storage+' · '+x.type+(x.shared?' (partagé)':'')]),
     current?.target_storage||pools[0].storage)
-  +selectField('Moteur envisagé (NON exécuté)','engine',engines,current?.engine||'planning_only')
-  +selectField('Fréquence souhaitée (indicative)','interval_minutes',
+  +selectField('Moteur de réplication','engine',engines,current?.engine||'planning_only')
+  +selectField('Fréquence automatique après amorçage','interval_minutes',
     [[15,'15 minutes'],[30,'30 minutes'],[60,'1 heure'],[240,'4 heures'],
      [720,'12 heures'],[1440,'24 heures']],
     current?.interval_minutes||60)+'</div>'
   +'<p class="hint">Noms cibles prévus : REP_&lt;nom de VM&gt;. Le VMID cible doit être libre. '
   +'Aucune création ou réservation n’est envoyée au cluster de secours.</p>'
-  +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer la protection préparatoire</button>'
+  +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer la protection</button>'
   +'<button type="button" class="btn" data-action="modal-close">Annuler</button></div></form>';
  modal('VM protégée · '+e(r.source_name)+' → '+e(r.target_name),body,'',true);
 }
@@ -720,11 +722,15 @@ function showProtectedVMTest(report){
 async function openProtectedVMHistory(vmId){
  const item=(state.drProtectedVMs||[]).find(x=>x.id===vmId);
  const rows=(await api('/dr/vms/'+vmId+'/tests')).items;
+ const syncs=(item?.engine==='qmp_live_incremental'?(await api('/dr/vms/'+vmId+'/replications')).items:[]);
+ const syncHtml=syncs.map(t=>'<div class="dr-vm-test-history"><div class="tool-row">'
+   +labelStatus(t.status)+' <b>Copie '+e(t.mode||'à préparer')+'</b><small class="hint">'+dt(t.created_at)
+   +' · '+e(t.actor)+'</small></div><p>'+e(t.details||'')+'</p></div>').join('');
  const html=rows.map(t=>'<div class="dr-vm-test-history"><div class="tool-row">'
    +labelStatus(t.outcome)+' <b>'+e(t.scenario)+'</b><small class="hint">'+dt(t.created_at)
    +' · '+e(t.actor)+'</small></div><p>'+e(t.report.conclusion)+'</p>'
    +'<small class="hint">Lecture seule : '+e(t.report.mode)+'</small></div>').join('');
- modal('Historique des tests · '+e(item?.source_name||vmId),html||
+ modal('Historique des réplications et tests · '+e(item?.source_name||vmId),syncHtml+html||
    '<div class="notice">Aucun test réalisé. Tu peux lancer le prévol de réplication ou une bascule simulée.</div>',
    '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
 }
@@ -1943,10 +1949,33 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   state.drProtectedVMs=(await api('/dr/vms')).items;
   showProtectedVMTest(result);return;
  }
+ if(a==='dr-vm-qmp-preflight'){
+  try{
+   const x=await api('/dr/vms/'+id+'/replication-preflight');
+   modal('Prévol QMP — VM #'+id,'<div class="notice"><b>Prévol API valide.</b> Source : '+e(x.source_node)+
+    ' → cible : '+e(x.target_node)+' · stockage DIR : '+e(x.storage)+
+    ' · disques : '+e(x.disks.join(', '))+
+    '. Les vérifications root/QMP et la création de la réplique n’auront lieu qu’au lancement effectif.</div>',
+    '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
+  }catch(ex){toast(ex.message,false)}
+  return;
+ }
+ if(a==='dr-vm-qmp-sync'){
+  const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
+  if(!vm || vm.engine!=='qmp_live_incremental')return;
+  if(!confirm('Lancer une vraie réplication QEMU à chaud de '+vm.source_name+' vers '+vm.target_node+' ? La VM source reste allumée ; une VM REP_ arrêtée peut être créée sur stockage DIR INSCRIPTIBLE. Cela entraîne des écritures et consomme du réseau et du stockage. Aucun failover ne sera démarré.'))return;
+  try{
+   const result=await api('/dr/vms/'+id+'/replicate','POST',{approved:true});
+   state.drProtectedVMs=(await api('/dr/vms')).items;
+   render();
+   toast('Réplication #'+result.run_id+' demandée. Actualise pour suivre le transfert.');
+  }catch(ex){toast(ex.message,false)}
+  return;
+ }
  if(a==='dr-vm-history'){await openProtectedVMHistory(id);return}
  if(a==='dr-vm-refresh'){
   state.drProtectedVMs=(await api('/dr/vms')).items;
-  render();toast('États et derniers tests rechargés depuis la base');return;
+  render();toast('États, checkpoints et derniers tests actualisés');return;
  }
  if(a==='dr-vm-pause'){
   const vm=(state.drProtectedVMs||[]).find(x=>x.id===id);
@@ -2050,7 +2079,7 @@ async function handleSubmit(ev){
    state.drVMPlanFilter=String(body.plan_id);
    showPage('protected-vms');
    toast('VM #'+body.source_vmid+' enregistrée : cible '+result.replica_name+
-         ' (plan seulement, aucun disque copié)');
+         ' (aucune copie lancée à l’enregistrement)');
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return;
  }
