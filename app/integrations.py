@@ -256,10 +256,13 @@ def assess_vm_dr(dc, cred, vmid, timeout=20):
         # Disk entries may reference a storage pool or special values like cdrom/none.
         pool = volume.split(':', 1)[0] if ':' in volume else ''
         meta = types.get(pool, {'type': 'unknown', 'shared': False})
-        drives.append({'slot': key, 'storage': pool or None,
-                       'storage_type': meta['type'], 'shared': meta['shared'],
-                       'size_bytes': _disk_size_bytes(value),
-                       'snapshot_capability': 'not_verified'})
+        detail = {'slot': key, 'storage': pool or None,
+                  'storage_type': meta['type'], 'shared': meta['shared'],
+                  'snapshot_capability': 'not_verified'}
+        declared_size = _disk_size_bytes(value)
+        if declared_size is not None:
+            detail['size_bytes'] = declared_size
+        drives.append(detail)
     unique_types = sorted({d['storage_type'] for d in drives})
     risks = ['No source fencing check, destination disk mapping, write-order guarantee or DR validation has been performed.',
              'Never boot a standby clone while the source may still be writing.']
