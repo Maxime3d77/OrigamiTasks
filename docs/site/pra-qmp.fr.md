@@ -171,3 +171,24 @@ synchronisation ni bascule. Aucun ajout de paramètre `.env` n'est requis.
 Le moteur de destination LVM n'est toujours pas raccordé au transfert QMP
 et le stockage `lvm` ne doit pas être présenté comme un récepteur opérationnel.
 
+## Capacité et propriété du stockage LVM (v0.3.27-rc1)
+
+Le diagnostic **Compatibilité stockage** expose désormais la taille virtuelle
+de chaque disque lorsque Proxmox la fournit sous la forme `size=` dans sa
+configuration. Pour une cible LVM classique avec chaînes QCOW2, il estime
+l'espace nécessaire à une génération : **somme des tailles virtuelles
++ réserve d'au moins 5 % (minimum 512 Mio)**. Une chaîne QCOW2 sur LVM utilise
+des volumes logiques **épais**, y compris lorsqu'un incrément ne contient que
+quelques blocs modifiés. L'absence d'une taille de disque est représentée
+comme **inconnue**, jamais comme zéro.
+
+L'adaptateur de préparation LVM vérifie directement le statut et l'espace
+libre du stockage sur le nœud Proxmox cible, ainsi que les VMID du **cluster
+entier**. Il refuse un VMID utilisé par un autre nœud/CT, une destination
+active, dotée du démarrage automatique ou appartenant à une autre protection.
+Le cas d'une première copie dont la VM cible n'existe pas est pris en compte.
+
+**Limite :** ces vérifications n'activent ni le transfert QMP vers LVM ni
+la bascule. Elles n'ont été évaluées qu'avec des tests automatisés simulés,
+et doivent être confirmées en recette sur les versions Proxmox voulues.
+
