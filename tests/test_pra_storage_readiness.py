@@ -65,3 +65,32 @@ def test_readiness_cannot_mutate_pve(monkeypatch):
     report=protected.storage_readiness(17)
     assert report["note"].startswith("Découverte")
     assert seen
+
+
+def test_lvm_capacity_report_flags_insufficient_space_without_allocating(monkeypatch):
+    setup(monkeypatch,{"storage":"target-storage","type":"lvm","content":"images",
+                       "snapshot-as-volume-chain":1})
+    from app import integrations
+    monkeypatch.setattr(integrations, "assess_vm_dr",
+        lambda *_args,**_kwargs: {"disks":[
+            {"slot":"scsi0","storage":"source","storage_type":"lvm","size_bytes":20*1024**3},
+            {"slot":"scsi1","storage":"source","storage_type":"lvm","size_bytes":10*1024**3},
+        ]})
+    monkeypatch.setattr(protected, "_node_storage",
+        lambda *_args,**_kwargs: {"active":True,"available_bytes":25*1024**3})
+    report=protected.storage_readiness(17)
+    assert report["source_total_virtual_bytes"]==30*1024**3
+    assert report["estimated_lvm_generation_bytes"]>30*1024**3
+    assert report["available_bytes"]==25*1024**3
+    assert any("insuffisant" in x for x in report["checks"])
+    assert report["target_replication_authorized"] is False
+
+
+def test_unknown_source_disk_size_never_claims_sufficient_lvm_capacity(monkeypatch):
+    setup(monkeypatch,{"storage":"target-storage","type":"lvm","content":"images",
+                       "snapshot-as-volume-chain":1})
+    report=protected.storage_readiness(17)
+    assert report["source_total_virtual_bytes"] is None
+    assert report["estimated_lvm_generation_bytes"] is None
+    assert any("non estimable" in x for x in report["checks"])
+    assert report["target_replication_authorized"] is False
