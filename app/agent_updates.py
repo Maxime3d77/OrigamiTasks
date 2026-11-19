@@ -116,8 +116,8 @@ def _remote(job):
                 "trap "+shlex.quote(rollback)+" EXIT; "
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_agent.py")+" /opt/origamitasks-agent/agent.py; "
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_pra_worker.py")+" /opt/origamitasks-agent/pra_worker.py; "
-                "install -d -m 700 -o root -g root /opt/origamitasks-agent/privileged; "
-                +''.join("install -m 500 -o root -g root "+shlex.quote(stage+"_"+h)+" /opt/origamitasks-agent/privileged/"+h+"; "
+                "install -d -m 700 -o root -g root /usr/local/lib/origamitasks-pra; "
+                +''.join("install -m 500 -o root -g root "+shlex.quote(stage+"_"+h)+" /usr/local/lib/origamitasks-pra/"+h+"; "
                          for h in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py"))+
                 "systemctl restart origamitasks-agent.service; "
                 "if systemctl is-enabled --quiet origamitasks-agent-pra.service 2>/dev/null; then systemctl restart origamitasks-agent-pra.service; fi; "
