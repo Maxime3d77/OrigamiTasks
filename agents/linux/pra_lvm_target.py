@@ -14,6 +14,7 @@ approved entrypoint, never called by the OrigamiTasks server/agent API.
 The local journal is for auditing and crash recovery of *staged allocations*.
 It is deliberately NOT considered a publishable/bootable PRA checkpoint.
 """
+import fcntl
 import json
 import os
 import re
@@ -145,13 +146,23 @@ class PveLvmTarget:
         if self.journal.is_symlink():
             raise LvmTargetError("Unsafe staging journal")
 
-    def stage_allocations(self, plan, *, approved=False):
-        """Operator-only staging, never invoked from the production agent API.
+    def _target_stopped(self):
+        """Staging never allocates for a live or auto-start standby VM."""
+        state = self.run("qm", "status", str(self.vmid)).strip()
+        if state != "status: stopped":
+            raise LvmTargetError("Destination VM must be explicitly stopped before staging")
+        config = self.run("qm", "config", str(self.vmid), "--current")
+        for line in config.splitlines():
+            if line.startswith("onboot: ") and line.split(": ", 1)[1] not in ("0", "false"):
+                raise LvmTargetError("Destination VM must have onboot disabled")
 
-        Record intent *before* PVE alloc; record every successful LV immediately.
-        After an ambiguous command failure, stop and require operator reconcile.
-        Never free disks automatically: a remote successful allocation could be
-        missed due to a network/process failure. No dangerous blind rollback.
+    def stage_allocations(self, plan, *, approved=False):
+        """Operator-only staging, deliberately absent from production agent API.
+
+        Record intent *before* PVE alloc and persist each successful LV. After
+        an ambiguous allocation failure stop and require manual reconciliation.
+        Concurrent staging on the same VM is serialized by an advisory lock.
+        Never free an LV or start/stop a VM automatically.
         """
         if approved is not True:
             raise LvmTargetError("Explicit staging approval required")
@@ -160,37 +171,43 @@ class PveLvmTarget:
         validated = self.plan(plan.get("disks"), plan.get("mode"))
         if plan != validated:
             raise LvmTargetError("Plan changed since preflight")
+        self._target_stopped()
         self._journal_path()
-        journal_file = self.journal / "pending.json"
-        if journal_file.exists() or journal_file.is_symlink():
-            raise LvmTargetError("Unresolved staging operation; reconcile manually")
-        token = uuid.uuid4().hex
-        slots = list(validated["disks"])
-        # UUID-derived integers are distinct within this attempt, but must
-        # still be treated as tentative: the PVE allocator rejects collisions.
-        sequence = int(token[:12], 16)
-        record = {"token": token, "storage": self.storage, "vmid": self.vmid,
-                  "status": "pending", "mode": validated["mode"],
-                  "allocated": {}, "planned": slots,
-                  "checkpoint_committed": False, "vm_started": False}
-        _atomic(journal_file, record)
+        lock_path = self.journal / ".lock"
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         try:
-            for index, slot in enumerate(slots):
-                size = validated["disks"][slot]
-                name = "vm-" + str(self.vmid) + "-disk-" + str(sequence + index) + ".qcow2"
-                volid = self.storage + ":" + name
-                # Must allocate through PVE rather than lvcreate in a shared VG.
-                self.run("pvesm", "alloc", self.storage, str(self.vmid),
-                         name, str(size), "--format", "qcow2")
-                record["allocated"][slot] = {"volid": volid, "size": size}
-                _atomic(journal_file, record)
-        except BaseException:
-            record["status"] = "uncertain"
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            journal_file = self.journal / "pending.json"
+            if journal_file.exists() or journal_file.is_symlink():
+                raise LvmTargetError("Unresolved staging operation; reconcile manually")
+            token = uuid.uuid4().hex
+            slots = list(validated["disks"])
+            # The allocator must still reject any name collision.
+            sequence = int(token[:12], 16)
+            record = {"token": token, "storage": self.storage, "vmid": self.vmid,
+                      "status": "pending", "mode": validated["mode"],
+                      "allocated": {}, "planned": slots,
+                      "checkpoint_committed": False, "vm_started": False}
             _atomic(journal_file, record)
-            raise
-        record["status"] = "staged_only"
-        _atomic(journal_file, record)
-        return dict(record)
+            try:
+                for index, slot in enumerate(slots):
+                    size = validated["disks"][slot]
+                    name = "vm-" + str(self.vmid) + "-disk-" + str(sequence + index) + ".qcow2"
+                    volid = self.storage + ":" + name
+                    self.run("pvesm", "alloc", self.storage, str(self.vmid),
+                             name, str(size), "--format", "qcow2")
+                    record["allocated"][slot] = {"volid": volid, "size": size}
+                    _atomic(journal_file, record)
+            except BaseException:
+                record["status"] = "uncertain"
+                _atomic(journal_file, record)
+                raise
+            record["status"] = "staged_only"
+            _atomic(journal_file, record)
+            return dict(record)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     def resolve_existing(self, volid, *, verified_block=True):
         """Translate a PVE volume ID; never compose /dev/<vg>/<lv> ourselves."""
