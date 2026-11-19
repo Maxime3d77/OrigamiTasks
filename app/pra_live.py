@@ -21,7 +21,7 @@ from . import db, dr_protected_vms, integrations
 STOP = threading.Event()
 _WORKERS = set()
 _LOCK = threading.Lock()
-_HELPER = "/opt/origamitasks-agent/privileged/pra_host_worker.py"
+_HELPER = "/usr/local/lib/origamitasks-pra/pra_host_worker.py"
 _SLOTS = re.compile(r"^(scsi|virtio|sata|ide)[0-9]{1,2}$")
 
 
