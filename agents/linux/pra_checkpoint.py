@@ -203,57 +203,6 @@ class CheckpointStore:
             "Automatic checkpoint garbage collection disabled: "
             "external PVE snapshot references cannot yet be proven absent")
 
-    def _legacy_garbage_collect_unreachable(self, protected_files=()):
-        """Historical algorithm retained for audit only: NEVER invoke."""
-        with self._exclusive():
-            if self.pending.exists():
-                raise CheckpointError("Cannot GC while staging")
-            current = self._read(self.manifest)
-            owned = self._read(self.owned)
-            if not current or not owned:
-                return {"removed": 0}
-            files = owned.get("files")
-            if not isinstance(files, list):
-                raise CheckpointError("Malformed owned ledger")
-            needed = set()
-            for disk in current["disks"].values():
-                image = self.root / disk["file"]
-                output = _command("qemu-img", "info", "-f", "qcow2",
-                                  "--backing-chain", "--output=json", str(image))
-                try:
-                    chain = json.loads(output)
-                except ValueError as exc:
-                    raise CheckpointError("Backing chain inspection failed") from exc
-                if not isinstance(chain, list) or not chain:
-                    raise CheckpointError("No backing chain data")
-                for item in chain:
-                    filename = item.get("filename")
-                    if not isinstance(filename, str):
-                        raise CheckpointError("Missing backing filename")
-                    dep = Path(filename)
-                    if dep.is_symlink() or dep.resolve().parent != self.root:
-                        raise CheckpointError("Backing image outside checkpoint root")
-                    needed.add(dep.name)
-            removed = 0
-            retained = []
-            for filename in files:
-                if (not isinstance(filename, str) or
-                        Path(filename).name != filename or
-                        self.target_vmid is None or
-                        not filename.startswith("vm-" + str(self.target_vmid) + "-disk-") or
-                        not filename.endswith(".qcow2")):
-                    raise CheckpointError("Unsafe owned-file ledger")
-                if filename in needed or filename in protected_files:
-                    retained.append(filename)
-                    continue
-                path = self.root / filename
-                if path.is_symlink():
-                    raise CheckpointError("Refusing symlink deletion")
-                path.unlink(missing_ok=True)
-                removed += 1
-            _atomic_json(self.owned, {"files": retained})
-            return {"removed": removed}
-
     def abort(self, token):
         """Keep the last published point intact after a failed or uncertain run."""
         with self._exclusive():
