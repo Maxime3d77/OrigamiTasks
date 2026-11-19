@@ -73,6 +73,7 @@ class CheckpointStore:
             raise CheckpointError("Target checkpoint directory is not writable")
         self.manifest = self.root / "current.json"
         self.pending = self.root / "pending.json"
+        self.owned = self.root / "owned.json"
         self.lock = self.root / ".lock"
 
     @contextmanager
@@ -157,6 +158,7 @@ class CheckpointStore:
                     "target_vmid": self.target_vmid,
                     "source_vm_uuid": source_vm_uuid,
                     "previous_token": previous.get("token") if previous else None,
+                    "depth": (int(previous.get("depth",1))+1 if mode=="incremental" else 1),
                     "disks": disks, "created_at": int(time.time())
                 }
                 _atomic_json(self.pending, document)
@@ -180,8 +182,66 @@ class CheckpointStore:
             committed = dict(pending, status="committed", committed_at=int(time.time()))
             # Atomic manifest update is the only checkpoint publication.
             _atomic_json(self.manifest, committed)
+            tracked = self._read(self.owned) or {"files": []}
+            existing = tracked.get("files", [])
+            if not isinstance(existing, list):
+                raise CheckpointError("Corrupt ownership ledger")
+            current_files = [item["file"] for item in pending["disks"].values()]
+            _atomic_json(self.owned, {"files": sorted(set(existing + current_files))})
             self.pending.unlink()
             return committed
+
+
+    def garbage_collect(self):
+        """Delete ONLY OrigamiTasks-owned QCOW2 no longer in the committed chain."""
+        with self._exclusive():
+            if self.pending.exists():
+                raise CheckpointError("Cannot GC while staging")
+            current = self._read(self.manifest)
+            owned = self._read(self.owned)
+            if not current or not owned:
+                return {"removed": 0}
+            files = owned.get("files")
+            if not isinstance(files, list):
+                raise CheckpointError("Malformed owned ledger")
+            needed = set()
+            for disk in current["disks"].values():
+                image = self.root / disk["file"]
+                output = _command("qemu-img", "info", "-f", "qcow2",
+                                  "--backing-chain", "--output=json", str(image))
+                try:
+                    chain = json.loads(output)
+                except ValueError as exc:
+                    raise CheckpointError("Backing chain inspection failed") from exc
+                if not isinstance(chain, list) or not chain:
+                    raise CheckpointError("No backing chain data")
+                for item in chain:
+                    filename = item.get("filename")
+                    if not isinstance(filename, str):
+                        raise CheckpointError("Missing backing filename")
+                    dep = Path(filename)
+                    if dep.is_symlink() or dep.resolve().parent != self.root:
+                        raise CheckpointError("Backing image outside checkpoint root")
+                    needed.add(dep.name)
+            removed = 0
+            retained = []
+            for filename in files:
+                if (not isinstance(filename, str) or
+                        Path(filename).name != filename or
+                        self.target_vmid is None or
+                        not filename.startswith("vm-" + str(self.target_vmid) + "-disk-") or
+                        not filename.endswith(".qcow2")):
+                    raise CheckpointError("Unsafe owned-file ledger")
+                if filename in needed:
+                    retained.append(filename)
+                    continue
+                path = self.root / filename
+                if path.is_symlink():
+                    raise CheckpointError("Refusing symlink deletion")
+                path.unlink(missing_ok=True)
+                removed += 1
+            _atomic_json(self.owned, {"files": retained})
+            return {"removed": removed}
 
     def abort(self, token):
         """Keep the last published point intact after a failed or uncertain run."""
