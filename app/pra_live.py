@@ -252,6 +252,7 @@ def _perform(run_id):
         try:
             backup = _run_helper(src_ssh, "source_copy", {
                 "vmid": vm["source_vmid"], "slots": info["slots"],
+                "source_vm_uuid": source["source_vm_uuid"],
                 "mode": mode, "ports": mapped, "timeout": 21600
             }, timeout=21660)
         finally:
