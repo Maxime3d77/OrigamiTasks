@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.24-rc1 — 19 novembre 2026 (pilote QMP, non validé en production)
+
+- **Moteur PRA QMP incrémental à chaud** : copie initiale complète, dirty bitmaps, transferts suivants des blocs modifiés et gestion multi-disques par transactions QMP.
+- **Agents Proxmox** : auxiliaires PRA installés et mis à jour avec l'agent Linux sous `/usr/local/lib/origamitasks-pra` root-only ; transport NBD relayé par SSH avec clés conservées dans le coffre central.
+- **Cible** : checkpoints QCOW2 versionnés sur stockage Proxmox DIR indépendant et inscriptible, publication sur une VM `REP_` strictement éteinte, exclusion des LUN Pure en lecture seule et du LVM brut comme cible du pilote.
+- **Pilotage** : prévol, validation du lancement, suivi et historique par VM, synchronisations automatiques après premier amorçage, réconciliation explicite des états incertains, horodatage du dernier point QMP pour observer le RPO.
+- **Sécurité** : source jamais arrêtée par OrigamiTasks, aucune bascule automatique, aucun témoin/fencing encore implémenté ; restaurabilité et compatibilité des hyperviseurs à valider sur VM de recette.
+- Guide détaillé : [Réplication QMP](pra-qmp.fr.md).
+
 ## 0.3.23-rc1 — 18 novembre 2026
 
 - **Mise à jour d'agents à l'unité** : bouton « Mettre à jour » pour un agent dont la version connue est plus ancienne que celle intégrée à la console.
