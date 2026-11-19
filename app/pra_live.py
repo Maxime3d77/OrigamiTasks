@@ -124,7 +124,7 @@ def _connect(binding):
 def _run_helper(ssh, action, data, timeout=60):
     if action not in {"source_probe", "source_copy", "source_dismiss",
                       "target_probe", "target_begin",
-                      "target_finish", "target_abort", "target_publish"}:
+                      "target_finish", "target_abort", "target_publish", "target_verify"}:
         raise LiveReplicationError("Action PRA non autorisée")
     encoded = base64.b64encode(json.dumps(data, separators=(",", ":")).encode()).decode()
     invoke = "/usr/bin/python3 " + shlex.quote(_HELPER) + " " + action + " " + shlex.quote(encoded)
@@ -284,22 +284,35 @@ def _perform(run_id):
         }, timeout=180)
         if not published.get("standby_configured") or published.get("vm_started"):
             raise LiveReplicationError("La configuration de secours n'a pas été confirmée")
-        successful = True
+        phase = "verify"
+        _state(run_id, "running", "Contrôle des disques et de la configuration de secours arrêtée")
+        proof = _run_helper(dst_ssh, "target_verify", {
+            "vmid": vm["target_vmid"], "storage": vm["target_storage"],
+            "token": token, "protected_vm_id": vm_id,
+        }, timeout=300)
+        if (proof.get("checkpoint_token") != token or
+                proof.get("verified_offline") is not True or
+                proof.get("disk_format_checked") is not True or
+                proof.get("standby_configured") is not True or
+                proof.get("vm_started") is not False or
+                proof.get("failover_authorized") is not False or
+                set(proof.get("disks", [])) != set(info["slots"])):
+            raise LiveReplicationError("Le contrôle de la copie de secours n'a pas été confirmé")
         point = backup.get("snapshot_epoch")
         if type(point) not in (int,float) or point <= 0:
             raise LiveReplicationError("Horodatage du point QMP absent")
         point_at = datetime.fromtimestamp(point,timezone.utc).isoformat(timespec="seconds")
-        _state(run_id, "completed", mode + ": checkpoint appliqué à la VM arrêtée",
+        _state(run_id, "completed", mode + ": image QCOW2 vérifiée hors ligne, VM arrêtée (non testée au démarrage)",
                point_at=point_at)
         db.audit("system", "pra.live.replication.completed", vm_id, "run=" + str(run_id))
     except BaseException as exc:
         # A source bitmap may have advanced even when the acknowledgement was
         # lost. No blind retry; require full copy on the next attempt.
-        uncertain = phase in ("commit", "publish") or (
+        uncertain = phase in ("commit", "publish", "verify") or (
             isinstance(exc, LiveReplicationError) and "réconciliation requise" in str(exc))
         _state(run_id, "uncertain" if uncertain else "failed",
                "Transfert ou publication non confirmé (" + phase + ") : " + type(exc).__name__)
-        if token and phase not in ("commit", "publish") and dst_ssh:
+        if token and phase not in ("commit", "publish", "verify") and dst_ssh:
             try:
                 _run_helper(dst_ssh, "target_abort",
                     {"vmid": vm["target_vmid"], "storage": vm["target_storage"],
