@@ -159,7 +159,16 @@ def save(data, actor, existing_id=None):
         raise ProtectedVMError("La VM source n'existe plus dans le cluster")
     vm=matches[0]
     if target_vmid in discovered["target_vmids_in_use"]:
-        raise ProtectedVMError("VMID cible déjà utilisé : choisir un ID libre")
+        # After successful seeding, the very same protected VMID legitimately
+        # exists as a powered-off REP_ on the standby cluster.
+        if existing_id is None:
+            raise ProtectedVMError("VMID cible déjà utilisé : choisir un ID libre")
+        original=_one(existing_id)
+        if (original["target_dc_id"]!=dst or
+                original["target_vmid"]!=target_vmid or
+                original["replica_name"]!="REP_"+re.sub(r"[^a-zA-Z0-9_-]","-",str(
+                    next(x for x in discovered["vms"] if x["vmid"]==vmid)["name"]))[:45]):
+            raise ProtectedVMError("Le VMID cible est utilisé par une autre protection")
     if not any(x["name"]==node and x["status"]=="online"
                for x in discovered["target_nodes"]):
         raise ProtectedVMError("Nœud cible non découvert ou hors ligne")
