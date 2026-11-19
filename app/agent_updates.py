@@ -134,7 +134,7 @@ def _remote(job):
                 return re.sub(r"^/([A-Za-z]:/)",r"\1",path).replace("/","\\").replace("'","''")
             staged=winpath(stage+"_agent.ps1")
             ps=(
-                "$ErrorActionPreference='Stop';$dest=Join-Path $env:ProgramData 'OrigamiTasks\Agent';"
+                "$ErrorActionPreference='Stop';$dest=Join-Path $env:ProgramData 'OrigamiTasks\\Agent';"
                 "$cfg=Get-Content -LiteralPath (Join-Path $dest 'config.json') -Raw | ConvertFrom-Json;"
                 "if([int]$cfg.agent_id -ne "+str(job["agent_id"])+"){throw 'Wrong agent ID'};"
                 "$target=Join-Path $dest 'agent.ps1';"
