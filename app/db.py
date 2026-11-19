@@ -241,6 +241,32 @@ CREATE TABLE IF NOT EXISTS pra_direct_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_pra_direct_jobs_vm ON pra_direct_jobs(protected_vm_id,id);
 CREATE INDEX IF NOT EXISTS idx_pra_direct_jobs_queue ON pra_direct_jobs(status,id);
+CREATE TABLE IF NOT EXISTS pra_hot_jobs (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE RESTRICT,
+ status TEXT NOT NULL CHECK(status IN ('queued','running','success','uncertain')),
+ source_credential_id INTEGER NOT NULL REFERENCES credentials(id),
+ target_credential_id INTEGER NOT NULL REFERENCES credentials(id),
+ scratch_path TEXT NOT NULL,
+ base_vmid INTEGER NOT NULL,
+ candidate_vmid INTEGER,
+ disk_count INTEGER NOT NULL DEFAULT 0,
+ scanned_bytes INTEGER NOT NULL DEFAULT 0,
+ transferred_bytes INTEGER NOT NULL DEFAULT 0,
+ error TEXT NOT NULL DEFAULT '',
+ actor TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ started_at TEXT,
+ finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pra_hot_job_vm ON pra_hot_jobs(protected_vm_id,id);
+CREATE INDEX IF NOT EXISTS idx_pra_hot_job_queue ON pra_hot_jobs(status,id);
+CREATE TABLE IF NOT EXISTS pra_hot_resolutions (
+ job_id INTEGER PRIMARY KEY REFERENCES pra_hot_jobs(id) ON DELETE RESTRICT,
+ actor TEXT NOT NULL,
+ checked_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pra_hot_preflights (
  protected_vm_id INTEGER PRIMARY KEY REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
  checked_at TEXT NOT NULL,

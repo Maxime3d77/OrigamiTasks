@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates, pra_restore, pra_direct_sync, pra_direct_jobs
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, agent_updates, pra_restore, pra_direct_sync, pra_direct_jobs, pra_hot_jobs
 
 
 @asynccontextmanager
@@ -27,12 +27,14 @@ async def lifespan(app):
     agent_deployments.start()
     agent_updates.start()
     pra_direct_jobs.start()
+    pra_hot_jobs.start()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
     agent_deployments.STOP.set()
     agent_updates.STOP.set()
     pra_direct_jobs.STOP.set()
+    pra_hot_jobs.STOP.set()
 
 
 app = FastAPI(title='OrigamiTasks', version=config.APP_VERSION, docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -761,6 +763,43 @@ def vm_hot_preflight(vm_id:int,source_credential_id:int,request:Request):
     try:
         return pra_direct_jobs.hot_preflight(vm_id,source_credential_id)
     except (pra_direct_jobs.PRAJobError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/hot-generations')
+def get_hot_generations(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_hot_jobs.history(vm_id)
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/hot-generations/{job_id}/resolve')
+def resolve_hot_generation(vm_id:int,job_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'}:
+        raise HTTPException(422,'Confirmation requise')
+    try:
+        return pra_hot_jobs.resolve_uncertain(vm_id,job_id,payload['approved'],user['username'])
+    except (pra_hot_jobs.HotPRAError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/hot-generations')
+def queue_hot_generation(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={
+            'source_credential_id','target_credential_id','scratch_path','approved'}:
+        raise HTTPException(422,'Identités SSH, volume temporaire et confirmation requis')
+    try:
+        return pra_hot_jobs.queue(
+            vm_id,payload['source_credential_id'],
+            payload['target_credential_id'],payload['scratch_path'],
+            payload['approved'],user['username']
+        )
+    except (pra_hot_jobs.HotPRAError,pra_direct_jobs.PRAJobError,
+            dr_protected_vms.ProtectedVMError) as exc:
         raise HTTPException(409,str(exc)) from None
 
 

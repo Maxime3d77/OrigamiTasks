@@ -1,0 +1,9 @@
+# Live source direct differential PRA — v0.3.32 staging
+
+A running SD Proxmox QEMU VM is snapshotted using vzdump in snapshot mode, extracted to a private scratch directory on a **dedicated mounted filesystem**, and compared to a freshly full-cloned, stopped AU standby. Only differing blocks cross the network via SSH/rsync. The original AU generation is never modified. Every disk is SHA-256 verified end-to-end before recording the new candidate as successful. SSH credentials come from the vault, and the Linux agent 0.3.32 installs the script automatically. No PBS, manual scp or extra .env flag.
+
+**Prerequisites:** working seed, source QEMU running, base standby stopped without HA, source scratch free space >= 110% of all virtual guest disk sizes and on a filesystem other than /, room for another full VM clone on AU, supported rsync --write-devices on both nodes, supported normal block-backed disks (not EFI/TPM/passthrough), dedicated technical SSH identities and pinned target host keys.
+
+**Not QEMU CBT:** this fallback reads and extracts a full snapshot and clones a full VM locally on AU for every generation; only network traffic is differential. Scratch can contain sensitive plaintext guest disk contents while running. No automatic scheduling, retention, fencing, failover, failback or guaranteed application-level consistency; the VM hardware configuration is not automatically reconciled. Use disposable test VMs and verify actual PVE versions and capabilities before considering production. On failure the candidate may exist in an uncertain, unusable state. Never boot two replicas on the same network.
+
+**Via UI:** update console and Linux agents to 0.3.32, Protected VMs → Direct initial seed (if missing), then Live differential, select the source/target SSH vault identities and dedicated scratch path, confirm; watch Generation history. The source VM remains running and all AU generations remain stopped.

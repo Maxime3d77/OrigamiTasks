@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.32-rc1 — Différentiel à chaud direct, générations AU éteintes
+
+- Nouveau moteur de recette **Différentiel à chaud** depuis la page VM protégées PRA, sans PBS ni arrêt de SD. Snapshot QEMU/VMA de la VM allumée, extraction sur un volume temporaire SD dédié.
+- Clone complet d'une réplique AU arrêtée dans un NOUVEAU VMID ; comparaison des blocs par rsync et transfert SSH des différences. Vérification SHA-256 de tous les disques avant validation ; la génération précédente n'est jamais modifiée.
+- Suivi des générations par VM (état, VMID de base et candidat, octets lus/transférés, erreurs). Reprise automatique interdite si résultat incertain ; aucune suppression automatique de clones.
+- Prérequis : espace temporaire dédié SD et espace AU suffisants pour une génération supplémentaire, disques bloc simples, rsync compatible. Ce n'est PAS du CBT QEMU ; chaque itération relit et extrait les disques complets. Planification, rétention, fencing, bascule/failback toujours non opérationnels.
+
+
 ## v0.3.31-rc1 — Prétest PRA exclusivement à chaud
 
 - La VM principale SD doit rester allumée ; la copie initiale directe refuse désormais une source éteinte et la réplique AU reste arrêtée.
