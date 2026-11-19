@@ -140,3 +140,31 @@ read-only report on the target pool, node, capacity, and source disks.
 It never allocates a volume, copies data, or starts a VM. No new `.env`
 setting is required.
 
+## QMP checkpoint safety release (v0.3.26-rc1)
+
+- After a QMP sync to a writable PVE `dir` store, the destination helper
+  checks that the `REP_` standby is still OFF, the configured disks match
+  the committed checkpoint, every backing image belongs to the VM, every
+  QCOW2 backing path is inside the managed store, and `qemu-img check`
+  succeeds. Only then may the run become `completed`.
+  Any verification failure produces an `uncertain` run requiring operator
+  reconciliation before another copy.
+- **Historical checkpoints are never automatically garbage-collected.**
+  `qm config --current` cannot prove that a disk is not referenced by a
+  PVE snapshot, unused volume or other dependent image. Capacity monitoring
+  is required until a proven reference-aware retention protocol is available.
+- Previous completed replication runs are migrated as `unverified`, with
+  history preserved. They are not trusted for auto-scheduling or incremental
+  base selection. The first new replication needs a FULL reseed and updated
+  host helpers at both sites.
+- Both source and destination helpers must advertise safety protocol v2
+  **before** allocation or transmission. Old helpers are rejected.
+- OVMF, TPM, unused disks and PCI passthrough are blocked until a separately
+  tested recovery profile exists. Source VMs are never stopped.
+- Verification is **offline structural validation only**. It does not prove
+  a bootable OS, application consistency, fencing or an independent witness.
+  No automatic failover or failback is enabled.
+
+The LVM receiver remains staging-only and is NOT wired to the live QMP
+transport in this release.
+
