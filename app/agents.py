@@ -256,6 +256,9 @@ def deploy(body, *, cluster_authorized=False):
             if not is_windows:
                 worker=Path(__file__).resolve().parent.parent / 'agents/linux/pra_worker.py'
                 files[marker+'_pra_worker.py']=worker.read_bytes()
+                # Root-only, bounded PRA helper libraries: shipped as part of the agent.
+                for helper in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py"):
+                    files[marker+"_"+helper]=(worker.parent/helper).read_bytes()
             for name_, data in files.items():
                 with sftp.file(base+'/'+name_, 'wb') as f:
                     f.write(data)
@@ -293,6 +296,11 @@ def deploy(body, *, cluster_authorized=False):
             stage_script = shlex.quote(base+'/'+marker+'_agent.py')
             stage_worker = shlex.quote(base+'/'+marker+'_pra_worker.py')
             stage_config = shlex.quote(base+'/'+marker+'_config.json')
+            stage_privileged = {name:shlex.quote(base+'/'+marker+'_'+name) for name in
+                                ('pra_qmp_incremental.py','pra_checkpoint.py','pra_host_worker.py')}
+            root_install = 'install -d -m 700 -o root -g root /opt/origamitasks-agent/privileged; ' + ''.join(
+                'install -m 500 -o root -g root '+source+' /opt/origamitasks-agent/privileged/'+name+'; '
+                for name,source in stage_privileged.items())
             install_script = (
                 'set -eu; command -v python3 >/dev/null; command -v systemctl >/dev/null; '
                 "id origamitasks-agent >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin origamitasks-agent; "
@@ -300,6 +308,7 @@ def deploy(body, *, cluster_authorized=False):
                 'install -m 500 -o origamitasks-agent -g origamitasks-agent '+stage_script+' /opt/origamitasks-agent/agent.py; '
                 'install -m 500 -o origamitasks-agent -g origamitasks-agent '+stage_worker+' /opt/origamitasks-agent/pra_worker.py; '
                 'install -m 600 -o origamitasks-agent -g origamitasks-agent '+stage_config+' /opt/origamitasks-agent/config.json; '
+                +root_install+
                 'printf "%s\\n" "[Unit]" "Description=OrigamiTasks outbound agent" "After=network-online.target" "Wants=network-online.target" '
                 '"[Service]" "Type=simple" "User=origamitasks-agent" "Group=origamitasks-agent" '
                 '"ExecStart=/usr/bin/env python3 /opt/origamitasks-agent/agent.py" "Restart=always" "RestartSec=10" '
@@ -313,7 +322,7 @@ def deploy(body, *, cluster_authorized=False):
                 '"[Install]" "WantedBy=multi-user.target" > /etc/systemd/system/origamitasks-agent-pra.service; '
                 'systemctl daemon-reload; systemctl enable --now origamitasks-agent.service; '
                 'systemctl enable --now origamitasks-agent-pra.service; '
-                'rm -f '+stage_script+' '+stage_config+' '+stage_worker
+                'rm -f '+stage_script+' '+stage_config+' '+stage_worker+' '+ ' '.join(stage_privileged.values())
             )
             command = 'sh -c '+shlex.quote("if [ \"$(id -u)\" -eq 0 ]; then exec sh -c "+shlex.quote(install_script)+"; else exec sudo -n sh -c "+shlex.quote(install_script)+"; fi")
         _, stdout, stderr = client.exec_command(command, timeout=120)
