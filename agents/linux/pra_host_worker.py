@@ -141,7 +141,7 @@ def source_probe(data):
                                 "recording": b.get("recording")}
                 for b in found.get("dirty-bitmaps", [])
             }
-    return {"source_vm_uuid": _source_generation(ident),
+    return {"pra_protocol": 2, "source_vm_uuid": _source_generation(ident),
             "slots": slots, "sizes": sizes, "nodes": nodes, "bitmaps": bitmaps,
             "active_jobs": active_jobs,
             "config": {k: configured[k] for k in ("name", "memory", "cores", "sockets", "bios", "scsihw", "cpu")
@@ -234,7 +234,9 @@ def target_probe(data):
     exists = _is_target_stopped(ident)
     store = _store(data)
     pending = store._read(store.pending)
-    return {"vm_exists": exists, "checkpoint": store.current(),
+    return {"pra_protocol": 2, "offline_structural_verify": True,
+            "checkpoint_retention": "manual_only",
+            "vm_exists": exists, "checkpoint": store.current(),
             "pending": {"token": pending["token"]} if pending else None,
             "writable": True, "storage_type": "dir"}
 
