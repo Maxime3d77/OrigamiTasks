@@ -224,6 +224,16 @@ def _perform(run_id):
                  {"vmid": vm["source_vmid"], "slots": info["slots"]})
         target = _run_helper(dst_ssh, "target_probe",
                  {"vmid": vm["target_vmid"], "storage": vm["target_storage"]})
+        # An older host helper cannot verify its output and could re-enable
+        # unsafe checkpoint GC. Reject the entire run *before* allocating or
+        # transmitting any data, rather than discovering this after a huge copy.
+        if (type(source.get("pra_protocol")) is not int or source["pra_protocol"] < 2
+                or type(target.get("pra_protocol")) is not int or target["pra_protocol"] < 2
+                or target.get("offline_structural_verify") is not True
+                or target.get("checkpoint_retention") != "manual_only"):
+            raise LiveReplicationError(
+                "Agents PRA obsolètes : mettre à jour les deux assistants Proxmox "
+                "avant une nouvelle réplication")
         if target.get("pending"):
             raise LiveReplicationError("Checkpoint cible non confirmé : réconciliation requise")
         if source.get("active_jobs"):
