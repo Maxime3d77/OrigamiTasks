@@ -192,7 +192,7 @@ class CheckpointStore:
             return committed
 
 
-    def garbage_collect(self):
+    def garbage_collect(self, protected_files=()):
         """Delete ONLY OrigamiTasks-owned QCOW2 no longer in the committed chain."""
         with self._exclusive():
             if self.pending.exists():
@@ -232,7 +232,7 @@ class CheckpointStore:
                         not filename.startswith("vm-" + str(self.target_vmid) + "-disk-") or
                         not filename.endswith(".qcow2")):
                     raise CheckpointError("Unsafe owned-file ledger")
-                if filename in needed:
+                if filename in needed or filename in protected_files:
                     retained.append(filename)
                     continue
                 path = self.root / filename
