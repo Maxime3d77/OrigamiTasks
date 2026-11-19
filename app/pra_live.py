@@ -220,9 +220,11 @@ def _perform(run_id):
                  {"vmid": vm["source_vmid"], "slots": info["slots"]})
         target = _run_helper(dst_ssh, "target_probe",
                  {"vmid": vm["target_vmid"], "storage": vm["target_storage"]})
+        if target.get("pending"):
+            raise LiveReplicationError("Checkpoint cible non confirmé : réconciliation requise")
+        if source.get("active_jobs"):
+            raise LiveReplicationError("Un job QMP de réplication est déjà actif")
         checkpoint = target["checkpoint"]
-        bitmap_names = {"origami_" + str(vm["source_vmid"]) + "_" + slot
-                        for slot in info["slots"]}
         state_good = all(source["bitmaps"][slot].get(
             "origami_" + str(vm["source_vmid"]) + "_" + slot, {}).get("recording") is True
             and source["bitmaps"][slot]["origami_" + str(vm["source_vmid"]) + "_" + slot].get("inconsistent") is not True
@@ -286,7 +288,9 @@ def _perform(run_id):
     except BaseException as exc:
         # A source bitmap may have advanced even when the acknowledgement was
         # lost. No blind retry; require full copy on the next attempt.
-        _state(run_id, "uncertain" if phase in ("commit", "publish") else "failed",
+        uncertain = phase in ("commit", "publish") or (
+            isinstance(exc, LiveReplicationError) and "réconciliation requise" in str(exc))
+        _state(run_id, "uncertain" if uncertain else "failed",
                "Transfert ou publication non confirmé (" + phase + ") : " + type(exc).__name__)
         if token and phase not in ("commit", "publish") and dst_ssh:
             try:
