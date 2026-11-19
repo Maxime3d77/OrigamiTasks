@@ -107,6 +107,7 @@ def source_probe(data):
         entries = {row.get("device"): row for row in block if isinstance(row, dict)}
         sizes = {}
         bitmaps = {}
+        nodes = {}
         for slot in slots:
             node = "drive-" + slot
             row = entries.get(node)
@@ -117,10 +118,12 @@ def source_probe(data):
             if type(size) is not int or size < 1024:
                 raise HostError("Invalid disk virtual size")
             sizes[slot] = size
+            # Device aliases may differ from graph node names in PVE builds.
+            nodes[slot] = inserted.get("node-name") or node
         named = qmp.execute("query-named-block-nodes")
         named_by_name = {r.get("node-name"): r for r in named}
         for slot in slots:
-            node = "drive-" + slot
+            node = nodes[slot]
             found = named_by_name.get(node, {})
             bitmaps[slot] = {
                 b.get("name"): {"busy": b.get("busy"), "inconsistent": b.get("inconsistent"),
@@ -128,7 +131,7 @@ def source_probe(data):
                 for b in found.get("dirty-bitmaps", [])
             }
     return {"source_vm_uuid": _source_generation(ident),
-            "slots": slots, "sizes": sizes, "bitmaps": bitmaps,
+            "slots": slots, "sizes": sizes, "nodes": nodes, "bitmaps": bitmaps,
             "config": {k: configured[k] for k in ("name", "memory", "cores", "sockets", "bios", "scsihw", "cpu")
                        if k in configured}}
 
@@ -361,11 +364,14 @@ def source_copy(data):
     ports = data["ports"]
     if not isinstance(ports, dict) or set(ports) != set(slots):
         raise HostError("Missing destination NBD ports")
+    inspected = source_probe({"vmid": ident, "slots": slots})
+    if inspected["source_vm_uuid"] != data["source_vm_uuid"]:
+        raise HostError("Source QEMU process changed since checkpoint preparation")
     with QMP(_qmp_path(ident), timeout=30) as qmp:
         disks = []
         for slot in slots:
             port = ports[slot]
-            disks.append(Disk(source="drive-" + slot,
+            disks.append(Disk(source=inspected["nodes"][slot],
                               bitmap="origami_" + str(ident) + "_" + slot,
                               host="127.0.0.1", port=port))
         return backup(qmp, disks, mode=data["mode"], timeout=data.get("timeout", 3600))
