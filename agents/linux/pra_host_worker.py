@@ -170,7 +170,10 @@ def _is_target_stopped(ident):
     try:
         output = cmd("qm", "status", str(ident))
     except HostError:
-        # No VM yet: eligible for safe creation after first checkpoint.
+        # Distinguish absent VMID from an API/PVE malfunction before creation.
+        rows = cmd("qm", "list")
+        if re.search(r"(?m)^\\s*" + str(ident) + r"\\s+", rows):
+            raise HostError("VM target exists but cannot be queried")
         return False
     if "status: stopped" not in output:
         raise HostError("The standby VM must remain OFF")
@@ -203,16 +206,19 @@ def _kill_export(store, slot, strict=False):
         if b"qemu-nbd" not in command or str(store.root).encode() not in command:
             raise HostError("NBD owner mismatch: manual intervention required")
         os.kill(pid, signal.SIGTERM)
-        for _ in range(30):
+        for _ in range(60):
             try:
                 os.kill(pid, 0)
             except ProcessLookupError:
                 break
             time.sleep(0.1)
+        else:
+            if strict:
+                raise HostError("NBD export did not terminate")
     except (ValueError, OSError) as exc:
         if strict:
             raise HostError("NBD process cannot be stopped safely") from exc
-    finally:
+    else:
         pidfile.unlink(missing_ok=True)
 
 
@@ -276,6 +282,79 @@ def target_abort(data):
     return store.abort(token)
 
 
+
+def target_publish(data):
+    """Attach a committed, QCOW2 COW checkpoint to an OFF Proxmox standby VM.
+
+    The target is either absent (created safely) or clearly owned by this
+    protection policy.  No network interfaces are copied or enabled.
+    """
+    ident = vmid(data["vmid"])
+    store_name = data["storage"]
+    token = data["token"]
+    protected = data["protected_vm_id"]
+    config = data["config"]
+    name = data["name"]
+    if (type(protected) is not int or protected <= 0 or
+            not isinstance(name, str) or not re.fullmatch(r"REP_[a-zA-Z0-9_-]{1,50}", name) or
+            not isinstance(token, str) or not _TOKEN.fullmatch(token) or
+            not isinstance(config, dict)):
+        raise HostError("Invalid protected VM identity")
+    store = _store(data)
+    checkpoint = store.current()
+    if not checkpoint or checkpoint.get("token") != token or checkpoint.get("status") != "committed":
+        raise HostError("Refusing to attach an uncommitted checkpoint")
+    exists = _is_target_stopped(ident)
+    marker = "ORIGAMITASKS_PRA_" + str(protected)
+    if exists:
+        previous = _vm_config(ident)
+        if marker not in previous.get("description", ""):
+            raise HostError("Existing target VM is not owned by this PRA protection")
+        if previous.get("onboot", "0") != "0":
+            raise HostError("Automatic target boot must be disabled")
+    else:
+        def integer(field, default, maximum):
+            val = str(config.get(field, default))
+            if not val.isdigit() or not 1 <= int(val) <= maximum:
+                raise HostError("Unsafe source VM option " + field)
+            return val
+        memory = integer("memory", "1024", 2097152)
+        cores = integer("cores", "1", 512)
+        sockets = integer("sockets", "1", 16)
+        args = ["qm", "create", str(ident), "--name", name, "--onboot", "0",
+                "--memory", memory, "--cores", cores, "--sockets", sockets,
+                "--description", marker]
+        scsihw = config.get("scsihw")
+        if scsihw is not None:
+            if scsihw not in ("virtio-scsi-pci", "virtio-scsi-single", "lsi", "megasas", "pvscsi"):
+                raise HostError("Unsupported SCSI controller profile")
+            args.extend(["--scsihw", scsihw])
+        # Legacy BIOS only in this pilot; EFI/TPM require dedicated handling.
+        if config.get("bios", "seabios") != "seabios":
+            raise HostError("EFI/OVMF source requires a dedicated recovery profile")
+        cmd(*args, timeout=60)
+    args = ["qm", "set", str(ident), "--onboot", "0"]
+    slots = sorted(checkpoint["disks"].keys())
+    for slot in slots:
+        if not _NODE.fullmatch(slot):
+            raise HostError("Invalid disk slot in checkpoint")
+        filename = checkpoint["disks"][slot]["file"]
+        if not filename.startswith("vm-" + str(ident) + "-disk-") or not filename.endswith(".qcow2"):
+            raise HostError("Checkpoint not in PVE image namespace")
+        path = store.root / filename
+        if path.is_symlink() or not path.is_file():
+            raise HostError("Checkpoint image missing")
+        args.extend(["--" + slot, store_name + ":" + str(ident) + "/" + filename])
+    # Single config transaction; target remains powered off during reattach.
+    cmd(*args, timeout=120)
+    # Ensure the target can attempt boot without changing source/network.
+    cmd("qm", "set", str(ident), "--boot", "order=" + slots[0])
+    if "status: stopped" not in cmd("qm", "status", str(ident)):
+        raise HostError("Target VM unexpectedly running; operator intervention required")
+    return {"standby_configured": True, "vm_started": False,
+            "vmid": ident, "checkpoint": token, "slots": slots}
+
+
 def source_copy(data):
     ident = vmid(data["vmid"])
     slots = _slots(data)
@@ -294,7 +373,8 @@ def source_copy(data):
 
 ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "target_probe": target_probe, "target_begin": target_begin,
-           "target_finish": target_finish, "target_abort": target_abort}
+           "target_finish": target_finish, "target_abort": target_abort,
+           "target_publish": target_publish}
 
 
 def main():
