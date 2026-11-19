@@ -139,3 +139,35 @@ rapport en lecture seule sur le stockage cible, le nœud, l'espace disponible
 et les disques source. Il n'alloue pas de volume et ne déclenche ni
 synchronisation ni bascule. Aucun ajout de paramètre `.env` n'est requis.
 
+## Sécurisation des checkpoints QMP (v0.3.26-rc1)
+
+- Après une synchronisation QMP vers un stockage `dir`, l'assistant de
+  destination contrôle de nouveau que `REP_` est arrêtée, que les disques
+  configurés correspondent au checkpoint, que chaque image appartient bien
+  à la VM, que les chaînes QCOW2 restent dans son dossier et que `qemu-img
+  check` réussit. La synchronisation est marquée `completed` **uniquement**
+  après ce contrôle. Une erreur laisse le transfert `uncertain` : la
+  récupération humaine est obligatoire avant toute nouvelle synchronisation.
+- **Aucun ancien checkpoint n'est supprimé automatiquement.** Une suppression
+  fondée sur `qm config --current` ne prouve pas l'absence de références dans
+  les snapshots Proxmox, les sauvegardes ou `unusedN`. Prévoir de la place :
+  un mécanisme de rétention ne pourra être activé qu'après une vérification
+  explicite de toutes les dépendances.
+- Les anciennes réplications terminées avant cette version sont
+  `unverified` après migration **sans suppression de leur historique**.
+  Elles ne peuvent ni déclencher une synchronisation planifiée ni servir de
+  base à un incrémental. La première nouvelle synchronisation doit refaire
+  une copie complète, après la mise à jour des assistants des deux nœuds.
+- Le protocole des assistants PRA est désormais vérifié **avant** toute
+  allocation : les deux assistants doivent annoncer le protocole de sûreté
+  version 2. Un vieux module sur une machine Proxmox est refusé avant transfert.
+- L'UEFI/OVMF, le TPM, les disques inutilisés et le passthrough PCI sont
+  explicitement refusés tant qu'un profil de récupération éprouvé n'existe
+  pas. Aucune conversion du disque ni arrêt de la source n'est effectué.
+- Ce contrôle est **structurel et hors ligne**. Il ne prouve ni démarrage
+  de l'OS, ni consistance applicative, ni fencing, ni droit de promotion.
+  Les tests de bascule et de failback restent des simulations.
+
+Le moteur de destination LVM n'est toujours pas raccordé au transfert QMP
+et le stockage `lvm` ne doit pas être présenté comme un récepteur opérationnel.
+
