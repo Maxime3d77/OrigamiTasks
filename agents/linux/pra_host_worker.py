@@ -145,32 +145,63 @@ def source_probe(data):
 
 
 def _dir_path(storage, target_vmid):
+    """Resolve only an enabled Proxmox DIR storage through its supported API.
+
+    Do not infer capacity or underlying transport from the storage name.
+    Explicitly-mounted DIR stores must still be mounted before a checkpoint
+    directory is created. Other backends are handled by separate adapters.
+    """
     if not isinstance(storage, str) or not _STORE.fullmatch(storage):
         raise HostError("Invalid target storage name")
     ident = vmid(target_vmid)
-    # Use only a Proxmox-managed directory storage; no arbitrary path input.
-    output = cmd("pvesm", "config", storage)
-    if not re.search(r"(?m)^dir: " + re.escape(storage) + r"\s*$", output):
-        raise HostError("Target storage must be registered PVE type dir")
-    found = re.search(r"(?m)^\s*path\s+(\/\S+)\s*$", output)
-    if not found:
-        raise HostError("Directory storage path unavailable")
-    root = Path(found.group(1))
+    try:
+        config = json.loads(cmd("pvesh", "get", "/storage/" + storage,
+                                "--output-format", "json"))
+    except (ValueError, TypeError) as exc:
+        raise HostError("Malformed Proxmox storage configuration") from exc
+    if not isinstance(config, dict) or config.get("type") != "dir":
+        raise HostError("PRA pilot requires an explicitly configured PVE DIR storage")
+    if config.get("disable") in (1, "1", True):
+        raise HostError("Destination storage is disabled")
+    content = config.get("content", "")
+    types = content.split(",") if isinstance(content, str) else content
+    if not isinstance(types, list) or "images" not in types:
+        raise HostError("Destination storage does not allow VM images")
+    path = config.get("path")
+    if not isinstance(path, str) or not path.startswith("/"):
+        raise HostError("Invalid destination storage path")
+    root = Path(path)
     if root.is_symlink() or not root.is_dir():
-        raise HostError("Target storage unavailable")
+        raise HostError("Destination storage unavailable")
     resolved = root.resolve()
-    if not os.path.ismount(str(resolved)) and str(resolved) == "/":
-        raise HostError("Invalid storage mount")
-    if "images" not in re.search(r"(?m)^\s*content\s+(.+)$", output).group(1).split(","):
-        raise HostError("Target storage does not allow VM images")
-    # Never write to readonly array replicas. The check is advisory; the
-    # exclusive writable filesystem requirement is enforced by mkdir/create.
+    if resolved == Path("/"):
+        raise HostError("Refusing filesystem root as checkpoint directory")
+
+    # Respect PVE's explicit is_mountpoint guard without assuming that every
+    # valid local DIR storage is a separate mount. A required mount missing
+    # means STOP -- never fall through and fill the underlying filesystem.
+    mountguard = config.get("is_mountpoint", False)
+    if mountguard not in (None, False, 0, "0", ""):
+        if isinstance(mountguard, str) and mountguard != "1":
+            mountdir = Path(mountguard)
+        elif mountguard in (True, 1, "1"):
+            mountdir = root
+        else:
+            raise HostError("Invalid mountpoint guard")
+        if not mountdir.is_absolute() or mountdir.is_symlink():
+            raise HostError("Unsafe destination mountpoint configuration")
+        if not os.path.ismount(str(mountdir)):
+            raise HostError("Required destination filesystem is not mounted")
+    # A directory under a standard automatically-mounted PVE path must not
+    # silently become a local directory if the network mount drops.
+    if resolved.is_relative_to("/mnt/pve") and not os.path.ismount(str(resolved)):
+        raise HostError("Proxmox-managed mountpoint not mounted")
+
     folder = resolved / "images" / str(ident)
     if folder.is_symlink():
         raise HostError("Unsafe VM checkpoint directory")
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     return folder
-
 
 def _store(data):
     return CheckpointStore(_dir_path(data["storage"], data["vmid"]),
