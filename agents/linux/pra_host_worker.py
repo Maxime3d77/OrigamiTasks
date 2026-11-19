@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -190,7 +191,9 @@ def target_probe(data):
     ident = vmid(data["vmid"])
     exists = _is_target_stopped(ident)
     store = _store(data)
+    pending = store._read(store.pending)
     return {"vm_exists": exists, "checkpoint": store.current(),
+            "pending": {"token": pending["token"]} if pending else None,
             "writable": True, "storage_type": "dir"}
 
 
@@ -234,6 +237,12 @@ def target_begin(data):
     source_gen = data["source_vm_uuid"]
     if not isinstance(sizes, dict) or any(not _NODE.fullmatch(k) for k in sizes):
         raise HostError("Invalid disk sizes")
+    total = sum(sizes.values())
+    free = shutil.disk_usage(store.root).free
+    reserve = max(512 * 1024 * 1024, total // 20)
+    required = reserve + (total if mode == "full" else 0)
+    if free < required:
+        raise HostError("Insufficient writable PRA checkpoint capacity")
     checkpoint = store.begin(mode, sizes, source_gen)
     ports = {}
     try:
@@ -354,6 +363,18 @@ def target_publish(data):
     cmd("qm", "set", str(ident), "--boot", "order=" + slots[0])
     if "status: stopped" not in cmd("qm", "status", str(ident)):
         raise HostError("Target VM unexpectedly running; operator intervention required")
+    current_config = _vm_config(ident)
+    referenced = set()
+    for value in current_config.values():
+        if isinstance(value, str):
+            for match in re.finditer(r"vm-" + str(ident) + r"-disk-[0-9]+\\.qcow2", value):
+                referenced.add(match.group(0))
+    # Cleanup is best-effort and MUST NEVER roll back a successfully published
+    # config or unlink a volume still referenced by Proxmox (e.g. unused0).
+    try:
+        store.garbage_collect(protected_files=referenced)
+    except (CheckpointError, OSError):
+        pass
     return {"standby_configured": True, "vm_started": False,
             "vmid": ident, "checkpoint": token, "slots": slots}
 
