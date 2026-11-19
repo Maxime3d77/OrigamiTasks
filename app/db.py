@@ -204,7 +204,8 @@ CREATE TABLE IF NOT EXISTS pra_live_runs (
  actor TEXT NOT NULL,
  created_at TEXT NOT NULL,
  started_at TEXT,
- finished_at TEXT
+ finished_at TEXT,
+ verification_level TEXT NOT NULL DEFAULT 'unverified'
 );
 CREATE INDEX IF NOT EXISTS idx_pra_live_runs_vm ON pra_live_runs(protected_vm_id,id DESC);
 
@@ -312,6 +313,7 @@ def initialize():
             ("agent_deploy_batches", "enable_proxmox", "INTEGER NOT NULL DEFAULT 0"),
             ("agent_deploy_batches", "enable_pra", "INTEGER NOT NULL DEFAULT 0"),
             ("pra_live_runs", "point_at", "TEXT"),
+            ("pra_live_runs", "verification_level", "TEXT NOT NULL DEFAULT 'unverified'"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:
