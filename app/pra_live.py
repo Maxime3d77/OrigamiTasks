@@ -122,7 +122,8 @@ def _connect(binding):
 
 
 def _run_helper(ssh, action, data, timeout=60):
-    if action not in {"source_probe", "source_copy", "target_probe", "target_begin",
+    if action not in {"source_probe", "source_copy", "source_dismiss",
+                      "target_probe", "target_begin",
                       "target_finish", "target_abort", "target_publish"}:
         raise LiveReplicationError("Action PRA non autorisée")
     encoded = base64.b64encode(json.dumps(data, separators=(",", ":")).encode()).decode()
@@ -339,6 +340,59 @@ def start(vm_id, actor, approved=False, scheduled=False):
     db.audit(actor, "pra.live.replication.request", vm_id, "run=" + str(run_id))
     return {"run_id": run_id, "status": "queued",
             "source_stopped": False, "target_started": False}
+
+
+
+def reconcile(vm_id, run_id, actor, approved=False):
+    """Reconcile only after verifying no source QMP backup is active."""
+    if approved is not True:
+        raise LiveReplicationError("Validation explicite nécessaire")
+    vm = dr_protected_vms._one(vm_id)
+    if vm["engine"] != "qmp_live_incremental":
+        raise LiveReplicationError("Moteur QMP attendu")
+    with db.session() as con:
+        row = con.execute(
+            "SELECT id,status FROM pra_live_runs WHERE protected_vm_id=? "
+            "ORDER BY id DESC LIMIT 1", (vm_id,)).fetchone()
+    if not row or row["id"] != run_id or row["status"] != "uncertain":
+        raise LiveReplicationError("Seule la dernière réplication incertaine peut être réconciliée")
+    info = _vm_runtime(vm)
+    source_ssh = target_ssh = None
+    try:
+        source_ssh = _connect(info["source"])
+        target_ssh = _connect(info["destination"])
+        src = _run_helper(source_ssh, "source_probe",
+                {"vmid": vm["source_vmid"], "slots": info["slots"]})
+        jobs = src.get("active_jobs") or []
+        if any(j.get("status") != "concluded" for j in jobs):
+            raise LiveReplicationError("Job QMP encore actif : attendre sa fin")
+        if jobs:
+            _run_helper(source_ssh, "source_dismiss",
+                {"vmid": vm["source_vmid"], "slots": info["slots"]})
+        target = _run_helper(target_ssh, "target_probe",
+                 {"vmid": vm["target_vmid"], "storage": vm["target_storage"]})
+        pending = target.get("pending")
+        if pending:
+            _run_helper(target_ssh, "target_abort",
+                {"vmid": vm["target_vmid"], "storage": vm["target_storage"],
+                 "token": pending["token"]}, timeout=120)
+        with db.session() as con:
+            con.execute("BEGIN IMMEDIATE")
+            changed = con.execute(
+                "UPDATE pra_live_runs SET status='failed',"
+                "details='Réconcilié : checkpoint provisoire abandonné, prochaine copie FULL',"
+                "finished_at=? WHERE id=? AND protected_vm_id=? AND status='uncertain'",
+                (db.now(),run_id,vm_id)).rowcount
+            if changed != 1:
+                raise LiveReplicationError("État du job modifié pendant la réconciliation")
+        db.audit(actor,"pra.live.reconcile",vm_id,"run="+str(run_id))
+        return {"run_id":run_id,"status":"failed","force_full_next":True,
+                "source_vm_stopped":False,"target_vm_started":False}
+    finally:
+        if source_ssh:
+            source_ssh.close()
+        if target_ssh:
+            target_ssh.close()
 
 
 def list_runs(vm_id, limit=30):
