@@ -458,7 +458,7 @@ def target_verify(data):
             raise HostError("Invalid committed disk metadata")
         name = item.get("file")
         if (not isinstance(name, str) or
-                not re.fullmatch("vm-" + str(ident) + r"-disk-[0-9]+\\.qcow2", name)):
+                not re.fullmatch("vm-" + str(ident) + r"-disk-[0-9]+\.qcow2", name)):
             raise HostError("Invalid committed disk name")
         expected = storage + ":" + str(ident) + "/" + name
         actual = config.get(slot, "").split(",", 1)[0]
