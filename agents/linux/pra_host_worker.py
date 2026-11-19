@@ -181,11 +181,13 @@ def _dir_path(storage, target_vmid):
     # valid local DIR storage is a separate mount. A required mount missing
     # means STOP -- never fall through and fill the underlying filesystem.
     mountguard = config.get("is_mountpoint", False)
-    if mountguard:
-        if isinstance(mountguard, str) and mountguard not in ("1", "0"):
+    if mountguard not in (None, False, 0, "0", ""):
+        if isinstance(mountguard, str) and mountguard != "1":
             mountdir = Path(mountguard)
-        else:
+        elif mountguard in (True, 1, "1"):
             mountdir = root
+        else:
+            raise HostError("Invalid mountpoint guard")
         if not mountdir.is_absolute() or mountdir.is_symlink():
             raise HostError("Unsafe destination mountpoint configuration")
         if not os.path.ismount(str(mountdir)):
