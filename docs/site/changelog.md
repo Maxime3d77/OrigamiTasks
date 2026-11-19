@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.24-rc1 — 2026-11-19 (QMP pilot, not production validated)
+
+- **Live QMP incremental DR transport**: one full backup, dirty bitmap incremental backups, grouped multi-disk QMP transactions.
+- **Proxmox agents**: root-owned helper libraries installed/updated with the Linux agent; encrypted NBD forwarding uses existing central SSH vault credentials.
+- **Target**: versioned QCOW2 checkpoints on an independent writable Proxmox DIR storage; attach only to a powered-off `REP_` VM. Readonly array replica and raw shared LVM are excluded.
+- **UI and orchestration**: preflight, explicit first run approval, per-VM history, scheduling, recovery from uncertain runs and observed source QMP anchor timestamp.
+- **Safety**: never stop the source or boot the standby, no automatic promotion. Witness/fencing, restore tests and PVE runtime certification remain outstanding.
+- Guide: [Live QMP replication](pra-qmp.md).
+
 ## 0.3.23-rc1 — 2026-11-18
 
 - **Single agent update** button for an agent reporting an older known version.
