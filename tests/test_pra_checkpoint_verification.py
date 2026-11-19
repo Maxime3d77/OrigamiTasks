@@ -121,7 +121,7 @@ def test_backing_chain_outside_managed_store_rejected(verification,monkeypatch,t
             return json.dumps([{"filename":str(file)},{"filename":str(actual)}])
         raise AssertionError(args)
     monkeypatch.setattr(worker, "cmd", modified_cmd)
-    with pytest.raises(worker.HostError, match="outside managed"):
+    with pytest.raises(worker.HostError, match="foreign|outside managed"):
         worker.target_verify(payload())
 
 
@@ -147,3 +147,19 @@ def test_source_probe_rejects_complex_hardware_before_qmp_access(monkeypatch, sp
         lambda _: (_ for _ in ()).throw(AssertionError("QMP must not be touched")))
     with pytest.raises(worker.HostError, match="recovery profile"):
         worker.source_probe({"vmid":321,"slots":["scsi0"]})
+
+
+def test_foreign_image_in_same_directory_is_rejected(verification,monkeypatch):
+    _, config, image, commands=verification
+    foreign=image.parent/"foreign.qcow2"
+    foreign.write_bytes(b"untrusted")
+    def fake(*args,**kwargs):
+        if args[:2]==("qm","status"):
+            return "status: stopped"
+        if args[:2]==("qemu-img","info"):
+            return json.dumps([{"filename":str(image),"format":"qcow2"},
+                               {"filename":str(foreign),"format":"qcow2"}])
+        raise AssertionError(args)
+    monkeypatch.setattr(worker,"cmd",fake)
+    with pytest.raises(worker.HostError,match="foreign"):
+        worker.target_verify(payload())
