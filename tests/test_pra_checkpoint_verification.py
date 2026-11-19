@@ -123,3 +123,27 @@ def test_backing_chain_outside_managed_store_rejected(verification,monkeypatch,t
     monkeypatch.setattr(worker, "cmd", modified_cmd)
     with pytest.raises(worker.HostError, match="outside managed"):
         worker.target_verify(payload())
+
+
+def test_finish_and_abort_refuse_if_standby_became_running(monkeypatch):
+    monkeypatch.setattr(worker, "_is_target_stopped",
+        lambda _: (_ for _ in ()).throw(worker.HostError("standby running")))
+    monkeypatch.setattr(worker, "_store",
+        lambda *_: (_ for _ in ()).throw(AssertionError("must not touch storage")))
+    for action in (worker.target_finish, worker.target_abort):
+        with pytest.raises(worker.HostError, match="standby running"):
+            action({"vmid":321,"storage":"test-dir","token":TOKEN})
+
+
+@pytest.mark.parametrize("special", [
+    {"bios": "ovmf"}, {"efidisk0": "target:efi0"},
+    {"tpmstate0": "target:tpm0"}, {"unused7": "target:orphan0"},
+    {"hostpci1": "0000:01:00.0"},
+])
+def test_source_probe_rejects_complex_hardware_before_qmp_access(monkeypatch, special):
+    config = {"scsi0": "test-dir:disk0", **special}
+    monkeypatch.setattr(worker, "_vm_config", lambda _: config)
+    monkeypatch.setattr(worker, "_qmp_path",
+        lambda _: (_ for _ in ()).throw(AssertionError("QMP must not be touched")))
+    with pytest.raises(worker.HostError, match="recovery profile"):
+        worker.source_probe({"vmid":321,"slots":["scsi0"]})
