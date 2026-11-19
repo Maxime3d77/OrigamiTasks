@@ -214,7 +214,7 @@ def _is_target_stopped(ident):
     except HostError:
         # Distinguish absent VMID from an API/PVE malfunction before creation.
         rows = cmd("qm", "list")
-        if re.search(r"(?m)^\\s*" + str(ident) + r"\\s+", rows):
+        if re.search(r"(?m)^\s*" + str(ident) + r"\s+", rows):
             raise HostError("VM target exists but cannot be queried")
         return False
     if "status: stopped" not in output:
@@ -404,18 +404,12 @@ def target_publish(data):
     cmd("qm", "set", str(ident), "--boot", "order=" + slots[0])
     if "status: stopped" not in cmd("qm", "status", str(ident)):
         raise HostError("Target VM unexpectedly running; operator intervention required")
-    current_config = _vm_config(ident)
-    referenced = set()
-    for value in current_config.values():
-        if isinstance(value, str):
-            for match in re.finditer(r"vm-" + str(ident) + r"-disk-[0-9]+\\.qcow2", value):
-                referenced.add(match.group(0))
-    # Cleanup is best-effort and MUST NEVER roll back a successfully published
-    # config or unlink a volume still referenced by Proxmox (e.g. unused0).
-    try:
-        store.garbage_collect(protected_files=referenced)
-    except (CheckpointError, OSError):
-        pass
+    # No automatic deletion of old checkpoint generations here.
+    # qm config --current is not sufficient proof that a generation is
+    # unreferenced: PVE snapshot configurations, unused volumes and other
+    # guest configurations may retain references. The former cleanup could
+    # delete data after a successful publish. Retain every owned image until
+    # an independently verified, explicit garbage-collection protocol exists.
     return {"standby_configured": True, "vm_started": False,
             "vmid": ident, "checkpoint": token, "slots": slots}
 
