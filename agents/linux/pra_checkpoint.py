@@ -193,55 +193,15 @@ class CheckpointStore:
 
 
     def garbage_collect(self, protected_files=()):
-        """Delete ONLY OrigamiTasks-owned QCOW2 no longer in the committed chain."""
-        with self._exclusive():
-            if self.pending.exists():
-                raise CheckpointError("Cannot GC while staging")
-            current = self._read(self.manifest)
-            owned = self._read(self.owned)
-            if not current or not owned:
-                return {"removed": 0}
-            files = owned.get("files")
-            if not isinstance(files, list):
-                raise CheckpointError("Malformed owned ledger")
-            needed = set()
-            for disk in current["disks"].values():
-                image = self.root / disk["file"]
-                output = _command("qemu-img", "info", "-f", "qcow2",
-                                  "--backing-chain", "--output=json", str(image))
-                try:
-                    chain = json.loads(output)
-                except ValueError as exc:
-                    raise CheckpointError("Backing chain inspection failed") from exc
-                if not isinstance(chain, list) or not chain:
-                    raise CheckpointError("No backing chain data")
-                for item in chain:
-                    filename = item.get("filename")
-                    if not isinstance(filename, str):
-                        raise CheckpointError("Missing backing filename")
-                    dep = Path(filename)
-                    if dep.is_symlink() or dep.resolve().parent != self.root:
-                        raise CheckpointError("Backing image outside checkpoint root")
-                    needed.add(dep.name)
-            removed = 0
-            retained = []
-            for filename in files:
-                if (not isinstance(filename, str) or
-                        Path(filename).name != filename or
-                        self.target_vmid is None or
-                        not filename.startswith("vm-" + str(self.target_vmid) + "-disk-") or
-                        not filename.endswith(".qcow2")):
-                    raise CheckpointError("Unsafe owned-file ledger")
-                if filename in needed or filename in protected_files:
-                    retained.append(filename)
-                    continue
-                path = self.root / filename
-                if path.is_symlink():
-                    raise CheckpointError("Refusing symlink deletion")
-                path.unlink(missing_ok=True)
-                removed += 1
-            _atomic_json(self.owned, {"files": retained})
-            return {"removed": removed}
+        """Disabled until full PVE snapshot, backup and storage reference audit.
+
+        A guest's current qm configuration is NOT an exhaustive inventory of
+        all references to old images. Never delete a checkpoint based only on
+        the current active chain or a single VM's running configuration.
+        """
+        raise CheckpointError(
+            "Automatic checkpoint garbage collection disabled: "
+            "external PVE snapshot references cannot yet be proven absent")
 
     def abort(self, token):
         """Keep the last published point intact after a failed or uncertain run."""

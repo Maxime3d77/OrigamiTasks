@@ -99,8 +99,12 @@ def source_probe(data):
     # Do not protect only a subset of data disks accidentally.
     if sorted(actual) != sorted(slots):
         raise HostError("The request does not cover every source disk")
-    if any(x in configured for x in ("efidisk0", "tpmstate0", "unused0")):
-        raise HostError("EFI/TPM/unused disk requires an explicit specialized recovery profile")
+    if (configured.get("bios", "seabios") != "seabios"
+            or any(x in configured for x in ("efidisk0", "tpmstate0"))
+            or any(x.startswith("unused") for x in configured)
+            or any(x.startswith("hostpci") for x in configured)):
+        raise HostError(
+            "OVMF/TPM/unused disk/PCI passthrough requires an explicit, tested recovery profile")
     if any("media=cdrom" in configured[s] for s in slots):
         raise HostError("Optical drives cannot be included as backup disks")
     if "running" not in cmd("qm", "status", str(ident)).split():
@@ -137,7 +141,7 @@ def source_probe(data):
                                 "recording": b.get("recording")}
                 for b in found.get("dirty-bitmaps", [])
             }
-    return {"source_vm_uuid": _source_generation(ident),
+    return {"pra_protocol": 2, "source_vm_uuid": _source_generation(ident),
             "slots": slots, "sizes": sizes, "nodes": nodes, "bitmaps": bitmaps,
             "active_jobs": active_jobs,
             "config": {k: configured[k] for k in ("name", "memory", "cores", "sockets", "bios", "scsihw", "cpu")
@@ -214,7 +218,7 @@ def _is_target_stopped(ident):
     except HostError:
         # Distinguish absent VMID from an API/PVE malfunction before creation.
         rows = cmd("qm", "list")
-        if re.search(r"(?m)^\\s*" + str(ident) + r"\\s+", rows):
+        if re.search(r"(?m)^\s*" + str(ident) + r"\s+", rows):
             raise HostError("VM target exists but cannot be queried")
         return False
     if "status: stopped" not in output:
@@ -230,7 +234,9 @@ def target_probe(data):
     exists = _is_target_stopped(ident)
     store = _store(data)
     pending = store._read(store.pending)
-    return {"vm_exists": exists, "checkpoint": store.current(),
+    return {"pra_protocol": 2, "offline_structural_verify": True,
+            "checkpoint_retention": "manual_only",
+            "vm_exists": exists, "checkpoint": store.current(),
             "pending": {"token": pending["token"]} if pending else None,
             "writable": True, "storage_type": "dir"}
 
@@ -309,6 +315,9 @@ def target_begin(data):
 
 
 def target_finish(data):
+    ident = vmid(data["vmid"])
+    # Re-check the destination after the potentially hours-long QMP copy.
+    _is_target_stopped(ident)
     store = _store(data)
     token = data["token"]
     if not isinstance(token, str) or not _TOKEN.fullmatch(token):
@@ -325,6 +334,9 @@ def target_finish(data):
 
 
 def target_abort(data):
+    ident = vmid(data["vmid"])
+    # Never unlink staging images if a target VM is now active.
+    _is_target_stopped(ident)
     store = _store(data)
     token = data["token"]
     pending = store._read(store.pending)
@@ -404,20 +416,105 @@ def target_publish(data):
     cmd("qm", "set", str(ident), "--boot", "order=" + slots[0])
     if "status: stopped" not in cmd("qm", "status", str(ident)):
         raise HostError("Target VM unexpectedly running; operator intervention required")
-    current_config = _vm_config(ident)
-    referenced = set()
-    for value in current_config.values():
-        if isinstance(value, str):
-            for match in re.finditer(r"vm-" + str(ident) + r"-disk-[0-9]+\\.qcow2", value):
-                referenced.add(match.group(0))
-    # Cleanup is best-effort and MUST NEVER roll back a successfully published
-    # config or unlink a volume still referenced by Proxmox (e.g. unused0).
-    try:
-        store.garbage_collect(protected_files=referenced)
-    except (CheckpointError, OSError):
-        pass
+    # No automatic deletion of old checkpoint generations here.
+    # qm config --current is not sufficient proof that a generation is
+    # unreferenced: PVE snapshot configurations, unused volumes and other
+    # guest configurations may retain references. The former cleanup could
+    # delete data after a successful publish. Retain every owned image until
+    # an independently verified, explicit garbage-collection protocol exists.
     return {"standby_configured": True, "vm_started": False,
             "vmid": ident, "checkpoint": token, "slots": slots}
+
+
+
+def target_verify(data):
+    """Verify a committed, attached standby *without ever starting it*.
+
+    This is a disk-format/configuration verification. It cannot establish
+    guest bootability or application consistency; a real isolated restore
+    test remains mandatory before permitting failover.
+    """
+    ident = vmid(data["vmid"])
+    token = data["token"]
+    protected = data["protected_vm_id"]
+    storage = data["storage"]
+    if (not isinstance(token, str) or not _TOKEN.fullmatch(token)
+            or type(protected) is not int or protected <= 0):
+        raise HostError("Invalid checkpoint verification identity")
+    if not _is_target_stopped(ident):
+        raise HostError("Cannot verify an unconfigured standby")
+    store = _store(data)
+    if store.pending.exists():
+        raise HostError("Unresolved checkpoint staging prevents verification")
+    checkpoint = store.current()
+    if (not checkpoint or checkpoint.get("status") != "committed"
+            or checkpoint.get("token") != token
+            or checkpoint.get("target_vmid") != ident):
+        raise HostError("No matching committed checkpoint on destination")
+    disks = checkpoint.get("disks")
+    if not isinstance(disks, dict) or not 1 <= len(disks) <= 32:
+        raise HostError("Checkpoint has no validated disk set")
+    config = _vm_config(ident)
+    if ("ORIGAMITASKS_PRA_" + str(protected)) not in config.get("description", ""):
+        raise HostError("Standby VM ownership marker missing")
+    if config.get("onboot", "0") not in ("0", "false"):
+        raise HostError("Standby automatic start must be disabled")
+    if any(re.fullmatch(r"net[0-9]{1,2}", key) for key in config):
+        raise HostError("Standby has a network adapter; isolated standby required")
+    if "status: stopped" not in cmd("qm", "status", str(ident)):
+        raise HostError("Destination VM unexpectedly active during verification")
+    checked = []
+    for slot, item in sorted(disks.items()):
+        if (not isinstance(slot, str) or not _NODE.fullmatch(slot)
+                or not isinstance(item, dict)):
+            raise HostError("Invalid committed disk metadata")
+        name = item.get("file")
+        if (not isinstance(name, str) or
+                not re.fullmatch("vm-" + str(ident) + r"-disk-[0-9]+\.qcow2", name)):
+            raise HostError("Invalid committed disk name")
+        expected = storage + ":" + str(ident) + "/" + name
+        actual = config.get(slot, "").split(",", 1)[0]
+        if actual != expected:
+            raise HostError("Standby disk does not match committed checkpoint")
+        image = store.root / name
+        if image.is_symlink() or not image.is_file():
+            raise HostError("Checkpoint disk missing or unsafe")
+        chain_output = cmd("qemu-img", "info", "--backing-chain",
+                           "--output=json", "-f", "qcow2", str(image), timeout=120)
+        try:
+            chain = json.loads(chain_output)
+        except (ValueError, TypeError) as exc:
+            raise HostError("Invalid image backing-chain report") from exc
+        if not isinstance(chain, list) or not 1 <= len(chain) <= 128:
+            raise HostError("Missing or excessive backing chain for committed checkpoint")
+        for entry in chain:
+            if not isinstance(entry, dict):
+                raise HostError("Malformed image backing-chain record")
+            path = entry.get("filename")
+            if not isinstance(path, str) or not path.startswith("/"):
+                raise HostError("Unverifiable backing-chain path")
+            dep = Path(path)
+            if (entry.get("format") not in (None, "qcow2")
+                    or not re.fullmatch("vm-" + str(ident) +
+                                        r"-disk-[0-9]+\.qcow2", dep.name)):
+                raise HostError("Unsupported or foreign QCOW2 backing image")
+            if dep.is_symlink() or dep.resolve(strict=True).parent != store.root:
+                raise HostError("Backing chain points outside managed storage")
+            if not dep.is_file():
+                raise HostError("Backing image is not a regular file")
+        cmd("qemu-img", "check", "-f", "qcow2", str(image), timeout=120)
+        checked.append(slot)
+    if "status: stopped" not in cmd("qm", "status", str(ident)):
+        raise HostError("Destination VM changed power state during verification")
+    return {
+        "checkpoint_token": token, "disks": checked,
+        "verified_offline": True, "disk_format_checked": True,
+        "standby_configured": True, "source_vm_stopped": False,
+        "vm_started": False, "boot_tested": False,
+        "application_consistency_verified": False,
+        "failover_authorized": False,
+        "note": "Proxmox config and qcow2 backing chains checked; no boot or application-level test"
+    }
 
 
 
@@ -458,7 +555,7 @@ ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "source_dismiss": source_dismiss,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
-           "target_publish": target_publish}
+           "target_publish": target_publish, "target_verify": target_verify}
 
 
 def main():
