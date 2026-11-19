@@ -93,7 +93,9 @@ def source_probe(data):
     ident = vmid(data["vmid"])
     configured = _vm_config(ident)
     slots = _slots(data)
-    actual = [key for key in configured if _NODE.fullmatch(key)]
+    actual = [key for key in configured if _NODE.fullmatch(key)
+              and "media=cdrom" not in configured[key]
+              and configured[key].split(",", 1)[0] != "none"]
     # Do not protect only a subset of data disks accidentally.
     if sorted(actual) != sorted(slots):
         raise HostError("The request does not cover every source disk")
