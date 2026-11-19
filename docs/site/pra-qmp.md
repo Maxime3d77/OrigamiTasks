@@ -117,3 +117,26 @@ acceptance testing. Read-only capability discovery does not activate
 replication, install agents on production or authorize failover.
 
 Official reference: [Proxmox LVM storage](https://github.com/proxmox/pve-docs/blob/master/pve-storage-lvm.adoc).
+
+## Generic LVM adapter: development stage (v0.3.25-rc1)
+
+The new `agents/linux/pra_lvm_target.py` is a generic Proxmox-managed
+block-volume staging component; it does not depend on any SAN vendor or VG
+name. It detects `snapshot-as-volume-chain` without writing to storage,
+rejects disabled pools, and calculates a conservative **thick LV** capacity
+estimate for every generation, including incremental copies. Its
+operator-approved staging method journals intent and outcomes and **never**
+automatically frees a volume after an uncertain allocation.
+
+Staging is **not connected** to the live replication API or to the
+"Synchroniser à chaud" button. It still needs a durable, cluster-visible
+checkpoint manifest, validated QCOW2 block-device backing chains, atomic
+publication, verified recovery, and start fencing. Real LVM replication
+remains deliberately **disabled** until these requirements have been
+validated on non-production Proxmox hosts.
+
+The new **Compatibilité stockage** action on a protected VM provides a
+read-only report on the target pool, node, capacity, and source disks.
+It never allocates a volume, copies data, or starts a VM. No new `.env`
+setting is required.
+
