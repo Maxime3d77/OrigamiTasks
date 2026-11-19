@@ -18,8 +18,9 @@ from . import db, dr_sites, integrations
 STRATEGIES = {
     "planning_only": "Étude / simulation uniquement",
     "offline_copy": "Copie à froid (transport à développer)",
+    "qmp_live_incremental": "QEMU : réplication incrémentale à chaud (pilote)",
     "pbs_backup_restore": "Sauvegarde PBS + restauration (à intégrer)",
-    "storage_array_replication": "Réplication baie / LUN (à qualifier)",
+    "storage_array_replication": "Ancienne option (non prise en charge)",
 }
 SCENARIOS = {
     "replication_preflight": "Prévol de réplication (lecture seule)",
@@ -263,9 +264,13 @@ def list_vms(plan_id=None):
             item["last_check"]=json.loads(item.pop("last_check_json") or "{}")
         except (TypeError,ValueError):
             item["last_check"]={}
-        item["replication_status"]="not_configured"
-        item["last_successful_sync"]=None
-        item["replica_verified"]=False
+        from . import pra_live
+        latest=pra_live.latest_status(item["id"]) if item["engine"]=="qmp_live_incremental" else {}
+        item["replication_status"]=latest.get("replication_status","not_configured")
+        item["last_successful_sync"]=latest.get("last_successful_sync")
+        item["last_replication_run"]=latest.get("last_replication_run")
+        item["replica_verified"]=item["replication_status"]=="completed"
+        # Disk sync alone must never authorize a failover.
         item["failover_available"]=False
         result.append(item)
     return result
@@ -296,6 +301,11 @@ def delete(vm_id):
         ).fetchone()
         if pending:
             raise ProtectedVMError("Sauvegarde PBS active ou indéterminée : contrôler la tâche avant suppression")
+        pending_live=con.execute(
+            "SELECT 1 FROM pra_live_runs WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
+        if pending_live:
+            raise ProtectedVMError("Réplication active/indéterminée : réconcilier avant suppression")
         con.execute("DELETE FROM dr_protected_vms WHERE id=?",(vm_id,))
     return {"ok":True,"vm_config_removed":True,
             "vm_deleted":False,"disks_deleted":False}
@@ -388,7 +398,12 @@ def run_readonly_test(vm_id, scenario, actor):
     check("VM source retrouvée",source_vm is not None,
           ("VM détectée sur "+str(source_vm.get("node"))+", état : "+
            str(source_vm.get("status"))) if source_vm else "VM source non observable")
-    if source_vm:
+    if vm["engine"]=="qmp_live_incremental":
+        check("VM source active pour copie à chaud",
+              bool(source_vm and source_vm.get("status")=="running"),
+              "QEMU actif" if source_vm and source_vm.get("status")=="running"
+              else "Source non active ou indisponible")
+    elif source_vm:
         check("VM source stable pour copie à froid",
               source_vm.get("status")=="stopped",
               "Source arrêtée" if source_vm.get("status")=="stopped" else
