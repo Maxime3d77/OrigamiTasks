@@ -298,8 +298,8 @@ def deploy(body, *, cluster_authorized=False):
             stage_config = shlex.quote(base+'/'+marker+'_config.json')
             stage_privileged = {name:shlex.quote(base+'/'+marker+'_'+name) for name in
                                 ('pra_qmp_incremental.py','pra_checkpoint.py','pra_host_worker.py')}
-            root_install = 'install -d -m 700 -o root -g root /opt/origamitasks-agent/privileged; ' + ''.join(
-                'install -m 500 -o root -g root '+source+' /opt/origamitasks-agent/privileged/'+name+'; '
+            root_install = 'install -d -m 700 -o root -g root /usr/local/lib/origamitasks-pra; ' + ''.join(
+                'install -m 500 -o root -g root '+source+' /usr/local/lib/origamitasks-pra/'+name+'; '
                 for name,source in stage_privileged.items())
             install_script = (
                 'set -eu; command -v python3 >/dev/null; command -v systemctl >/dev/null; '
