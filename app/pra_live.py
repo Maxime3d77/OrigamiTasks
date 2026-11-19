@@ -189,14 +189,15 @@ def _forward(source_ssh, target_ssh, slots_ports):
     return mapping, forwards, threads, errors
 
 
-def _state(run_id, state, note="", mode=None, checkpoint=None):
+def _state(run_id, state, note="", mode=None, checkpoint=None, point_at=None):
     with db.session() as con:
         con.execute(
             "UPDATE pra_live_runs SET status=?,details=?,mode=COALESCE(?,mode),"
             "checkpoint_token=COALESCE(?,checkpoint_token),"
+            "point_at=COALESCE(?,point_at),"
             "started_at=CASE WHEN ?='running' THEN COALESCE(started_at,?) ELSE started_at END,"
             "finished_at=CASE WHEN ? IN ('completed','failed','uncertain') THEN ? ELSE finished_at END "
-            "WHERE id=?", (state, note[:500], mode, checkpoint, state, db.now(),
+            "WHERE id=?", (state, note[:500], mode, checkpoint, point_at, state, db.now(),
                            state, db.now(), run_id))
 
 
@@ -284,7 +285,12 @@ def _perform(run_id):
         if not published.get("standby_configured") or published.get("vm_started"):
             raise LiveReplicationError("La configuration de secours n'a pas été confirmée")
         successful = True
-        _state(run_id, "completed", mode + ": checkpoint appliqué à la VM arrêtée")
+        point = backup.get("snapshot_epoch")
+        if type(point) not in (int,float) or point <= 0:
+            raise LiveReplicationError("Horodatage du point QMP absent")
+        point_at = datetime.fromtimestamp(point,timezone.utc).isoformat(timespec="seconds")
+        _state(run_id, "completed", mode + ": checkpoint appliqué à la VM arrêtée",
+               point_at=point_at)
         db.audit("system", "pra.live.replication.completed", vm_id, "run=" + str(run_id))
     except BaseException as exc:
         # A source bitmap may have advanced even when the acknowledgement was
@@ -400,7 +406,7 @@ def list_runs(vm_id, limit=30):
     limit = max(1, min(100, int(limit)))
     with db.session() as con:
         rows = con.execute(
-            "SELECT id,status,actor,mode,details,created_at,started_at,finished_at "
+            "SELECT id,status,actor,mode,details,created_at,started_at,finished_at,point_at "
             "FROM pra_live_runs WHERE protected_vm_id=? ORDER BY id DESC LIMIT ?",
             (vm_id, limit)).fetchall()
     return [dict(r) for r in rows]
@@ -416,10 +422,10 @@ def latest_status(vm_id):
     last_success = None
     with db.session() as con:
         last_success = con.execute(
-            "SELECT finished_at FROM pra_live_runs WHERE protected_vm_id=? "
+            "SELECT COALESCE(point_at,finished_at) AS point_at FROM pra_live_runs WHERE protected_vm_id=? "
             "AND status='completed' ORDER BY id DESC LIMIT 1", (vm_id,)).fetchone()
     return {"replication_status": row["status"],
-            "last_successful_sync": last_success["finished_at"] if last_success else None,
+            "last_successful_sync": last_success["point_at"] if last_success else None,
             "last_replication_run": {"id": row["id"], "mode": row["mode"],
                                      "details": row["details"], "status": row["status"]}}
 
