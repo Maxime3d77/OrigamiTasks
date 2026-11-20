@@ -166,9 +166,11 @@ def test_ui_does_not_claim_lvm_recovery_is_production_safe():
     for phrase in ("Copie LVM recette","DISPOSABLE-LAB-ONLY",
                    "lvm-lab/replicate","lvm-lab/runs",
                    "Copie complète à chaud","Synchronisation incrémentale",
-                   "Protection OrigamiTasks #","qm create ",
-                   "ORIGAMITASKS_PRA_"):
+                   "Préparer automatiquement la VM de secours",
+                   "lvm-lab/prepare-standby"):
         assert phrase in ui
+    # The legacy UI must no longer tell operators to run qm create manually.
+    assert "qm create " not in ui
     assert "Bascule réelle interdite" in ui
 
 
