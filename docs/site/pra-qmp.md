@@ -214,3 +214,25 @@ non-production Proxmox clusters and an independent witness**:
 Until steps **6 through 9** are implemented and verified, failover/failback
 remain simulations and are not enabled in production.
 
+## Failover recovery readiness report (v0.3.28-rc1)
+
+The **Préparation bascule** action on **VM protégées PRA** provides a
+per-VM evidence checklist. It distinguishes offline QCOW2 structural checks
+from the independent proofs required for safe recovery.
+
+The read-only admin API
+`GET /api/dr/vms/{id}/recovery-readiness` reports the most recent
+structurally verified copy, destination adapter, storage availability,
+missing evidence and recovery blockers.
+
+This is intentionally **fail closed**: even when an offline image has been
+verified, it will not authorize promotion without an isolated guest restore,
+independent witness, confirmed fencing, an enforced single-writer start guard,
+application validation and approved network mapping. Administrator-entered
+flags never constitute proof of fencing or independent witness.
+
+This version cannot start or stop a VM, does not require any new `.env`
+setting and does not require Proxmox agent upgrades just to display the
+report. Real failover and failback are still pending implementation and
+non-production acceptance tests.
+
