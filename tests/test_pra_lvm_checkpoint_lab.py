@@ -179,8 +179,12 @@ def test_foreign_previous_lvm_checkpoint_never_becomes_incremental_base(setup):
     document=store._read(store.current_file)
     document["protected_vm_id"]=999
     mod._atomic(store.current_file,document)
+    # Capture prior PVE operations: the FULL seed legitimately allocated one LV.
+    calls_before = list(target.calls)
+    volumes_before = dict(target.files)
     with pytest.raises(mod.LvmCheckpointError,match="FULL reseed"):
         store.begin(mode="incremental",sizes=sizes,
                     source_vm_uuid="lab-vm-one",operator_approved=True)
+    assert target.calls == calls_before
+    assert target.files == volumes_before
     assert len(target.files)==1
-    assert target.calls[-1][0]!="pvesm"
