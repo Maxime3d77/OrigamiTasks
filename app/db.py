@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS dr_protected_vms (
  source_storage TEXT NOT NULL DEFAULT '',
  engine TEXT NOT NULL DEFAULT 'planning_only',
  interval_minutes INTEGER NOT NULL DEFAULT 60,
+ lab_enabled INTEGER NOT NULL DEFAULT 0,
  state TEXT NOT NULL DEFAULT 'planned' CHECK(state IN ('planned','paused')),
  last_check_at TEXT,
  last_check_json TEXT NOT NULL DEFAULT '{}',
@@ -340,6 +341,7 @@ def initialize():
             ("agent_deploy_batches", "enable_pra", "INTEGER NOT NULL DEFAULT 0"),
             ("pra_live_runs", "point_at", "TEXT"),
             ("pra_live_runs", "verification_level", "TEXT NOT NULL DEFAULT 'unverified'"),
+            ("dr_protected_vms", "lab_enabled", "INTEGER NOT NULL DEFAULT 0"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:
