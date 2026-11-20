@@ -160,8 +160,15 @@ class LvmCheckpointStore:
                 _atomic(self.pending, prepared)
                 return prepared
             except BaseException:
-                # Never automatically free a potentially in-use/shared LV.
-                # Existing allocation journal remains for reconciliation.
+                # An allocation may have succeeded even if QEMU refused to
+                # initialize its QCOW2 header. Preserve every LV and record
+                # the uncertain state for explicit operator reconciliation.
+                record = self._read(self.pending)
+                if record and record.get("token") == token:
+                    record["status"] = "uncertain"
+                    record["checkpoint_committed"] = False
+                    record["note"] = "QCOW2 initialization incomplete; no LV freed"
+                    _atomic(self.pending, record)
                 raise
 
     def image_path(self, slot, token):
@@ -210,6 +217,18 @@ class LvmCheckpointStore:
                     raise LvmCheckpointError("FULL seed unexpectedly depends on prior volumes")
                 self.command("qemu-img", "check", "-f", "qcow2", path)
             committed = dict(staged, status="committed", committed_at=int(time.time()))
+            previous_ledger = self._read(self.owned) or {"generations": []}
+            existing = previous_ledger.get("generations")
+            if not isinstance(existing, list) or len(existing) > 100000:
+                raise LvmCheckpointError("Malformed owned-volume ledger")
+            # Record all owned volumes before making the new checkpoint
+            # current. On crash an orphan can be reconciled, not deleted.
+            ledger = {"generations": existing + [{
+                "token": token,
+                "volids": [item["volid"] for item in committed["disks"].values()],
+                "created_at": committed["created_at"]
+            }]}
+            _atomic(self.owned, ledger)
             _atomic(self.current_file, committed)
             self.pending.unlink()
             return committed
