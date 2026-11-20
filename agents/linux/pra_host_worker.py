@@ -592,6 +592,71 @@ def _lvm_lab_store(data):
     return LvmCheckpointStore(target)
 
 
+def lvm_lab_prepare_standby(data):
+    """Create only an owned, powered-off, networkless LAB VM.
+
+    Recheck the *cluster-wide* VMID at the host immediately before qm create.
+    No disks are attached and no guest is started. This does not authorize
+    production failover or make an LVM checkpoint bootable.
+    """
+    if data.get("lab_ack") != "DISPOSABLE-LAB-ONLY":
+        raise HostError("Explicit disposable lab approval required")
+    ident = vmid(data.get("vmid"))
+    protected = data.get("protected_vm_id")
+    if type(protected) is not int or protected <= 0:
+        raise HostError("Invalid protection identity")
+    name = data.get("name")
+    if not isinstance(name, str) or not re.fullmatch(r"REP_[a-zA-Z0-9_-]{1,50}", name):
+        raise HostError("Invalid standby VM name")
+    storage = data.get("storage")
+    store = PveLvmTarget(storage, ident, cmd, protected_vm_id=protected)
+    store.inspect()
+    store._node_capacity()
+    marker = "ORIGAMITASKS_PRA_" + str(protected)
+    def inspect_existing():
+        resources = json.loads(cmd("pvesh", "get", "/cluster/resources",
+                                   "--type", "vm", "--output-format", "json"))
+        if not isinstance(resources, list):
+            raise HostError("Cluster VMID inventory unavailable")
+        matches = [x for x in resources if isinstance(x, dict) and x.get("vmid") == ident]
+        if len(matches) > 1:
+            raise HostError("Ambiguous target VMID in cluster")
+        return matches[0] if matches else None
+
+    existing = inspect_existing()
+    if existing:
+        if existing.get("type") != "qemu" or existing.get("node") != socket.gethostname().split(".")[0]:
+            raise HostError("Target VMID already used by another resource or node")
+        if not _is_target_stopped(ident):
+            raise HostError("Existing VM is not a stopped standby")
+        config = _vm_config(ident)
+        markers = set(re.findall(r"[A-Za-z0-9_]+", config.get("description", "")))
+        if marker not in markers or "ORIGAMITASKS_LAB_ONLY" not in markers:
+            raise HostError("Existing VM is not owned by this lab protection")
+        if config.get("onboot", "0") not in ("0", "false"):
+            raise HostError("Standby autoboot is forbidden")
+        if any(re.fullmatch(r"net[0-9]{1,2}", k) for k in config):
+            raise HostError("Standby network must be empty")
+        return {"created": False, "vmid": ident, "target_stopped": True,
+                "network_isolated": True, "lab_only": True}
+
+    cmd("qm", "create", str(ident), "--name", name, "--onboot", "0",
+        "--memory", "2048", "--cores", "2",
+        "--description", marker + " ORIGAMITASKS_LAB_ONLY", timeout=90)
+    existing = inspect_existing()
+    if not existing or existing.get("type") != "qemu":
+        raise HostError("Created standby not visible in cluster inventory")
+    if not _is_target_stopped(ident):
+        raise HostError("New standby is not stopped")
+    config = _vm_config(ident)
+    if any(re.fullmatch(r"net[0-9]{1,2}", k) for k in config):
+        raise HostError("Unexpected standby network interface")
+    if marker not in set(re.findall(r"[A-Za-z0-9_]+", config.get("description", ""))):
+        raise HostError("Missing ownership marker on new standby")
+    return {"created": True, "vmid": ident, "target_stopped": True,
+            "network_isolated": True, "lab_only": True}
+
+
 def lvm_lab_probe(data):
     store = _lvm_lab_store(data)
     exists = store.root.exists() and not store.root.is_symlink()
@@ -769,6 +834,7 @@ ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
            "target_publish": target_publish, "target_verify": target_verify,
+           "lvm_lab_prepare_standby": lvm_lab_prepare_standby,
            "lvm_lab_probe": lvm_lab_probe,
            "lvm_lab_begin": lvm_lab_begin,
            "lvm_lab_finish": lvm_lab_finish,
