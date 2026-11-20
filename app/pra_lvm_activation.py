@@ -73,9 +73,9 @@ def start(vm_id, actor, confirmation):
     with db.session() as con:
         con.execute("BEGIN IMMEDIATE")
         if con.execute("SELECT 1 FROM pra_lvm_activations WHERE protected_vm_id=? "
-                       "AND status IN ('queued','running','uncertain') LIMIT 1",
+                       "AND status IN ('queued','running','uncertain','completed') LIMIT 1",
                        (vm_id,)).fetchone():
-            raise ValueError("Activation déjà active ou incertaine")
+            raise ValueError("Protection déjà activée ou état incertain : ne pas recommencer une copie FULL")
         identifier=con.execute(
             "INSERT INTO pra_lvm_activations "
             "(protected_vm_id,status,phase,details,actor,created_at,updated_at) "
