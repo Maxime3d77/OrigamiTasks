@@ -738,9 +738,12 @@ async function openPRALvmLabPanel(vmId){
  catch(ex){preError=ex.message}
  const rows=history.map(x=>'<tr><td>'+e('#'+x.id)+'</td><td>'+labelStatus(x.status)
    +'</td><td>'+e(x.mode)+'</td><td>'+e(x.point_at?dt(x.point_at):'—')
-   +'</td><td>'+e(x.details||'')+'</td></tr>').join('');
+   +'</td><td>'+e(x.details||'')+(x.test_vmid?' · clone VMID '+e(x.test_vmid):'')+'</td></tr>').join('');
  const running=history.some(x=>['queued','running','uncertain'].includes(x.status));
  const writable=Boolean(pre && pre.source_running && pre.target_stopped) && !running;
+ const latestCopy=history.find(x=>['full','incremental'].includes(x.mode));
+ const restoreReady=writable&&Boolean(pre?.checkpoint)
+   &&latestCopy?.status==='completed'&&latestCopy?.checkpoint_token===pre.checkpoint;
  const targetLabel=pre?'Source VM #'+e(pre.source_vmid)+' ON → cible VM #'+e(pre.target_vmid)
    +' OFF · '+e(pre.destination_storage):'Connexion des nœuds non validée';
  const content='<div class="notice error"><b>RECETTE UNIQUEMENT : vraies écritures sur LVM.</b> '
@@ -761,6 +764,13 @@ async function openPRALvmLabPanel(vmId){
    +((writable&&pre?.checkpoint)?'':'disabled')+'>Synchronisation incrémentale</button>'
    +'<button class="btn" data-action="dr-vm-lvm-lab-open" data-id="'+vmId+'">Actualiser</button>'
    +'</div>'
+   +'<h3>Préparer un clone indépendant pour un test de restauration</h3>'
+   +'<p class="hint">Crée une nouvelle VM PRA_TEST_ arrêtée, avec ses propres LV aplatis, '
+   +'sans interface réseau. Le clone ne démarre pas : son boot devra être contrôlé séparément.</p>'
+   +'<label class="field"><span>VMID Proxmox libre pour le clone</span>'
+   +'<input id="praLvmLabCloneVMID" type="number" min="100" step="1" placeholder="Ex. 4301"></label>'
+   +'<div class="tool-row"><button class="btn" data-action="dr-vm-lvm-lab-restore" data-id="'+vmId+'" '
+   +(restoreReady?'':'disabled')+'>Préparer un clone isolé (arrêté)</button></div>'
    +'<h3>Historique des copies LVM de recette</h3>'
    +'<div class="table-wrap"><table><thead><tr><th>Run</th><th>État</th><th>Mode</th><th>Point</th><th>Diagnostic</th>'
    +'</tr></thead><tbody>'+(rows||'<tr><td colspan="5">Aucune copie lancée</td></tr>')+'</tbody></table></div>'
@@ -2024,6 +2034,26 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    try{
     const result=await api('/dr/vms/'+id+'/lvm-lab/replicate','POST',{mode,confirmation});
     toast('Copie LVM de recette #'+result.run_id+' lancée. Suivre son état ici.');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-restore'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   const idText=document.getElementById('praLvmLabCloneVMID')?.value?.trim()||'';
+   const test_vmid=Number(idText);
+   if(confirmation!=='DISPOSABLE-LAB-ONLY'){
+    toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour le clone de recette',false);return;
+   }
+   if(!/^[0-9]{3,9}$/.test(idText)||!Number.isSafeInteger(test_vmid)||test_vmid<100){
+    toast('Choisir un VMID Proxmox libre et valide pour le clone',false);return;
+   }
+   if(!confirm('Créer réellement la VM de test PRA_TEST_'+test_vmid+' sur la cible LAB ? '
+     +'Cette opération alloue de nouveaux LV, prépare une VM sans réseau et ne la démarre pas.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/restore-clone','POST',{test_vmid,confirmation});
+    toast('Préparation du clone isolé #'+result.run_id+' démarrée. Suivre le résultat ci-dessous.');
     state.drProtectedVMs=(await api('/dr/vms')).items;
     await openPRALvmLabPanel(id);
    }catch(ex){toast(ex.message,false)}
