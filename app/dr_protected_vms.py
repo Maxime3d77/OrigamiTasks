@@ -276,6 +276,15 @@ def list_vms(plan_id=None):
         item["replication_status"]=latest.get("replication_status","not_configured")
         item["last_successful_sync"]=latest.get("last_successful_sync")
         item["last_replication_run"]=latest.get("last_replication_run")
+        # An independent lab QMP/LVM run must never be confused with an
+        # attached bootable REP_ or a production failover-ready checkpoint.
+        with db.session() as con:
+            lab=con.execute(
+                "SELECT id,status,mode,details,point_at,checkpoint_token "
+                "FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+                "ORDER BY id DESC LIMIT 1", (item["id"],)
+            ).fetchone()
+        item["lvm_lab_latest_run"]=dict(lab) if lab else None
         # An old 'completed' run predating structural verification is NOT
         # evidence of an intact standby or a safe incremental base.
         item["offline_image_verified"]=bool(latest.get("offline_image_verified", False))
