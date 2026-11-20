@@ -236,6 +236,79 @@ setting and does not require Proxmox agent upgrades just to display the
 report. Real failover and failback are still pending implementation and
 non-production acceptance tests.
 
+## Real QMP acceptance tests — v0.3.29-rc1
+
+The new `CI / Real QEMU QMP/NBD full + incremental smoke test` job
+installs actual QEMU tools and runs on **disposable local test images**,
+never real production guests.
+
+It starts QEMU with two QCOW2 disks, performs an actual QMP full backup
+to NBD exports, atomically commits the resulting images with
+`CheckpointStore`, writes changed data through the source QEMU process,
+then transfers incremental dirty bitmap backups to fresh QCOW2 COW
+overlays. It verifies payload contents, both backing chains, the
+immutability of initial checkpoints, and bitmap loss after QEMU restart.
+No obsolete checkpoint can be automatically deleted.
+
+The tests revealed a real QMP incompatibility: bitmap-add actions cannot
+share a grouped-completion transaction with backup jobs. Full seed
+transactions now omit that property, while incremental transactions
+containing only backup jobs keep grouped completion.
+
+The destination helper additionally requires a **verified shutdown** of
+the exact `qemu-nbd` process exporting each checkpoint image. Missing PID
+files, unexpected process identities and ambiguous shutdowns fail closed,
+preserving the checkpoint for manual reconciliation. Failed NBD launches
+no longer automatically erase staging data.
+
+### Not yet covered
+
+This tests real QEMU/NBD, but **not** two independent Proxmox clusters,
+SSH forwarding between actual agents, guest OS boot, application
+consistency, LVM/iSCSI receiver integration, witness, fencing, failover
+or failback. These still require implementation and real acceptance tests
+on non-production infrastructure.
+
+## Integrated PRA 0.3.29 — end-to-end laboratory qualification
+
+This integration release brings together real QMP/NBD full and incremental
+replication, atomic DIR COW checkpoints, and a guarded, experimental
+Proxmox-managed LVM receiver. The source remains ON and the standby OFF.
+
+The CI suite executes two-disk full/delta backups against a real temporary
+QEMU process, checks data integrity and immutable QCOW2 generations,
+enforces FULL reseeding after bitmap loss and exercises QCOW2-on-block via
+disposable /dev/loop devices. LVM receiver control tests are mock-based:
+**two actual Proxmox clusters have not been tested**.
+
+A manual **lab-only** command on the OrigamiTasks controller can replicate
+to a Proxmox LVM destination, with actual fresh PVE-allocated LVs and
+SSH-forwarded QMP/NBD transport:
+
+```bash
+docker exec origamitasks python -m app.pra_lvm_lab --vm-id 17
+docker exec origamitasks python -m app.pra_lvm_lab --vm-id 17 --execute --lab-confirm DISPOSABLE-LAB-ONLY
+docker exec origamitasks python -m app.pra_lvm_lab --vm-id 17 --incremental --execute --lab-confirm DISPOSABLE-LAB-ONLY
+```
+
+The target QEMU VM must exist, be stopped, have onboot disabled, **zero network
+interfaces**, and a description with both
+`ORIGAMITASKS_PRA_<protection id>` and `ORIGAMITASKS_LAB_ONLY`.
+Use *only disposable non-production volumes and VMs*. The first command is
+read-only; executed commands allocate real LVs. Lost acknowledgment results
+in manual reconciliation, never automatic deletion.
+
+The `pra_lvm_restore_lab.py` module can prepare an independent, flattened
+QCOW2 clone on new LVs for future boot tests; it intentionally keeps the clone
+OFF, has no web API and must not be considered proof of OS or application
+recovery.
+
+**Not production-ready:** LVM metadata is node-local; there is no durable
+shared witness authority, source fencing, proven isolated guest boot,
+UEFI/TPM recovery, real promotion or safe reverse sync/failback. No production
+agents are installed automatically, and no new .env feature switches
+are required.
+
 ## Integrated PRA v1 development branch (not a production release)
 
 The remaining PRA functionality is developed under
@@ -272,4 +345,3 @@ with mocked providers do not prove safe inter-site behavior.
 Do not merge this integrated development branch into production until
 LVM QMP transfer, EFI/TPM, external witness/fencing, isolated guest
 restore and two-cluster failure tests are complete.
-

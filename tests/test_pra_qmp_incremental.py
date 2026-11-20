@@ -65,7 +65,7 @@ def test_full_live_copy_uses_one_qmp_transaction_and_does_not_start_vm():
     assert result["target_checkpoint_committed"] is False
     assert result["standby_vm_started"] is False
     tx = next(args for cmd, args in qmp.calls if cmd == "transaction")
-    assert tx["properties"]["completion-mode"] == "grouped"
+    assert "properties" not in tx  # QEMU rejects grouped with bitmap-add actions
     assert [a["type"] for a in tx["actions"]].count("blockdev-backup") == 2
     assert [a["type"] for a in tx["actions"]].count("block-dirty-bitmap-add") == 2
     assert all(a["data"]["sync"] == "full" for a in tx["actions"]
@@ -81,6 +81,7 @@ def test_incremental_uses_source_dirty_bitmaps():
     assert len(tx["actions"]) == 1
     assert tx["actions"][0]["data"]["sync"] == "incremental"
     assert tx["actions"][0]["data"]["bitmap"] == "origami_106_scsi0"
+    assert tx["properties"]["completion-mode"] == "grouped"
 
 
 def test_lost_bitmap_fails_before_attaching_nbd():

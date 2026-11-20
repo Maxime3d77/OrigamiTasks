@@ -21,6 +21,8 @@ from pathlib import Path
 
 from pra_checkpoint import CheckpointStore, CheckpointError
 from pra_qmp_incremental import QMP, Disk, backup, ReplicationError
+from pra_lvm_target import PveLvmTarget, LvmTargetError
+from pra_lvm_checkpoint import LvmCheckpointStore, LvmCheckpointError
 
 _VM = re.compile(r"^[1-9][0-9]{0,8}$")
 _NODE = re.compile(r"^(?:scsi|virtio|sata|ide)[0-9]{1,2}$")
@@ -241,39 +243,47 @@ def target_probe(data):
             "writable": True, "storage_type": "dir"}
 
 
-def _kill_export(store, slot, strict=False):
+def _kill_export(store, slot, *, image_name, strict=True):
+    """Fail closed if the exact NBD image process cannot be proven stopped.
+
+    A shared VM directory can host many backup generations. A PID referring
+    to some other disk in the same directory MUST NOT be killed, and a lost
+    PID file cannot be interpreted as proof that the image is no longer
+    being written to.
+    """
+    if (not isinstance(image_name, str)
+            or Path(image_name).name != image_name
+            or not re.fullmatch(r"vm-[0-9]+-disk-[0-9]+\.qcow2", image_name)):
+        raise HostError("Invalid NBD checkpoint image name")
     pidfile = store.root / (".origami-" + slot + ".pid")
     if not pidfile.exists():
-        return
+        raise HostError("NBD PID missing: must reconcile before deleting/checking image")
     if pidfile.is_symlink():
         raise HostError("Invalid NBD pidfile")
     try:
         pid = int(pidfile.read_text().strip())
         if pid <= 1:
-            raise ValueError()
-        # Only signal a qemu-nbd process with this exact checkpoint path.
-        command = Path("/proc/" + str(pid) + "/cmdline").read_bytes().replace(b"\x00", b" ")
-        if b"qemu-nbd" not in command or str(store.root).encode() not in command:
-            raise HostError("NBD owner mismatch: manual intervention required")
+            raise ValueError("Invalid PID")
+        proc = Path("/proc/" + str(pid) + "/cmdline")
+        try:
+            arguments = proc.read_bytes().split(b"\x00")
+        except FileNotFoundError:
+            pidfile.unlink()
+            return
+        if (not any(b"qemu-nbd" in a for a in arguments[:1])
+                or str(store.root / image_name).encode() not in arguments):
+            raise HostError("NBD writer identity mismatch: manual reconciliation required")
         os.kill(pid, signal.SIGTERM)
         for _ in range(60):
             try:
                 os.kill(pid, 0)
             except ProcessLookupError:
-                break
+                pidfile.unlink()
+                return
             time.sleep(0.1)
-        else:
-            if strict:
-                raise HostError("NBD export did not terminate")
-    except FileNotFoundError:
-        # Stale PID file from a daemon already exited.
-        pidfile.unlink(missing_ok=True)
-    except (ValueError, OSError) as exc:
-        if strict:
-            raise HostError("NBD process cannot be stopped safely") from exc
-    else:
-        pidfile.unlink(missing_ok=True)
-
+        raise HostError("NBD export still active: checkpoint must be reconciled")
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HostError("NBD export shutdown not verified: preserve checkpoint") from exc
 
 def target_begin(data):
     ident = vmid(data["vmid"])
@@ -308,9 +318,12 @@ def target_begin(data):
             ports[slot] = port
         return {"token": checkpoint["token"], "ports": ports, "mode": mode}
     except BaseException:
+        # A qemu-nbd launch can fail after fork, so the launch outcome may be
+        # uncertain. Never automatically unlink the checkpoint here. Keep
+        # its pending manifest and the images until explicit reconciliation.
         for slot in ports:
-            _kill_export(store, slot)
-        store.abort(checkpoint["token"])
+            _kill_export(store, slot,
+                         image_name=checkpoint["disks"][slot]["file"], strict=True)
         raise
 
 
@@ -325,8 +338,8 @@ def target_finish(data):
     pending = store._read(store.pending)
     if not pending or pending["token"] != token:
         raise HostError("Unknown checkpoint")
-    for slot in pending["disks"]:
-        _kill_export(store, slot, strict=True)
+    for slot, disk in pending["disks"].items():
+        _kill_export(store, slot, image_name=disk["file"], strict=True)
     # Successful block copy must be proven by controller before this call.
     if data.get("verified_by_source") is not True:
         raise HostError("Source backup proof missing")
@@ -342,8 +355,8 @@ def target_abort(data):
     pending = store._read(store.pending)
     if not pending or pending.get("token") != token:
         raise HostError("No matching pending checkpoint")
-    for slot in pending["disks"]:
-        _kill_export(store, slot, strict=True)
+    for slot, disk in pending["disks"].items():
+        _kill_export(store, slot, image_name=disk["file"], strict=True)
     return store.abort(token)
 
 
@@ -551,11 +564,184 @@ def source_copy(data):
         return backup(qmp, disks, mode=data["mode"], timeout=data.get("timeout", 3600))
 
 
+
+def _lvm_lab_store(data):
+    """Require an explicitly labelled disposable standby VM on this node."""
+    if data.get("lab_ack") != "DISPOSABLE-LAB-ONLY":
+        raise HostError("Experimental LVM replication requires LAB-only approval")
+    ident = vmid(data["vmid"])
+    protected = data.get("protected_vm_id")
+    if type(protected) is not int or protected <= 0:
+        raise HostError("Invalid lab protection identifier")
+    _is_target_stopped(ident)
+    config = _vm_config(ident)
+    desc = config.get("description", "")
+    if ("ORIGAMITASKS_PRA_" + str(protected) not in desc
+            or "ORIGAMITASKS_LAB_ONLY" not in desc):
+        raise HostError("LVM receiver requires an owned, LAB-ONLY standby VM")
+    if config.get("onboot", "0") not in ("0", "false"):
+        raise HostError("LAB standby VM onboot must be disabled")
+    if any(re.fullmatch(r"net[0-9]{1,2}", key) for key in config):
+        raise HostError("LAB standby must have zero network interfaces")
+    target = PveLvmTarget(data["storage"], ident, cmd, protected_vm_id=protected)
+    target.inspect()
+    return LvmCheckpointStore(target)
+
+
+def lvm_lab_probe(data):
+    store = _lvm_lab_store(data)
+    exists = store.root.exists() and not store.root.is_symlink()
+    return {
+        "pra_protocol": 3, "storage_type": "lvm", "lab_only": True,
+        "source_vm_stopped": False, "vm_started": False,
+        "checkpoint": store.current() if exists else None,
+        "pending": store._read(store.pending) if exists else None,
+        "auto_failover": False, "cluster_manifest_ready": False
+    }
+
+
+def lvm_lab_begin(data):
+    store = _lvm_lab_store(data)
+    sizes = data.get("sizes")
+    if not isinstance(sizes, dict) or any(not _NODE.fullmatch(x) for x in sizes):
+        raise HostError("Invalid lab disk set")
+    checkpoint = store.begin(
+        mode=data["mode"], sizes=sizes,
+        source_vm_uuid=data["source_vm_uuid"], operator_approved=True)
+    ports = {}
+    try:
+        for slot in sorted(sizes):
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                port = listener.getsockname()[1]
+            path = store.image_path(slot, checkpoint["token"])
+            pidfile = store.root / (".origami-" + slot + ".pid")
+            if pidfile.exists() or pidfile.is_symlink():
+                raise HostError("Stale NBD lab PID file requires manual reconciliation")
+            cmd("qemu-nbd", "--format=qcow2", "--fork", "--persistent",
+                "--bind=127.0.0.1", "--port=" + str(port),
+                "--pid-file=" + str(pidfile), path, timeout=30)
+            ports[slot] = port
+        return {"token": checkpoint["token"], "mode": data["mode"],
+                "ports": ports, "vm_started": False, "lab_only": True}
+    except BaseException:
+        # Never unlink staged block volumes after a failed export launch.
+        # A qemu-nbd daemon may have forked despite a command failure.
+        raise
+
+
+def _lvm_lab_stop_export(store, slot, token):
+    """Stop only the exact NBD process exporting the intended PVE LV."""
+    expected = store.image_path(slot, token)
+    pidfile = store.root / (".origami-" + slot + ".pid")
+    if pidfile.is_symlink() or not pidfile.is_file():
+        raise HostError("LVM NBD PID unavailable; manual reconciliation required")
+    try:
+        pid = int(pidfile.read_text().strip())
+        if pid <= 1:
+            raise ValueError("Invalid PID")
+        try:
+            argv = Path("/proc/" + str(pid) + "/cmdline").read_bytes().split(b"\x00")
+        except FileNotFoundError:
+            pidfile.unlink()
+            return
+        if (b"qemu-nbd" not in argv[0]
+                or str(expected).encode() not in argv):
+            raise HostError("LVM export PID does not match its volume")
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(60):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                pidfile.unlink()
+                return
+            time.sleep(0.1)
+        raise HostError("LVM NBD writer shutdown not confirmed")
+    except (ValueError, OSError) as exc:
+        raise HostError("LVM NBD export ownership or shutdown uncertain") from exc
+
+
+def lvm_lab_finish(data):
+    store = _lvm_lab_store(data)
+    token = data.get("token")
+    if not isinstance(token, str) or not _TOKEN.fullmatch(token):
+        raise HostError("Invalid LAB checkpoint token")
+    pending = store._read(store.pending)
+    if not pending or pending.get("token") != token or pending.get("status") != "staging":
+        raise HostError("No matching staged LVM checkpoint")
+    for slot in sorted(pending["disks"]):
+        _lvm_lab_stop_export(store, slot, token)
+    if data.get("verified_by_source") is not True:
+        raise HostError("QMP completion proof missing")
+    committed = store.commit(token, writers_closed=True, source_jobs_verified=True)
+    return {"checkpoint": committed, "vm_started": False, "lab_only": True}
+
+
+def lvm_lab_verify(data):
+    """Read-only inspection of current LV chain; never attach or boot."""
+    store = _lvm_lab_store(data)
+    current = store.current()
+    if not current or current.get("token") != data.get("token"):
+        raise HostError("No matching committed LVM test checkpoint")
+    if store.pending.exists():
+        raise HostError("Pending LVM staging prevents certification")
+    ledger = store._read(store.owned)
+    if not ledger or not isinstance(ledger.get("generations"), list):
+        raise HostError("LVM volume ownership ledger missing")
+    owned = {v for generation in ledger["generations"]
+             for v in generation.get("volids", []) if isinstance(v, str)}
+    allowed = {store._safe_path(volid) for volid in owned}
+    checked=[]
+    for slot, disk in sorted(current["disks"].items()):
+        volume = store._safe_path(disk["volid"])
+        report=cmd("qemu-img", "info", "-f", "qcow2",
+                   "--backing-chain", "--output=json", volume, timeout=120)
+        try:
+            chain=json.loads(report)
+        except (ValueError, TypeError) as exc:
+            raise HostError("Invalid qcow2-on-LVM chain") from exc
+        if not isinstance(chain, list) or not chain or len(chain) > 128:
+            raise HostError("Missing or excessive LVM QCOW2 chain")
+        if Path(chain[0].get("filename", "")).resolve(strict=True) != Path(volume).resolve(strict=True):
+            raise HostError("Wrong top LVM QCOW2 checkpoint")
+        for link in chain:
+            path=link.get("filename")
+            if (not isinstance(path, str) or not path.startswith("/dev/")
+                    or link.get("format") not in (None, "qcow2")
+                    or str(Path(path).resolve(strict=True)) not in allowed):
+                raise HostError("Backing chain references an unowned LVM volume")
+        cmd("qemu-img", "check", "-f", "qcow2", volume, timeout=120)
+        checked.append(slot)
+    if "status: stopped" not in cmd("qm", "status", str(store.target.vmid)):
+        raise HostError("LAB VM unexpectedly active")
+    return {"checkpoint_token": current["token"], "disks": checked,
+            "verified_offline": True, "disk_format_checked": True,
+            "vm_started": False, "boot_tested": False,
+            "cluster_manifest_ready": False, "failover_authorized": False,
+            "lab_only": True}
+
+
+def lvm_lab_abort(data):
+    store = _lvm_lab_store(data)
+    token = data.get("token")
+    pending = store._read(store.pending)
+    if not pending or pending.get("token") != token:
+        raise HostError("No matching pending LVM generation")
+    for slot in sorted(pending.get("disks", {})):
+        _lvm_lab_stop_export(store, slot, token)
+    return store.abort(token)
+
+
 ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "source_dismiss": source_dismiss,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
-           "target_publish": target_publish, "target_verify": target_verify}
+           "target_publish": target_publish, "target_verify": target_verify,
+           "lvm_lab_probe": lvm_lab_probe,
+           "lvm_lab_begin": lvm_lab_begin,
+           "lvm_lab_finish": lvm_lab_finish,
+           "lvm_lab_verify": lvm_lab_verify,
+           "lvm_lab_abort": lvm_lab_abort}
 
 
 def main():
@@ -575,7 +761,7 @@ def main():
         result = ACTIONS[args.action](request)
         print(json.dumps({"ok": True, "result": result}, separators=(",", ":")))
     except (ValueError, KeyError, OSError, ReplicationError,
-            CheckpointError, HostError) as exc:
+            CheckpointError, LvmTargetError, LvmCheckpointError, HostError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)[:400]}))
         sys.exit(1)
 
