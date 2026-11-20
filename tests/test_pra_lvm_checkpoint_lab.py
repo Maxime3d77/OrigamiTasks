@@ -168,3 +168,19 @@ def test_failed_qcow2_init_is_uncertain_not_auto_rolled_back(setup):
     assert not store.current()
     assert len(target.files)==1
     assert all(p.exists() for p in target.files.values())
+
+
+def test_foreign_previous_lvm_checkpoint_never_becomes_incremental_base(setup):
+    store,target,_=setup
+    sizes={"scsi0":4096}
+    first=store.begin(mode="full",sizes=sizes,
+                      source_vm_uuid="lab-vm-one",operator_approved=True)
+    store.commit(first["token"],writers_closed=True,source_jobs_verified=True)
+    document=store._read(store.current_file)
+    document["protected_vm_id"]=999
+    mod._atomic(store.current_file,document)
+    with pytest.raises(mod.LvmCheckpointError,match="FULL reseed"):
+        store.begin(mode="incremental",sizes=sizes,
+                    source_vm_uuid="lab-vm-one",operator_approved=True)
+    assert len(target.files)==1
+    assert target.calls[-1][0]!="pvesm"
