@@ -590,6 +590,7 @@ function protectedVMsPage(){
  const tableRows=current.map(vm=>{
   const last=vm.last_check||{};
   return '<tr><td><b>'+e(vm.source_name||'VM #'+vm.source_vmid)+'</b>'
+   +'<div class="muted tinytext">Protection OrigamiTasks #'+e(vm.id)+'</div>'
    +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
    +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
    +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
@@ -746,11 +747,19 @@ async function openPRALvmLabPanel(vmId){
    &&latestCopy?.status==='completed'&&latestCopy?.checkpoint_token===pre.checkpoint;
  const targetLabel=pre?'Source VM #'+e(pre.source_vmid)+' ON → cible VM #'+e(pre.target_vmid)
    +' OFF · '+e(pre.destination_storage):'Connexion des nœuds non validée';
+ const labInitCommand='qm create '+vm.target_vmid+' --name REP_TEST_'+vm.target_vmid
+   +' --onboot 0 --description "ORIGAMITASKS_PRA_'+vm.id
+   +' ORIGAMITASKS_LAB_ONLY" --memory 2048 --cores 2';
  const content='<div class="notice error"><b>RECETTE UNIQUEMENT : vraies écritures sur LVM.</b> '
    +'La cible doit porter ORIGAMITASKS_LAB_ONLY, être arrêtée, sans carte réseau et avec onboot=0. '
    +'Chaque transfert alloue de nouveaux volumes logiques épais, sans suppression automatique. '
    +'Aucune bascule ni aucun démarrage automatique.</div>'
    +'<p><b>'+targetLabel+'</b></p>'
+   +'<details><summary>Préparer la VM de secours vide (nœud Proxmox de recette)</summary>'
+   +'<p class="hint">Protection #'+e(vm.id)+' : créer cette VM seulement si le VMID '+e(vm.target_vmid)
+   +' est encore libre sur tout le cluster de RECETTE. Ne pas ajouter de disque ni réseau ; VM arrêtée.</p>'
+   +'<pre><code>'+e(labInitCommand)+'\nqm status '+e(vm.target_vmid)
+   +'\nqm config '+e(vm.target_vmid)+'</code></pre></details>'
    +(pre?'<p class="hint">Disques : '+e((pre.disk_slots||[]).join(', '))
       +' · Espace libre : '+e(Math.round(pre.available_bytes/1073741824))+' Gio'
       +' · Dernier checkpoint : '+e(pre.checkpoint||'aucun')+'</p>'
