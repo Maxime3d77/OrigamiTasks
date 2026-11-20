@@ -679,6 +679,23 @@ def get_vm_storage_readiness(vm_id:int,request:Request):
         raise HTTPException(503,'Découverte du stockage : API Proxmox indisponible ou non autorisée') from None
 
 
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/prepare-standby')
+def prepare_lvm_lab_standby(vm_id:int, request:Request, payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation de recette requise')
+    from . import pra_lvm_standby
+    try:
+        result=pra_lvm_standby.prepare(vm_id,payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Préparation PRA non confirmée : vérifier agent, SSH et Proxmox') from None
+    db.audit(user['username'],'pra.lvm.lab.standby.prepare',vm_id,
+             'VMID='+str(result['vmid'])+' created='+str(result['created']))
+    return result
+
+
 @app.get('/api/dr/vms/{vm_id}/lvm-lab/preflight')
 def get_lvm_lab_preflight(vm_id:int, request:Request):
     security.require(request,role='admin')
