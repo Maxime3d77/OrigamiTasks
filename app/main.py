@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, agent_updates
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_lvm_jobs, agent_updates
 
 
 @asynccontextmanager
@@ -27,6 +27,7 @@ async def lifespan(app):
     agent_deployments.start()
     agent_updates.start()
     pra_live.initialize()
+    pra_lvm_jobs.initialize()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
@@ -676,6 +677,41 @@ def get_vm_storage_readiness(vm_id:int,request:Request):
         raise HTTPException(409,str(exc)) from None
     except Exception:
         raise HTTPException(503,'Découverte du stockage : API Proxmox indisponible ou non autorisée') from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/preflight')
+def get_lvm_lab_preflight(vm_id:int, request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_lvm_jobs.preflight(vm_id)
+    except (pra_lvm_jobs.LabJobError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Prévol LVM de recette : vérifier les agents SSH/PVE et la VM marquée LAB-ONLY') from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/runs')
+def list_lvm_lab_runs(vm_id:int, request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_jobs.list_runs(vm_id)}
+    except (pra_lvm_jobs.LabJobError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/replicate')
+def start_lvm_lab_run(vm_id:int, request:Request, payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'mode','confirmation'}:
+        raise HTTPException(422,'Préciser mode et confirmation de recette')
+    try:
+        return pra_lvm_jobs.start(
+            vm_id,user['username'],
+            mode=payload['mode'],confirmation=payload['confirmation'])
+    except (pra_lvm_jobs.LabJobError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Copie LVM non lancée : contrôler la recette Proxmox et les agents') from None
 
 
 @app.get('/api/dr/vms/{vm_id}/replication-preflight')
