@@ -124,7 +124,9 @@ def _connect(binding):
 def _run_helper(ssh, action, data, timeout=60):
     if action not in {"source_probe", "source_copy", "source_dismiss",
                       "target_probe", "target_begin",
-                      "target_finish", "target_abort", "target_publish", "target_verify"}:
+                      "target_finish", "target_abort", "target_publish", "target_verify",
+                       "lvm_lab_probe", "lvm_lab_begin", "lvm_lab_finish",
+                       "lvm_lab_verify", "lvm_lab_abort"}:
         raise LiveReplicationError("Action PRA non autorisée")
     encoded = base64.b64encode(json.dumps(data, separators=(",", ":")).encode()).decode()
     invoke = "/usr/bin/python3 " + shlex.quote(_HELPER) + " " + action + " " + shlex.quote(encoded)
