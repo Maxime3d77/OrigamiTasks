@@ -657,6 +657,16 @@ def get_live_replication_history(vm_id:int,request:Request):
         raise HTTPException(404,str(exc)) from None
 
 
+@app.get('/api/dr/vms/{vm_id}/recovery-readiness')
+def get_vm_recovery_readiness(vm_id:int, request:Request):
+    security.require(request,role='admin')
+    from . import pra_recovery_readiness
+    try:
+        return pra_recovery_readiness.assess(vm_id)
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
 @app.get('/api/dr/vms/{vm_id}/storage-readiness')
 def get_vm_storage_readiness(vm_id:int,request:Request):
     security.require(request,role='admin')
