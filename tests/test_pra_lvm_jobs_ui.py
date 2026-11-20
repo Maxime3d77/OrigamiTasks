@@ -168,3 +168,76 @@ def test_ui_does_not_claim_lvm_recovery_is_production_safe():
                    "Copie complète à chaud","Synchronisation incrémentale"):
         assert phrase in ui
     assert "Bascule réelle interdite" in ui
+
+
+def test_restore_clone_requires_verified_full_and_never_starts_vm(monkeypatch):
+    with TestClient(app) as client:
+        h=login(client)
+        vm_id,sites,clusters,plans=_setup(client,h,monkeypatch)
+        try:
+            token="a"*32
+            def pre(_):
+                return {**preflight(None),"checkpoint":token}
+            monkeypatch.setattr(pra_lvm_jobs,"preflight",pre)
+            monkeypatch.setattr(pra_lvm_jobs.threading,"Thread",NoThread)
+            # A remote checkpoint alone is not enough: it must correspond to a
+            # completed, tracked LVM copy of this exact protected VM.
+            blocked=client.post(f"/api/dr/vms/{vm_id}/lvm-lab/restore-clone",headers=h,
+                                json={"test_vmid":4301,"confirmation":pra_lvm_jobs.LAB_ACK})
+            assert blocked.status_code==409
+            with db.session() as con:
+                con.execute(
+                    "INSERT INTO pra_lvm_lab_runs("
+                    "protected_vm_id,status,mode,actor,created_at,point_at,checkpoint_token,"
+                    "source_vmid,target_vmid,target_storage,source_dc_id,target_dc_id)"
+                    " SELECT id,'completed','full','admin',?,?,?,source_vmid,target_vmid,"
+                    "target_storage,source_dc_id,target_dc_id FROM dr_protected_vms WHERE id=?",
+                    (db.now(),"2026-11-20T09:35:00+00:00",token,vm_id))
+            missing_ack=client.post(f"/api/dr/vms/{vm_id}/lvm-lab/restore-clone",headers=h,
+                                    json={"test_vmid":4301,"confirmation":"anything"})
+            assert missing_ack.status_code==409
+            vmid_collision=client.post(f"/api/dr/vms/{vm_id}/lvm-lab/restore-clone",headers=h,
+                                       json={"test_vmid":321,"confirmation":pra_lvm_jobs.LAB_ACK})
+            assert vmid_collision.status_code==409
+            requested=client.post(f"/api/dr/vms/{vm_id}/lvm-lab/restore-clone",headers=h,
+                                  json={"test_vmid":4301,"confirmation":pra_lvm_jobs.LAB_ACK})
+            assert requested.status_code==200,requested.text
+            run_id=requested.json()["run_id"]
+            assert requested.json()["test_vm_started"] is False
+            simultaneous=client.post(f"/api/dr/vms/{vm_id}/lvm-lab/restore-clone",headers=h,
+                                     json={"test_vmid":4302,"confirmation":pra_lvm_jobs.LAB_ACK})
+            assert simultaneous.status_code==409
+            def isolated(_):
+                return {"test_vmid":4301,"checkpoint_token":token,
+                        "network_isolated":True,"vm_started":False,
+                        "standby_started":False,"boot_verified":False,
+                        "application_verified":False,"failover_authorized":False}
+            monkeypatch.setattr(pra_lvm_jobs,"_prepare_isolated_clone",isolated)
+            pra_lvm_jobs._perform(run_id)
+            history=pra_lvm_jobs.list_runs(vm_id)
+            assert history[0]["mode"]=="restore"
+            assert history[0]["status"]=="completed"
+            assert history[0]["test_vmid"]==4301
+            assert history[0]["checkpoint_token"]==token
+            assert "arrêté" in history[0]["details"]
+        finally:
+            _remove(client,h,vm_id,sites,clusters,plans)
+
+
+def test_clone_approval_never_exposes_generic_hypervisor_start(monkeypatch):
+    with TestClient(app) as client:
+        h=login(client)
+        vm_id,sites,clusters,plans=_setup(client,h,monkeypatch)
+        try:
+            denied=client.post(f"/api/dr/vms/{vm_id}/lvm-lab/restore-clone",
+                               json={"test_vmid":4301,"confirmation":pra_lvm_jobs.LAB_ACK})
+            assert denied.status_code in (401,403)
+            wrong=client.post(f"/api/dr/vms/{vm_id}/lvm-lab/restore-clone",headers=h,
+                              json={"test_vmid":4301,"confirmation":pra_lvm_jobs.LAB_ACK,
+                                    "start_vm":True})
+            assert wrong.status_code==422
+            assert "lvm_lab_prepare_clone" in (
+                __import__("pathlib").Path(__file__).resolve().parents[1]/
+                "agents/linux/pra_host_worker.py").read_text()
+        finally:
+            _remove(client,h,vm_id,sites,clusters,plans)
