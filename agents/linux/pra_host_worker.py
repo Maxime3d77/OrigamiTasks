@@ -264,7 +264,7 @@ def _kill_export(store, slot, *, image_name, strict=True):
             raise ValueError("Invalid PID")
         proc = Path("/proc/" + str(pid) + "/cmdline")
         try:
-            arguments = proc.read_bytes().split(b"\\x00")
+            arguments = proc.read_bytes().split(b"\x00")
         except FileNotFoundError:
             pidfile.unlink()
             return
