@@ -714,6 +714,21 @@ def start_lvm_lab_run(vm_id:int, request:Request, payload:dict[str,Any]):
         raise HTTPException(503,'Copie LVM non lancée : contrôler la recette Proxmox et les agents') from None
 
 
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/restore-clone')
+def create_lvm_lab_restore_clone(vm_id:int, request:Request, payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'test_vmid','confirmation'}:
+        raise HTTPException(422,'VMID de test et confirmation explicite requis')
+    try:
+        return pra_lvm_jobs.start_restore(
+            vm_id,user['username'],test_vmid=payload['test_vmid'],
+            confirmation=payload['confirmation'])
+    except (pra_lvm_jobs.LabJobError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Préparation du clone de recette non confirmée : vérifier les LV/QEMU') from None
+
+
 @app.get('/api/dr/vms/{vm_id}/replication-preflight')
 def live_replication_preflight(vm_id:int,request:Request):
     security.require(request,role='admin')
