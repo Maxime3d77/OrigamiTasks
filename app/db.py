@@ -209,6 +209,30 @@ CREATE TABLE IF NOT EXISTS pra_live_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_pra_live_runs_vm ON pra_live_runs(protected_vm_id,id DESC);
 
+CREATE TABLE IF NOT EXISTS pra_lvm_lab_runs (
+  id INTEGER PRIMARY KEY,
+  protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK(status IN ('queued','running','completed','failed','uncertain')),
+  mode TEXT NOT NULL CHECK(mode IN ('full','incremental')),
+  actor TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  details TEXT NOT NULL DEFAULT '',
+  result_json TEXT NOT NULL DEFAULT '{}',
+  point_at TEXT,
+  checkpoint_token TEXT,
+  source_vmid INTEGER NOT NULL,
+  target_vmid INTEGER NOT NULL,
+  target_storage TEXT NOT NULL,
+  source_dc_id INTEGER NOT NULL,
+  target_dc_id INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pra_lvm_lab_runs_vm ON pra_lvm_lab_runs(protected_vm_id,id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pra_lvm_lab_unresolved
+  ON pra_lvm_lab_runs(protected_vm_id) WHERE status IN ('queued','running','uncertain');
+
+
 
 CREATE TABLE IF NOT EXISTS runs (
  id INTEGER PRIMARY KEY, job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
