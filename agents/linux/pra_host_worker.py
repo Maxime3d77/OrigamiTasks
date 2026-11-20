@@ -251,7 +251,7 @@ def _kill_export(store, slot, *, image_name, strict=True):
     """
     if (not isinstance(image_name, str)
             or Path(image_name).name != image_name
-            or not re.fullmatch(r"vm-[0-9]+-disk-[0-9]+\\.qcow2", image_name)):
+            or not re.fullmatch(r"vm-[0-9]+-disk-[0-9]+\.qcow2", image_name)):
         raise HostError("Invalid NBD checkpoint image name")
     pidfile = store.root / (".origami-" + slot + ".pid")
     if not pidfile.exists():
