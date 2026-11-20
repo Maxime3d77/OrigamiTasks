@@ -98,6 +98,9 @@ def test_full_to_incremental_volumes_never_reuse_old_lv(setup):
         assert chains[path]==[path,previous]
     assert not any(call[0]=="pvesm" and call[1]=="free" for call in target.calls)
     assert all(p.exists() for p in target.files.values())
+    ledger=json.loads(store.owned.read_text())
+    assert len(ledger["generations"])==2
+    assert {x["token"] for x in ledger["generations"]}=={seed["token"],delta["token"]}
 
 
 def test_no_allocation_without_explicit_approval(setup):
@@ -149,3 +152,19 @@ def test_source_generation_mismatch_blocks_incremental(setup):
     with pytest.raises(mod.LvmCheckpointError,match="FULL reseed"):
         store.begin(mode="incremental",sizes={"scsi0":4096},
                     source_vm_uuid="lab-vm-new",operator_approved=True)
+
+
+def test_failed_qcow2_init_is_uncertain_not_auto_rolled_back(setup):
+    store,target,chains=setup
+    def broken(*args):
+        raise mod.LvmCheckpointError("image format rejected")
+    store.command=broken
+    with pytest.raises(mod.LvmCheckpointError,match="rejected"):
+        store.begin(mode="full",sizes={"scsi0":4096},
+                    source_vm_uuid="lab-vm-one",operator_approved=True)
+    record=store._read(store.pending)
+    assert record["status"]=="uncertain"
+    assert record["checkpoint_committed"] is False
+    assert not store.current()
+    assert len(target.files)==1
+    assert all(p.exists() for p in target.files.values())
