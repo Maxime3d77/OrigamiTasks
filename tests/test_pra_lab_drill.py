@@ -43,9 +43,9 @@ def _setup(client, monkeypatch, h):
            "base":conf,"clone":{},"calls":[]}
     def fake_pve_http(dc,cred,path,method="GET",data=None):
         state["calls"].append((method,path,data))
-        if path.endswith("/qemu/321/config"):
+        if method=="GET" and path.endswith("/qemu/321/config"):
             return dict(state["base"])
-        if path.endswith("/qemu/9301/config"):
+        if method=="GET" and path.endswith("/qemu/9301/config"):
             return dict(state["clone"])
         if "/tasks/" in path and path.endswith("/status"):
             return {"status":"stopped","exitstatus":"OK"}
