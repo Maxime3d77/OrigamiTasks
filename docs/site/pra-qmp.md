@@ -236,3 +236,36 @@ setting and does not require Proxmox agent upgrades just to display the
 report. Real failover and failback are still pending implementation and
 non-production acceptance tests.
 
+## Real QMP acceptance tests — v0.3.29-rc1
+
+The new `CI / Real QEMU QMP/NBD full + incremental smoke test` job
+installs actual QEMU tools and runs on **disposable local test images**,
+never real production guests.
+
+It starts QEMU with two QCOW2 disks, performs an actual QMP full backup
+to NBD exports, atomically commits the resulting images with
+`CheckpointStore`, writes changed data through the source QEMU process,
+then transfers incremental dirty bitmap backups to fresh QCOW2 COW
+overlays. It verifies payload contents, both backing chains, the
+immutability of initial checkpoints, and bitmap loss after QEMU restart.
+No obsolete checkpoint can be automatically deleted.
+
+The tests revealed a real QMP incompatibility: bitmap-add actions cannot
+share a grouped-completion transaction with backup jobs. Full seed
+transactions now omit that property, while incremental transactions
+containing only backup jobs keep grouped completion.
+
+The destination helper additionally requires a **verified shutdown** of
+the exact `qemu-nbd` process exporting each checkpoint image. Missing PID
+files, unexpected process identities and ambiguous shutdowns fail closed,
+preserving the checkpoint for manual reconciliation. Failed NBD launches
+no longer automatically erase staging data.
+
+### Not yet covered
+
+This tests real QEMU/NBD, but **not** two independent Proxmox clusters,
+SSH forwarding between actual agents, guest OS boot, application
+consistency, LVM/iSCSI receiver integration, witness, fencing, failover
+or failback. These still require implementation and real acceptance tests
+on non-production infrastructure.
+
