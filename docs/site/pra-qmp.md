@@ -269,3 +269,43 @@ consistency, LVM/iSCSI receiver integration, witness, fencing, failover
 or failback. These still require implementation and real acceptance tests
 on non-production infrastructure.
 
+## Integrated PRA 0.3.29 — end-to-end laboratory qualification
+
+This integration release brings together real QMP/NBD full and incremental
+replication, atomic DIR COW checkpoints, and a guarded, experimental
+Proxmox-managed LVM receiver. The source remains ON and the standby OFF.
+
+The CI suite executes two-disk full/delta backups against a real temporary
+QEMU process, checks data integrity and immutable QCOW2 generations,
+enforces FULL reseeding after bitmap loss and exercises QCOW2-on-block via
+disposable /dev/loop devices. LVM receiver control tests are mock-based:
+**two actual Proxmox clusters have not been tested**.
+
+A manual **lab-only** command on the OrigamiTasks controller can replicate
+to a Proxmox LVM destination, with actual fresh PVE-allocated LVs and
+SSH-forwarded QMP/NBD transport:
+
+```bash
+docker exec origamitasks python -m app.pra_lvm_lab --vm-id 17
+docker exec origamitasks python -m app.pra_lvm_lab --vm-id 17 --execute --lab-confirm DISPOSABLE-LAB-ONLY
+docker exec origamitasks python -m app.pra_lvm_lab --vm-id 17 --incremental --execute --lab-confirm DISPOSABLE-LAB-ONLY
+```
+
+The target QEMU VM must exist, be stopped, have onboot disabled, **zero network
+interfaces**, and a description with both
+`ORIGAMITASKS_PRA_<protection id>` and `ORIGAMITASKS_LAB_ONLY`.
+Use *only disposable non-production volumes and VMs*. The first command is
+read-only; executed commands allocate real LVs. Lost acknowledgment results
+in manual reconciliation, never automatic deletion.
+
+The `pra_lvm_restore_lab.py` module can prepare an independent, flattened
+QCOW2 clone on new LVs for future boot tests; it intentionally keeps the clone
+OFF, has no web API and must not be considered proof of OS or application
+recovery.
+
+**Not production-ready:** LVM metadata is node-local; there is no durable
+shared witness authority, source fencing, proven isolated guest boot,
+UEFI/TPM recovery, real promotion or safe reverse sync/failback. No production
+agents are installed automatically, and no new .env feature switches
+are required.
+
