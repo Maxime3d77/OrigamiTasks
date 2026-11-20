@@ -32,3 +32,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils
       - name: Exercise actual QMP dirty bitmap backups over local NBD
         run: python tests/pra_qmp_e2e_lab.py
+      - name: Validate QCOW2 COW chains on real block devices (loop-backed, disposable)
+        run: |
+          sudo modprobe loop || true
+          sudo python tests/pra_qcow2_on_loop_lab.py
