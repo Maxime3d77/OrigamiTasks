@@ -580,8 +580,8 @@ function datacenters(){
 }
 
 
-/* A protected VM is a manually selected plan, never an actual running replica.
-   All tests perform read-only GET requests to Proxmox and return BLOCKED. */
+/* A protected VM can run a disposable LAB copy; actual promotion remains
+   blocked until independent fencing and witness controls are proven. */
 function protectedVMsPage(){
  if(!roleAdmin())return title('VM protégées PRA','Administration uniquement.');
  const plans=state.drPlans||[],all=state.drProtectedVMs||[];
@@ -594,14 +594,18 @@ function protectedVMsPage(){
    +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
    +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
    +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
-   +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
+   +'<td><b>'+e(vm.replica_name)+'</b>'
+   +'<div class="muted tinytext">'+(vm.lvm_standby_configured?'Disques publiés sur REP_ · boot non validé':'Réplique non encore publiée')+'</div>'
+   +'<div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
-   +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
+   +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)
+     +' min '+(vm.lvm_lab_activated?'(incrémental programmé après amorçage)':'(objectif indicatif)')+'</div>'
+     +(vm.lvm_activation?'<div class="muted tinytext">'+e(vm.lvm_activation.phase)+' · '+e(vm.lvm_activation.details)+'</div>':'')+'</td>'
    +'<td>'+labelStatus(vm.lvm_lab_latest_run?.status||vm.replication_status)
      +'<div class="muted tinytext">Dernière copie LVM : '
      +(vm.lvm_lab_latest_run?.point_at?dt(vm.lvm_lab_latest_run.point_at):(vm.last_successful_sync?dt(vm.last_successful_sync):'aucune'))+'</div>'
      +'<div class="muted tinytext">Moteur : '+(vm.lvm_lab_latest_run?'QMP → LVM de recette':'QMP → DIR / non configuré')+'</div>'
-   +'<div class="muted tinytext">Validation du dernier transfert : '+(vm.offline_image_verified?'structurelle, hors ligne':'non vérifiée ou sans transfert')+' · Démarrage non testé</div>'
+   +'<div class="muted tinytext">Validation : '+(vm.lvm_standby_configured?'checkpoint LVM vérifié et attaché, boot non certifié':vm.offline_image_verified?'structurelle DIR, hors ligne':'pas encore certifiée')+'</div>'
    +'<div class="muted tinytext">'+e(vm.last_replication_run?.details||'')+'</div>'
    +(vm.lvm_lab_latest_run?'<div class="muted tinytext"><b>LVM RECETTE :</b> '
      +labelStatus(vm.lvm_lab_latest_run.status)+' · '+e(vm.lvm_lab_latest_run.mode)
@@ -617,7 +621,7 @@ function protectedVMsPage(){
    +'<button class="btn tiny" data-action="dr-vm-recovery-readiness" data-id="'+vm.id+'">Préparation bascule</button>'
    +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'">Réplication LVM</button>':'')
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
-   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
+   +(vm.engine==='qmp_live_incremental'&&!vm.lvm_lab_activated?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
@@ -630,7 +634,7 @@ function protectedVMsPage(){
    '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
    +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
   +'<div class="notice dr-safety-notice"><b>QMP expérimental :</b> une synchronisation approuvée peut créer une VM REP_ arrêtée sur stockage DIR inscriptible ; source toujours allumée. '
-  +'Copie LVM recette : le pilote permet une copie FULL/incrémentale réelle sur LV marqués LAB-ONLY, sans démarrage ni attachement automatique. '
+  +'Copie LVM recette : amorçage REP_, copies FULL/incrémentales et publication, avec limite de 8 générations sans rétention automatique. '
   +'Une vérification QCOW2 hors ligne ne garantit pas le démarrage ni la cohérence applicative. '
    +'Les tests de bascule et de retour restent des simulations : aucune promotion automatique.</div>'
   +'<div class="stats-grid dr-vm-stat-grid">'
