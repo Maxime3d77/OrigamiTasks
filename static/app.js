@@ -605,7 +605,9 @@ function protectedVMsPage(){
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +'<button class="btn tiny" data-action="dr-vm-storage-readiness" data-id="'+vm.id+'">Compatibilité stockage</button>'
    +'<button class="btn tiny" data-action="dr-vm-recovery-readiness" data-id="'+vm.id+'">Préparation bascule</button>'
-   +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
+   +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>'
+    +'<button class="btn tiny" data-action="dr-vm-pbs-restore-start" data-id="'+vm.id+'">Restaurer sur secours</button>'
+    +'<button class="btn tiny" data-action="dr-vm-pbs-release" data-id="'+vm.id+'">Libérer après suppression du clone</button>':'')
    +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
@@ -1877,13 +1879,63 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   }catch(ex){toast(ex.message,false)}
   return;
  }
+ if(a==='dr-vm-pbs-release'){
+   if(!confirm('Cette action exige que la VM secours ait été supprimée MANUELLEMENT dans Proxmox. OrigamiTasks vérifiera son absence et libérera uniquement son suivi, sans toucher aux disques. Continuer ?'))return;
+   try{
+     const x=await api('/dr/vms/'+id+'/pbs/release','POST',{approved:true});
+     state.drProtectedVMs=(await api('/dr/vms')).items;render();
+     toast(x.removed_history+' suivi(s) de restauration libéré(s), aucun disque supprimé.');
+   }catch(ex){toast(ex.message,false)}
+   return;
+ }
+ if(a==='dr-vm-pbs-restore-start'){
+   try{
+     const backups=(await api('/dr/vms/'+id+'/pbs/backups')).items||[];
+     const completed=backups.filter(x=>x.status==='completed');
+     if(!completed.length)return toast('Aucune sauvegarde PBS terminée enregistrée pour cette VM. Lance une sauvegarde puis vérifie son statut.',false);
+     const suggested=Number(b.dataset.backup)||completed[0].id;
+     const jobId=prompt('ID du job PBS terminé (disponibles : '+completed.slice(0,7).map(x=>x.id).join(', ')+') :',String(suggested));
+     if(!jobId||!/^\d+$/.test(jobId)||!completed.some(x=>x.id===Number(jobId)))return toast('Choisir un job PBS terminé et enregistré.',false);
+     const destPBS=prompt('Identifiant du stockage PBS visible depuis le cluster de secours :');
+     if(!destPBS||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(destPBS))return;
+     const x=await api('/dr/vms/'+id+'/pbs/restore-options?backup_job_id='+Number(jobId)
+       +'&target_pbs_storage='+encodeURIComponent(destPBS));
+     if(!x.archives?.length)return toast('Aucun snapshot PBS correspondant visible sur le cluster de secours.',false);
+     const opts=x.archives.map(v=>'<option value="'+e(v.volid)+'">'+e(v.volid)+'</option>').join('');
+     modal('Restaurer une VM secours ÉTEINTE',
+       '<div class="notice error"><b>Opération réelle sur le stockage de destination.</b> '
+       +'Vérifier la VMID '+e(x.target_vmid)+', le stockage '+e(x.target_storage)+', la provenance du PBS et l’isolement réseau. '
+       +'Aucun démarrage et aucune promotion ne seront effectués.</div>'
+       +'<form id="drPBSRestoreForm" data-id="'+id+'" data-backup="'+e(jobId)+'" data-storage="'+e(destPBS)+'">'
+       +'<div class="field"><span>Snapshot PBS présent sur les deux sites</span><select name="archive">'+opts+'</select></div>'
+       +'<label class="field checkbox"><input type="checkbox" name="approved" required><span>'
+       +'Je confirme une RESTAURATION REELLE sur VMID '+e(x.target_vmid)+' ; elle restera éteinte.</span></label>'
+       +'<button class="btn primary" type="submit">Restaurer la copie de secours</button></form>',
+       '',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+ }
+ if(a==='dr-vm-pbs-restore-status'){
+   try{
+     const x=await api('/dr/vms/'+id+'/pbs/restores/'+Number(b.dataset.job));
+     modal('Restauration PBS sur secours',
+       '<div class="notice"><b>Statut :</b> '+e(x.status)
+       +' · <b>VMID :</b> '+e(x.target_vmid||'—')
+       +' · <b>VM arrêtée et présente :</b> '+(x.restored?'oui':'non confirmé')
+       +' · <b>Réseau isolé :</b> '+(x.network_isolated?'oui':'non confirmé')
+       +' · <b>Bascule autorisée :</b> NON.</div>',
+       '<button class="btn primary" data-action="dr-vm-pbs-restore-status" data-id="'+id+'" data-job="'+Number(b.dataset.job)+'">Actualiser</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+ }
  if(a==='dr-vm-pbs-status'){
   try{
    const x=await api('/dr/vms/'+id+'/pbs/backups/'+Number(b.dataset.job));
    modal('État de sauvegarde PBS','<div class="notice">État : '+e(x.status)+' · sortie : '+e(x.exitstatus||'en cours')+
      '. Sauvegarde terminée : '+(x.backup_verified?'oui':'non')+
      '. VM secours restaurée : non.</div>',
-    '<button class="btn primary" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+e(b.dataset.job)+'">Actualiser le statut</button>',true);
+    '<button class="btn" data-action="dr-vm-pbs-status" data-id="'+id+'" data-job="'+e(b.dataset.job)+'">Actualiser le statut</button>'
+    +(x.backup_verified?'<button class="btn primary" data-action="dr-vm-pbs-restore-start" data-id="'+id+'" data-backup="'+e(b.dataset.job)+'">Restaurer sur secours</button>':''),true);
   }catch(ex){toast(ex.message,false)}
   return;
  }
@@ -2381,6 +2433,23 @@ async function handleSubmit(ev){
    await refresh();showPage('agents');
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return
+ }
+ if(ev.target.id==='drPBSRestoreForm'){
+  ev.preventDefault();
+  const data=new FormData(ev.target);
+  if(!data.has('approved'))return toast('Confirmation obligatoire',false);
+  if(!confirm('Confirmer la restauration REELLE des disques sur le cluster de secours, sans démarrage ?'))return;
+  try{
+    const job=await api('/dr/vms/'+Number(ev.target.dataset.id)+'/pbs/restore','POST',{
+      backup_job_id:Number(ev.target.dataset.backup),
+      target_pbs_storage:ev.target.dataset.storage,
+      archive:String(data.get('archive')),approved:true
+    });
+    modal('Restauration PBS soumise à Proxmox',
+      '<div class="notice">Tâche Proxmox : '+e(job.upid)+'. VM secours non démarrée.</div>',
+      '<button class="btn primary" data-action="dr-vm-pbs-restore-status" data-id="'+e(ev.target.dataset.id)+'" data-job="'+job.restore_job_id+'">Vérifier le résultat</button>',true);
+  }catch(ex){toast(ex.message,false)}
+  return;
  }
  if(ev.target.id==='agentUpdateForm'){
   ev.preventDefault();const f=new FormData(ev.target);
