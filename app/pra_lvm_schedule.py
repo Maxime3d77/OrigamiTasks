@@ -95,6 +95,13 @@ def tick(now=None):
                     continue
             previous = latest["id"]
             with db.session() as con:
+                publication=con.execute(
+                    "SELECT status FROM pra_lvm_publications WHERE protected_vm_id=? "
+                    "AND checkpoint_token=(SELECT checkpoint_token FROM pra_lvm_lab_runs "
+                    "WHERE id=?) ORDER BY id DESC LIMIT 1",(vm_id,previous)).fetchone()
+            if not publication or publication["status"] != "completed":
+                continue
+            with db.session() as con:
                 previously_blocked=con.execute(
                     "SELECT 1 FROM pra_lvm_schedule_events WHERE protected_vm_id=? "
                     "AND previous_run_id=? AND status='blocked' LIMIT 1",
