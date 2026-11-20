@@ -30,11 +30,21 @@ def _dt(value):
 
 def _event(vm_id, prior_id, status, detail):
     with db.session() as con:
-        con.execute(
+        if prior_id is None:
+            # One generic error per protection rather than logging every
+            # five-second scheduler tick forever.
+            existing=con.execute(
+                "SELECT 1 FROM pra_lvm_schedule_events WHERE protected_vm_id=? "
+                "AND previous_run_id IS NULL AND status=? LIMIT 1",
+                (vm_id,status)).fetchone()
+            if existing:
+                return
+        inserted=con.execute(
             "INSERT OR IGNORE INTO pra_lvm_schedule_events"
             "(protected_vm_id,previous_run_id,status,detail,created_at) VALUES (?,?,?,?,?)",
-            (vm_id,prior_id,status,str(detail)[:600],db.now()))
-    db.audit("system","pra.lvm.schedule."+status,vm_id,str(detail)[:400])
+            (vm_id,prior_id,status,str(detail)[:600],db.now())).rowcount
+    if inserted:
+        db.audit("system","pra.lvm.schedule."+status,vm_id,str(detail)[:400])
 
 
 def history(vm_id):
