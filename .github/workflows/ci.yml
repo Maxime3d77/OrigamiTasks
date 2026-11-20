@@ -16,3 +16,19 @@ jobs:
         run: python tools/check_docs.py
       - name: Build bilingual documentation (strict)
         run: mkdocs build --strict
+
+  pra-qmp-e2e:
+    name: Real QEMU QMP/NBD full + incremental smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install real QEMU block tools
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils
+      - name: Exercise actual QMP dirty bitmap backups over local NBD
+        run: python tests/pra_qmp_e2e_lab.py
