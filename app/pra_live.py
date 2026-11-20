@@ -126,7 +126,7 @@ def _run_helper(ssh, action, data, timeout=60):
                       "target_probe", "target_begin",
                       "target_finish", "target_abort", "target_publish", "target_verify",
                        "lvm_lab_probe", "lvm_lab_begin", "lvm_lab_finish",
-                       "lvm_lab_verify", "lvm_lab_abort"}:
+                       "lvm_lab_verify", "lvm_lab_abort", "lvm_lab_prepare_clone"}:
         raise LiveReplicationError("Action PRA non autorisée")
     encoded = base64.b64encode(json.dumps(data, separators=(",", ":")).encode()).decode()
     invoke = "/usr/bin/python3 " + shlex.quote(_HELPER) + " " + action + " " + shlex.quote(encoded)
@@ -359,6 +359,13 @@ def start(vm_id, actor, approved=False, scheduled=False):
         if previous:
             raise LiveReplicationError(
                 "Réplication active ou état indéterminé : vérifier et réconcilier avant de relancer")
+        lvm_conflict = con.execute(
+            "SELECT id FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain') LIMIT 1", (vm_id,)
+        ).fetchone()
+        if lvm_conflict:
+            raise LiveReplicationError(
+                "Copie LVM de recette active/incertaine : résoudre son état avant un QMP DIR")
         row = con.execute("SELECT engine,state FROM dr_protected_vms WHERE id=?",
                           (vm_id,)).fetchone()
         if not row or row["engine"] != "qmp_live_incremental" or row["state"] != "planned":

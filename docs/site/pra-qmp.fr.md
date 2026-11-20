@@ -408,3 +408,85 @@ preuve de sécurité intersites.
 
 **Ne pas fusionner cette branche tant que les chemins LVM QMP, EFI/TPM,
 témoin/fencing et validation sur deux clusters de recette ne sont pas prêts.**
+
+## v0.3.30 — Copie LVM réelle depuis la console (recette supervisée)
+
+La page **VM protégées PRA** propose maintenant l'action **Copie LVM recette**.
+Ce n'est plus seulement un diagnostic : la copie **FULL** ou
+**INCREMENTAL** déclenche véritablement le moteur QMP/NBD par les agents
+Proxmox déjà associés au groupe PRA. La VM source reste **allumée** et la
+VM de destination **arrêtée** ; chaque génération LVM utilise de nouveaux LV
+QCOW2. Les résultats et les échecs sont conservés dans
+`pra_lvm_lab_runs`, séparément des réplications DIR.
+
+### Première utilisation sur deux clusters de recette uniquement
+
+1. Déclarer les clusters et les sites PRA et installer les agents Linux PRA
+   **0.3.30** sur les deux nœuds de **recette** avec des accès SSH approuvés.
+2. Depuis **VM protégées PRA**, créer la protection avec le moteur
+   `qmp_live_incremental`, sélectionner la VM source **allumée**, le nœud
+   cible et un stockage `lvm` compatible `snapshot-as-volume-chain=1`.
+   Sélectionner un VMID cible **encore libre**.
+3. Après création de la protection, relever son **identifiant de protection**
+   (pas le VMID source). Sur le **nœud Proxmox cible de recette**, créer une
+   VM vide, **sans disque et sans carte réseau**, avec le VMID cible :
+
+   ```bash
+   # EXEMPLE LAB SEULEMENT : adapter l'identifiant et le nom
+   qm create 3301 --name REP_TEST_3301 --onboot 0 \
+     --description 'ORIGAMITASKS_PRA_17 ORIGAMITASKS_LAB_ONLY' \
+     --memory 2048 --cores 2
+   qm status 3301
+   qm config 3301
+   ```
+
+   Remplacer `17` par **l'identifiant de la protection OrigamiTasks**,
+   et `3301` par le VMID réservé. Le VMID doit être libre sur **tout le
+   cluster**. La VM doit rester `stopped`, sans entrée `net0` ou autre
+   interface réseau, avec `onboot: 0`.
+4. Dans **VM protégées PRA → Copie LVM recette**, exécuter le **prévol**.
+   S'il réussit, saisir `DISPOSABLE-LAB-ONLY`, puis **Copie complète à chaud**.
+5. Actualiser l'historique des runs jusqu'à `completed`. Cette réussite
+   atteste uniquement des images et de leurs chaînes QCOW2 **hors ligne**.
+   Après des écritures sur la VM source, choisir **Synchronisation incrémentale**.
+   Si le bitmap QMP est perdu ou incohérent, refaire une copie complète.
+6. Un run `uncertain` empêche toute relance automatique et nécessite une
+   vérification manuelle des jobs QMP, des exports NBD et des LV attribués
+   au checkpoint ; aucune suppression automatique n'est effectuée.
+
+**Important :** ces opérations **allouent et remplissent de vrais volumes
+LVM**. Chaque incrément occupe potentiellement l'espace virtuel complet
+de chaque disque (LV épaisses). Utiliser un VG de recette jetable,
+avec une réserve suffisante. N'utiliser ni la baie/les pools de production
+ni une VM contenant des données importantes.
+
+Le récepteur LVM de cette étape **n'attache pas automatiquement les disques**
+à `REP_`, ne démarre aucune copie et n'autorise **ni bascule ni failback**.
+Un clone indépendant préparé via le module `pra_lvm_restore_lab.py` reste
+une opération de test distincte, à valider avant tout démarrage isolé.
+Pas de nouvelle variable `.env` ; la migration de base SQLite est additive.
+
+### Préparer une restauration réelle et isolée (sans démarrage automatique)
+
+Après une copie LVM `completed` depuis la console, le même panneau
+**Copie LVM recette** propose **Préparer un clone isolé (arrêté)**.
+Choisir un **nouveau VMID libre sur tout le cluster de destination**, puis
+confirmer `DISPOSABLE-LAB-ONLY`.
+
+OrigamiTasks vérifie que le dernier checkpoint LVM est le dernier point
+structurellement vérifié et que la VM `REP_` est toujours arrêtée.
+L'assistant **copie et aplatit les images dans de nouveaux LV**, puis crée
+une VM indépendante `PRA_TEST_<VMID>` avec `onboot=0` et sans carte réseau.
+Le test est enregistré dans l'historique comme `restore`.
+
+La VM `PRA_TEST_` est **réellement créée mais reste arrêtée**. Son
+`boot_verified` reste faux. Après un contrôle de l'isolement réseau et des
+disques sur l'hyperviseur de recette, l'administrateur pourra effectuer
+**un test de démarrage manuel**, mesurer le temps de récupération et
+contrôler les fichiers/services. Aucun test de démarrage ni de cohérence
+applicative n'est automatique à cette étape. L'ancienne VM source n'est
+jamais arrêtée, et la VM `REP_` n'est jamais promue.
+
+**Échec ou perte de liaison** : le job passe en `uncertain`, aucun
+nouvel essai ni nettoyage n'est lancé sans réconciliation manuelle.
+

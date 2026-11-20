@@ -134,6 +134,12 @@ def test_lvm_lab_helper_requires_label_and_protection_marker(monkeypatch):
              "lab_ack":"DISPOSABLE-LAB-ONLY"}
     with pytest.raises(worker.HostError,match="LAB-ONLY"):
         worker._lvm_lab_store(payload)
+    cfg["description"]="ORIGAMITASKS_PRA_170 ORIGAMITASKS_LAB_ONLY"
+    with pytest.raises(worker.HostError,match="LAB-ONLY"):
+        worker._lvm_lab_store(payload)
+    cfg["description"]="ORIGAMITASKS_PRA_17 ORIGAMITASKS_LAB_ONLY_BUT_NOT_REAL"
+    with pytest.raises(worker.HostError,match="LAB-ONLY"):
+        worker._lvm_lab_store(payload)
     cfg["description"]="ORIGAMITASKS_PRA_17 ORIGAMITASKS_LAB_ONLY"
     cfg["net0"]="virtio,bridge=vmbr0"
     with pytest.raises(worker.HostError,match="zero network"):
