@@ -246,3 +246,42 @@ aucun paramètre `.env` et ne nécessite pas une mise à jour des agents
 Proxmox pour afficher ce rapport. Les moteurs de bascule réelle et failback
 restent à développer et à qualifier sur une infrastructure de recette.
 
+## Vérification QMP réelle automatisée — v0.3.29-rc1
+
+Le workflow GitHub Actions `CI / Real QEMU QMP/NBD full + incremental
+smoke test` installe de vrais exécutables QEMU et effectue les tests suivants
+sur des fichiers **temporaires jetables**, et non sur les VM de production :
+
+- Démarrage d'un processus QEMU avec deux disques QCOW2 distincts.
+- Copie initiale via QMP `blockdev-backup` et deux serveurs NBD locaux.
+- Commit réel des deux disques dans `CheckpointStore`, manifeste atomique.
+- Écritures sur les disques de la source QEMU active, puis copie incrémentale
+  avec dirty bitmap vers deux overlays QCOW2.
+- Contrôle `qemu-img check` et lecture des motifs de données, vérification
+  du chaînage et de l'immuabilité du checkpoint initial.
+- Redémarrage de la source QEMU, perte des bitmaps volatils et refus d'un
+  incrémental sans nouvel amorçage.
+- Vérification que le mécanisme de rétention refuse toujours une suppression
+  automatique non prouvée.
+
+Les essais réels ont permis de corriger une **incompatibilité QMP** : la
+transaction de copie initiale combine `block-dirty-bitmap-add` et
+`blockdev-backup`, pour laquelle `completion-mode=grouped` n'est pas
+autorisé par QEMU. Les copies incrémentales composées exclusivement de
+jobs de sauvegarde conservent ce mode groupé.
+
+L'assistant cible impose maintenant un arrêt **prouvé** de chaque processus
+`qemu-nbd` avant de publier, d'abandonner ou de supprimer un checkpoint.
+Un PID absent, un processus qui pointe vers un autre disque ou un arrêt
+incertain préservent les images et obligent une réconciliation. Une erreur
+d'initialisation NBD n'efface plus automatiquement la génération en cours.
+
+### Limites des essais
+
+Cette campagne teste une **copie technique QEMU/NBD réelle**, mais sans
+hyperviseur Proxmox, sans deux nœuds SSH distincts, sans démarrage d'OS,
+sans baie de stockage, sans adaptateur LVM actif et sans témoin/fencing.
+Elle ne vaut donc **pas** qualification d'un PRA multi-clusters. Les essais
+terrain sur deux clusters de recette restent obligatoires pour compléter
+la matrice de qualification PRA.
+
