@@ -22,14 +22,14 @@ async def lifespan(app):
     security.cipher()  # validation before accepting requests
     db.initialize()
     security.initialize_admin()
-    engine.start()
-    scheduler.start()
-    agent_deployments.start()
-    agent_updates.start()
     pra_live.initialize()
     pra_lvm_jobs.initialize()
     pra_lvm_activation.initialize()
     pra_lvm_schedule.initialize()
+    engine.start()
+    scheduler.start()
+    agent_deployments.start()
+    agent_updates.start()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
