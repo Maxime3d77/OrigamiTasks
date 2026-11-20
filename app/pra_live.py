@@ -359,6 +359,13 @@ def start(vm_id, actor, approved=False, scheduled=False):
         if previous:
             raise LiveReplicationError(
                 "Réplication active ou état indéterminé : vérifier et réconcilier avant de relancer")
+        lvm_conflict = con.execute(
+            "SELECT id FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain') LIMIT 1", (vm_id,)
+        ).fetchone()
+        if lvm_conflict:
+            raise LiveReplicationError(
+                "Copie LVM de recette active/incertaine : résoudre son état avant un QMP DIR")
         row = con.execute("SELECT engine,state FROM dr_protected_vms WHERE id=?",
                           (vm_id,)).fetchone()
         if not row or row["engine"] != "qmp_live_incremental" or row["state"] != "planned":
