@@ -835,6 +835,14 @@ def lvm_lab_test_boot(data):
     volumes = data.get("test_volumes")
     if not isinstance(volumes, dict) or not volumes or set(volumes) != set(current["disks"]):
         raise HostError("Missing independent clone disk manifest")
+    resources = json.loads(cmd("pvesh", "get", "/cluster/resources",
+                               "--type", "vm", "--output-format", "json"))
+    node = socket.gethostname().split(".", 1)[0]
+    matched = [x for x in resources if isinstance(x, dict)
+               and x.get("vmid") == test_id]
+    if (len(matched) != 1 or matched[0].get("type") != "qemu"
+            or matched[0].get("node") != node):
+        raise HostError("Test clone VMID is not exclusively owned by this node")
     if not _is_target_stopped(test_id):
         raise HostError("Test VM must already exist and be stopped")
     config = _vm_config(test_id)
