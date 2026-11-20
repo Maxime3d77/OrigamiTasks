@@ -576,8 +576,11 @@ def _lvm_lab_store(data):
     _is_target_stopped(ident)
     config = _vm_config(ident)
     desc = config.get("description", "")
-    if ("ORIGAMITASKS_PRA_" + str(protected) not in desc
-            or "ORIGAMITASKS_LAB_ONLY" not in desc):
+    # Match complete description tokens, not substring prefixes:
+    # ORIGAMITASKS_PRA_17 must not authorize ORIGAMITASKS_PRA_170.
+    markers = set(re.findall(r"[A-Za-z0-9_]+", desc))
+    if (("ORIGAMITASKS_PRA_" + str(protected)) not in markers
+            or "ORIGAMITASKS_LAB_ONLY" not in markers):
         raise HostError("LVM receiver requires an owned, LAB-ONLY standby VM")
     if config.get("onboot", "0") not in ("0", "false"):
         raise HostError("LAB standby VM onboot must be disabled")
