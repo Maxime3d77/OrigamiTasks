@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_lvm_jobs, agent_updates
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_lvm_jobs, pra_lvm_activation, agent_updates
 
 
 @asynccontextmanager
@@ -28,6 +28,7 @@ async def lifespan(app):
     agent_updates.start()
     pra_live.initialize()
     pra_lvm_jobs.initialize()
+    pra_lvm_activation.initialize()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
@@ -575,14 +576,32 @@ def protected_vm_options(request:Request,plan_id:int,source_dc_id:int,target_dc_
 @app.post('/api/dr/vms')
 def create_protected_vm(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict):
+        raise HTTPException(422,'Paramètres invalides')
+    activate=payload.get('activate_lab') is True
+    if activate and payload.get('lab_confirmation')!='DISPOSABLE-LAB-ONLY':
+        raise HTTPException(422,'Confirmer explicitement la recette LVM')
+    if activate and payload.get('engine')!='qmp_live_incremental':
+        raise HTTPException(422,'Activation de recette réservée au moteur QMP')
+    clean={k:v for k,v in payload.items() if k not in ('activate_lab','lab_confirmation')}
     try:
-        result=dr_protected_vms.save(payload,user['username'])
+        result=dr_protected_vms.save(clean,user['username'])
     except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
         raise HTTPException(422,str(exc)) from None
     except Exception:
         raise HTTPException(503,'Préparation VM impossible : vérifier les deux API Proxmox') from None
+    if payload.get("activate_lab") is True:
+        try:
+            activation=pra_lvm_activation.start(
+                result['id'],user['username'],payload.get('lab_confirmation'))
+        except ValueError as exc:
+            db.audit(user['username'],'pra.lvm.lab.activation.blocked',result['id'],str(exc)[:450])
+            # Keep the protection so an admin can inspect and retry safely.
+            raise HTTPException(409,'Protection enregistrée, mais activation refusée : '+str(exc)) from None
+        result['activation']=activation
     db.audit(user['username'],'dr.vm.plan.create',result['id'],
-             'Configuration seulement ; aucune copie ou VM créée')
+             'Protection enregistrée ; activation de recette demandée' if payload.get("activate_lab") else
+             'Configuration uniquement ; aucune copie ni VM créée')
     return result
 
 
@@ -694,6 +713,15 @@ def prepare_lvm_lab_standby(vm_id:int, request:Request, payload:dict[str,Any]):
     db.audit(user['username'],'pra.lvm.lab.standby.prepare',vm_id,
              'VMID='+str(result['vmid'])+' created='+str(result['created']))
     return result
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/activations')
+def list_lvm_lab_activations(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_activation.status(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
 
 
 @app.get('/api/dr/vms/{vm_id}/lvm-lab/preflight')
