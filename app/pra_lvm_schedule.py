@@ -84,6 +84,13 @@ def tick(now=None):
                 if active:
                     continue
             previous = latest["id"]
+            with db.session() as con:
+                previously_blocked=con.execute(
+                    "SELECT 1 FROM pra_lvm_schedule_events WHERE protected_vm_id=? "
+                    "AND previous_run_id=? AND status='blocked' LIMIT 1",
+                    (vm_id,previous)).fetchone()
+            if previously_blocked:
+                continue
             try:
                 started = pra_lvm_jobs.start(
                     vm_id,"system:pra-lvm-scheduler",mode="incremental",
