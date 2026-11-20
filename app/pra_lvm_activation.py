@@ -111,5 +111,9 @@ def status(vm_id):
                         item["status"]=run["status"]
                         item["phase"]="verified" if run["status"]=="completed" else "blocked"
                         item["details"]=run["details"]
+                        con.execute("UPDATE pra_lvm_activations SET status=?,phase=?,"
+                                    "details=?,updated_at=? WHERE id=? AND status='running'",
+                                    (item["status"],item["phase"],str(item["details"])[:1000],
+                                     db.now(),item["id"]))
             result.append(item)
     return result
