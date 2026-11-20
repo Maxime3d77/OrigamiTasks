@@ -119,7 +119,11 @@ class LvmCheckpointStore:
             if self.pending.exists() or self.pending.is_symlink():
                 raise LvmCheckpointError("Staged or uncertain checkpoint requires reconciliation")
             previous = self._read(self.current_file)
-            if mode == "incremental" and not self._matches(previous, sizes, source_vm_uuid):
+            if mode == "incremental" and (
+                    not self._matches(previous, sizes, source_vm_uuid)
+                    or previous.get("protected_vm_id") != self.target.protected_vm_id
+                    or previous.get("target_vmid") != self.target.vmid
+                    or previous.get("storage") != self.target.storage):
                 raise LvmCheckpointError("No verified compatible LVM base: FULL reseed required")
             plan_previous = previous if mode == "incremental" else None
             plan = self.target.plan(sizes, mode, previous=plan_previous)
@@ -191,8 +195,11 @@ class LvmCheckpointStore:
             raise LvmCheckpointError("Invalid checkpoint token")
         with self._exclusive():
             staged = self._read(self.pending)
-            if not staged or staged.get("token") != token or staged.get("status") != "staging":
-                raise LvmCheckpointError("Unknown or incomplete staged checkpoint")
+            if (not staged or staged.get("token") != token or staged.get("status") != "staging"
+                    or staged.get("protected_vm_id") != self.target.protected_vm_id
+                    or staged.get("target_vmid") != self.target.vmid
+                    or staged.get("storage") != self.target.storage):
+                raise LvmCheckpointError("Unknown or foreign staged checkpoint")
             for slot, item in sorted(staged["disks"].items()):
                 path = self._safe_path(item["volid"])
                 report = self.command("qemu-img", "info", "-f", "qcow2",
