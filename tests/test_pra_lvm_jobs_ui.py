@@ -20,7 +20,7 @@ def _cleanup_lab(client,h,vm_id,sites,clusters,plans):
         con.execute("DELETE FROM pra_lvm_schedule_events WHERE protected_vm_id=?",(vm_id,))
         con.execute("DELETE FROM pra_lvm_publications WHERE protected_vm_id=?",(vm_id,))
         con.execute("DELETE FROM pra_lvm_boot_tests WHERE protected_vm_id=?",(vm_id,))
-    _cleanup_lab(client,h,vm_id,sites,clusters,plans)
+    _remove(client,h,vm_id,sites,clusters,plans)
 
 
 class NoThread:
