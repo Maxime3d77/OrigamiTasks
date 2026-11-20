@@ -243,6 +243,11 @@ def release_after_manual_removal(vm_id,approved,actor):
         raise RestoreError("VM secours toujours présente : aucune protection libérée")
     with db.session() as con:
         con.execute("BEGIN IMMEDIATE")
+        if con.execute("SELECT 1 FROM pra_lab_drills WHERE protected_vm_id=?",
+                       (vm_id,)).fetchone():
+            raise RestoreError(
+                "Un clone de test est encore suivi : le supprimer manuellement et libérer "
+                "son suivi avant la libération PBS")
         if con.execute("SELECT 1 FROM pra_pbs_restores WHERE protected_vm_id=? "
                        "AND status IN ('starting','submitted','running','uncertain')",
                        (vm_id,)).fetchone():
