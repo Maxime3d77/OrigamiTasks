@@ -775,6 +775,15 @@ def start_protected_vm_pbs_backup(vm_id:int, payload:dict[str,Any], request:Requ
         raise HTTPException(409,str(exc)) from None
 
 
+@app.get('/api/dr/vms/{vm_id}/pbs/backups')
+def list_protected_vm_pbs_backups(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_pbs.list_backups(vm_id)
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
 @app.get('/api/dr/vms/{vm_id}/pbs/backups/{job_id}')
 def get_protected_vm_pbs_backup(vm_id:int,job_id:int,request:Request):
     security.require(request,role='admin')
