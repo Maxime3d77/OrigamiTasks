@@ -56,10 +56,65 @@ def _status(run_id, status, details, *, result=None):
         )
 
 
+def _prepare_isolated_clone(item):
+    """Make a testable, independent OFF clone from the current LAB checkpoint.
+
+    Source hardware metadata comes directly from a live QMP probe (never the
+    browser). The receiver independently checks cluster VMID availability,
+    owns every LV and enforces an empty networkless test VM.
+    """
+    vm = dr_protected_vms._one(item["protected_vm_id"])
+    info = pra_lvm_lab._runtime(vm)
+    src = dst = None
+    try:
+        src = pra_lvm_lab.pra_live._connect(info["source"])
+        dst = pra_lvm_lab.pra_live._connect(info["destination"])
+        source = pra_lvm_lab.pra_live._run_helper(src, "source_probe", {
+            "vmid": vm["source_vmid"], "slots": info["slots"]
+        }, timeout=90)
+        target = pra_lvm_lab.pra_live._run_helper(
+            dst, "lvm_lab_probe", pra_lvm_lab._request(vm), timeout=90)
+        checkpoint = target.get("checkpoint")
+        if (source.get("pra_protocol", 0) < 2
+                or target.get("pra_protocol", 0) < 3
+                or target.get("pending")
+                or not isinstance(checkpoint, dict)
+                or checkpoint.get("status") != "committed"
+                or checkpoint.get("token") != item["checkpoint_token"]):
+            raise LabJobError("Checkpoint de recette indisponible, modifié ou non confirmé")
+        hardware = source.get("config")
+        if not isinstance(hardware, dict):
+            raise LabJobError("Configuration matérielle source non confirmée")
+        result = pra_lvm_lab.pra_live._run_helper(
+            dst, "lvm_lab_prepare_clone",
+            {**pra_lvm_lab._request(vm, item["checkpoint_token"]),
+             "test_vmid": item["test_vmid"], "source_config": hardware},
+            timeout=21660
+        )
+        if (result.get("test_vmid") != item["test_vmid"]
+                or result.get("checkpoint") != item["checkpoint_token"]
+                or result.get("vm_started") is not False
+                or result.get("standby_started") is not False
+                or result.get("network_isolated") is not True
+                or result.get("boot_verified") is not False
+                or result.get("failover_authorized") is not False):
+            raise LabJobError("Le clone d'essai n'a pas confirmé son isolation et son arrêt")
+        return {**result, "checkpoint_token": result["checkpoint"],
+                "source_running": True, "target_stopped": True,
+                "offline_structure_verified": True,
+                "real_pve_replication_performed": False}
+    finally:
+        if src:
+            src.close()
+        if dst:
+            dst.close()
+
+
 def _perform(run_id):
     with db.session() as con:
         item = con.execute(
-            "SELECT protected_vm_id,mode,source_vmid,target_vmid,target_storage,"
+            "SELECT protected_vm_id,mode,test_vmid,checkpoint_token,"
+            "source_vmid,target_vmid,target_storage,"
             "source_dc_id,target_dc_id FROM pra_lvm_lab_runs WHERE id=?",
             (run_id,)
         ).fetchone()
@@ -71,21 +126,34 @@ def _perform(run_id):
                     "source_dc_id", "target_dc_id"):
             if current[key] != item[key]:
                 raise LabJobError("Protection modifiée depuis la demande : aucune copie démarrée")
-        _status(run_id, "running", "Transfert QMP/NBD à chaud vers des LV LVM de recette")
-        result = pra_lvm_lab.run(
-            item["protected_vm_id"], execute=True,
-            incremental=item["mode"] == "incremental", lab_confirm=LAB_ACK
-        )
-        if (result.get("real_pve_replication_performed") is not True
-                or result.get("offline_structure_verified") is not True
-                or result.get("vm_started") is not False
-                or result.get("target_stopped") is not True
-                or not result.get("checkpoint_token")):
-            raise LabJobError("Le récepteur n'a pas attesté une copie LVM vérifiée")
-        _status(run_id, "completed",
-                "Copie " + item["mode"] +
-                " QMP/LVM vérifiée hors ligne ; réplique non démarrée",
-                result=result)
+        if item["mode"] == "restore":
+            _status(run_id, "running",
+                    "Création du clone de restauration isolé et arrêté (LVM recette)")
+            result = _prepare_isolated_clone(item)
+            if (result.get("network_isolated") is not True
+                    or result.get("vm_started") is not False
+                    or result.get("boot_verified") is not False):
+                raise LabJobError("Clone non isolé ou état de démarrage incertain")
+            _status(run_id, "completed",
+                    "Clone indépendant PRA_TEST_" + str(item["test_vmid"]) +
+                    " prêt pour inspection, arrêté et sans réseau (boot NON testé)",
+                    result=result)
+        else:
+            _status(run_id, "running", "Transfert QMP/NBD à chaud vers des LV LVM de recette")
+            result = pra_lvm_lab.run(
+                item["protected_vm_id"], execute=True,
+                incremental=item["mode"] == "incremental", lab_confirm=LAB_ACK
+            )
+            if (result.get("real_pve_replication_performed") is not True
+                    or result.get("offline_structure_verified") is not True
+                    or result.get("vm_started") is not False
+                    or result.get("target_stopped") is not True
+                    or not result.get("checkpoint_token")):
+                raise LabJobError("Le récepteur n'a pas attesté une copie LVM vérifiée")
+            _status(run_id, "completed",
+                    "Copie " + item["mode"] +
+                    " QMP/LVM vérifiée hors ligne ; réplique non démarrée",
+                    result=result)
         db.audit("system", "pra.lvm.lab.completed", item["protected_vm_id"],
                  "run=" + str(run_id) + " checkpoint=" + str(result["checkpoint_token"])[:40])
     except BaseException as exc:
@@ -106,7 +174,7 @@ def list_runs(vm_id, limit=20):
     limit = max(1, min(limit, 100))
     with db.session() as con:
         rows = con.execute(
-            "SELECT id,protected_vm_id,status,mode,details,actor,created_at,"
+            "SELECT id,protected_vm_id,status,mode,test_vmid,details,actor,created_at,"
             "started_at,finished_at,point_at,checkpoint_token "
             "FROM pra_lvm_lab_runs WHERE protected_vm_id=? ORDER BY id DESC LIMIT ?",
             (vm_id, limit)
@@ -182,3 +250,75 @@ def start(vm_id, actor, *, mode, confirmation):
         "source_remains_running": True, "standby_must_remain_stopped": True,
         "lab_only": True, "failover_available": False
     }
+
+def start_restore(vm_id, actor, *, test_vmid, confirmation):
+    """Authorize one LAB-only independent test clone; never start the guest."""
+    if confirmation != LAB_ACK:
+        raise LabJobError("Saisir exactement DISPOSABLE-LAB-ONLY pour un clone de recette")
+    if type(test_vmid) is not int or not 100 <= test_vmid <= 999999999:
+        raise LabJobError("VMID de clone de recette invalide")
+    if not isinstance(actor, str) or not actor:
+        raise LabJobError("Administrateur non identifié")
+    vm = dr_protected_vms._one(vm_id)
+    if vm["engine"] != "qmp_live_incremental" or vm["state"] != "planned":
+        raise LabJobError("Protection QMP inactive ou incompatible")
+    if test_vmid == vm["target_vmid"]:
+        raise LabJobError("VMID du clone et de la réplique doivent être distincts")
+    checked = preflight(vm_id)
+    token = checked.get("checkpoint")
+    if not isinstance(token, str) or len(token) != 32:
+        raise LabJobError("Aucun checkpoint LVM confirmé disponible pour le clone")
+    if checked.get("source_running") is not True or checked.get("target_stopped") is not True:
+        raise LabJobError("Le test exige une source allumée et la réplique arrêtée")
+
+    with db.session() as con:
+        con.execute("BEGIN IMMEDIATE")
+        pending = con.execute(
+            "SELECT id FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain') LIMIT 1",
+            (vm_id,)
+        ).fetchone()
+        if pending:
+            raise LabJobError("Transfert ou clone LVM actif/incertain ; réconcilier avant une restauration")
+        conflict = con.execute(
+            "SELECT id FROM pra_live_runs WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain') LIMIT 1",
+            (vm_id,)
+        ).fetchone()
+        if conflict:
+            raise LabJobError("Une copie QMP DIR active/incertaine bloque la restauration LVM")
+        latest = con.execute(
+            "SELECT status,checkpoint_token FROM pra_lvm_lab_runs "
+            "WHERE protected_vm_id=? AND mode IN ('full','incremental') "
+            "ORDER BY id DESC LIMIT 1", (vm_id,)
+        ).fetchone()
+        if (latest is None or latest["status"] != "completed"
+                or latest["checkpoint_token"] != token):
+            raise LabJobError("Checkpoint LVM non suivi comme copie complète/incrémentale vérifiée")
+        row = con.execute(
+            "SELECT source_vmid,target_vmid,target_storage,source_dc_id,target_dc_id,"
+            "engine,state FROM dr_protected_vms WHERE id=?", (vm_id,)
+        ).fetchone()
+        if (row is None or row["state"] != "planned"
+                or row["engine"] != "qmp_live_incremental"
+                or any(row[k] != vm[k] for k in
+                       ("source_vmid","target_vmid","target_storage","source_dc_id","target_dc_id"))):
+            raise LabJobError("Protection modifiée pendant le prévol du clone")
+        run_id = con.execute(
+            "INSERT INTO pra_lvm_lab_runs("
+            "protected_vm_id,status,mode,test_vmid,checkpoint_token,actor,created_at,details,"
+            "source_vmid,target_vmid,target_storage,source_dc_id,target_dc_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (vm_id,"queued","restore",test_vmid,token,actor,db.now(),
+             "Clone LVM isolé de recette demandé, aucun démarrage",
+             vm["source_vmid"],vm["target_vmid"],vm["target_storage"],
+             vm["source_dc_id"],vm["target_dc_id"])
+        ).lastrowid
+    db.audit(actor,"pra.lvm.lab.restore.request",vm_id,
+             "run="+str(run_id)+" test_vmid="+str(test_vmid))
+    threading.Thread(target=_perform,args=(run_id,),daemon=True,
+                     name="pra-lvm-restore-"+str(run_id)).start()
+    return {"run_id":run_id, "status":"queued","mode":"restore",
+            "test_vmid":test_vmid,"lab_only":True,
+            "test_vm_started":False,"failover_available":False}
+
