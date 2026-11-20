@@ -345,3 +345,54 @@ with mocked providers do not prove safe inter-site behavior.
 Do not merge this integrated development branch into production until
 LVM QMP transfer, EFI/TPM, external witness/fencing, isolated guest
 restore and two-cluster failure tests are complete.
+
+## v0.3.30 — Real QMP-to-LVM replication through the UI (supervised LAB)
+
+**VM protégées PRA → Copie LVM recette** now launches the existing
+**real QMP/NBD full and incremental** data plane, rather than only listing
+storage capabilities. Source VM stays **ON** and target standby remains
+**OFF**. Runs are asynchronously tracked in the SQLite
+`pra_lvm_lab_runs` history and kept separate from DIR receiver runs.
+
+### Use on disposable non-production Proxmox clusters only
+
+1. Register both clusters/sites and deploy PRA-capable **Linux agent 0.3.30**
+   to the authorized **lab** source and target nodes, with approved SSH.
+2. Create a protected VM policy using `qmp_live_incremental`; source must
+   be running, target storage must be PVE `lvm` with
+   `snapshot-as-volume-chain=1`, target node online and target VMID **free**.
+3. After creating the policy, create an **empty, stopped, networkless,
+   auto-start-disabled** VM on the destination lab node, with ownership
+   markers for the OrigamiTasks **protection ID**:
+
+   ```bash
+   # EXAMPLE LAB ONLY — replace the VMID and protection ID
+   qm create 3301 --name REP_TEST_3301 --onboot 0 \
+     --description 'ORIGAMITASKS_PRA_17 ORIGAMITASKS_LAB_ONLY' \
+     --memory 2048 --cores 2
+   qm status 3301
+   qm config 3301
+   ```
+
+   `17` is the **OrigamiTasks protection ID**, not the VMID. `3301` is
+   the unused destination Proxmox VMID. The destination VM must have **no
+   network adapters, no disks, onboot=0 and status stopped**.
+4. In the UI, open **Copie LVM recette**, verify read-only preflight,
+   type `DISPOSABLE-LAB-ONLY` and click **Copie complète à chaud**.
+5. Refresh the run history until completed. Then write new data to the
+   source guest and use **Synchronisation incrémentale**. Missing/unsafe
+   dirty bitmap requires a new full seed.
+6. An `uncertain` result blocks all replay pending manual QMP/NBD/LV
+   reconciliation. Existing LVs are **never automatically freed**.
+
+This performs **real disk writes**, one thick PVE-managed LVM generation
+per run, including increments, and may consume the *entire virtual size*
+of each disk per generation. Use disposable, adequately sized lab storage.
+Do not target production arrays, production VGs or important VMs.
+
+No auto-attach, guest start, production fencing, promotion, witness or
+failback is provided. The separate `pra_lvm_restore_lab.py` component
+can prepare an isolated independent clone, but requires a distinct
+authorized test and never automatically boots a guest. No new `.env`
+flag is needed; the SQLite migration preserves existing records.
+
