@@ -242,6 +242,13 @@ def target_probe(data):
 
 
 def _kill_export(store, slot, strict=False):
+    """Never remove a PID file or checkpoint while an NBD writer may exist.
+
+    A failed process shutdown, including an unexpected qemu-nbd identity,
+    is an UNCERTAIN state: preserve both the PID file and backing data for
+    operator reconciliation. Silent failure would risk deleting a live
+    exported image during target_abort / target_begin rollback.
+    """
     pidfile = store.root / (".origami-" + slot + ".pid")
     if not pidfile.exists():
         return
@@ -250,9 +257,15 @@ def _kill_export(store, slot, strict=False):
     try:
         pid = int(pidfile.read_text().strip())
         if pid <= 1:
-            raise ValueError()
-        # Only signal a qemu-nbd process with this exact checkpoint path.
-        command = Path("/proc/" + str(pid) + "/cmdline").read_bytes().replace(b"\x00", b" ")
+            raise ValueError("Invalid PID")
+        # qemu-nbd must still own exactly this checkpoint directory.
+        process = Path("/proc/" + str(pid) + "/cmdline")
+        try:
+            command = process.read_bytes().replace(b"\\x00", b" ")
+        except FileNotFoundError:
+            # Already dead: its persisted file is stale, not active.
+            pidfile.unlink()
+            return
         if b"qemu-nbd" not in command or str(store.root).encode() not in command:
             raise HostError("NBD owner mismatch: manual intervention required")
         os.kill(pid, signal.SIGTERM)
@@ -260,20 +273,13 @@ def _kill_export(store, slot, strict=False):
             try:
                 os.kill(pid, 0)
             except ProcessLookupError:
-                break
+                pidfile.unlink()
+                return
             time.sleep(0.1)
-        else:
-            if strict:
-                raise HostError("NBD export did not terminate")
-    except FileNotFoundError:
-        # Stale PID file from a daemon already exited.
-        pidfile.unlink(missing_ok=True)
-    except (ValueError, OSError) as exc:
-        if strict:
-            raise HostError("NBD process cannot be stopped safely") from exc
-    else:
-        pidfile.unlink(missing_ok=True)
-
+        # Even a best-effort abort MUST NOT free live checkpoint images.
+        raise HostError("NBD export still active: checkpoint must be reconciled")
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HostError("NBD export shutdown not verified: preserve checkpoint") from exc
 
 def target_begin(data):
     ident = vmid(data["vmid"])
