@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_lvm_jobs, pra_lvm_activation, pra_lvm_schedule, pra_lvm_boot, agent_updates
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_lvm_jobs, pra_lvm_activation, pra_lvm_schedule, pra_lvm_boot, pra_lvm_publish, agent_updates
 
 
 @asynccontextmanager
@@ -27,6 +27,7 @@ async def lifespan(app):
     pra_lvm_activation.initialize()
     pra_lvm_schedule.initialize()
     pra_lvm_boot.initialize()
+    pra_lvm_publish.initialize()
     engine.start()
     scheduler.start()
     agent_deployments.start()
@@ -715,6 +716,15 @@ def prepare_lvm_lab_standby(vm_id:int, request:Request, payload:dict[str,Any]):
     db.audit(user['username'],'pra.lvm.lab.standby.prepare',vm_id,
              'VMID='+str(result['vmid'])+' created='+str(result['created']))
     return result
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/publications')
+def list_lvm_publications(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_publish.history(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
 
 
 @app.get('/api/dr/vms/{vm_id}/lvm-lab/boot-tests')
