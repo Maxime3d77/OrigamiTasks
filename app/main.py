@@ -773,6 +773,17 @@ def get_lvm_lab_schedule_events(vm_id:int,request:Request):
         raise HTTPException(404,str(exc)) from None
 
 
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/activate')
+def activate_existing_lvm_protection(vm_id:int, request:Request, payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation de recette requise')
+    try:
+        return pra_lvm_activation.start(vm_id,user['username'],payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
 @app.get('/api/dr/vms/{vm_id}/lvm-lab/activations')
 def list_lvm_lab_activations(vm_id:int,request:Request):
     security.require(request,role='admin')
