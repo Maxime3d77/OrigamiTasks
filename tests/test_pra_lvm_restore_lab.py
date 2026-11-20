@@ -56,7 +56,7 @@ def lab(tmp_path,monkeypatch):
             return devices[volid]
     from pra_lvm_target import PveLvmTarget
     monkeypatch.setattr(mod,"PveLvmTarget",NewTarget)
-    monkeypatch.setattr(NewTarget,"validate_sizes",staticmethod(PveLvmTarget.validate_sizes))
+    monkeypatch.setattr(NewTarget,"validate_sizes",staticmethod(PveLvmTarget.validate_sizes), raising=False)
     def runner(*args,**kwargs):
         calls.append(args)
         if args[:2]==("qm","status"):
