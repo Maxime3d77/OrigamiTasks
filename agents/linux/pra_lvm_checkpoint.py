@@ -119,6 +119,17 @@ class LvmCheckpointStore:
             if self.pending.exists() or self.pending.is_symlink():
                 raise LvmCheckpointError("Staged or uncertain checkpoint requires reconciliation")
             previous = self._read(self.current_file)
+            # Every incremental LVM checkpoint allocates a full-size thick LV
+            # per disk. Automatic garbage collection is not proven safe for
+            # backing chains and Proxmox snapshots; stop instead of exhausting
+            # a production VG. Operators must use a separately validated
+            # retention/consolidation mechanism before continuous PRA.
+            ledger = self._read(self.owned) or {"generations": []}
+            generations = ledger.get("generations")
+            if not isinstance(generations, list) or len(generations) >= 8:
+                raise LvmCheckpointError(
+                    "Limite de 8 générations LVM épaisses atteinte ; "
+                    "réconciliation et politique de rétention nécessaires")
             if mode == "incremental" and (
                     not self._matches(previous, sizes, source_vm_uuid)
                     or previous.get("protected_vm_id") != self.target.protected_vm_id
