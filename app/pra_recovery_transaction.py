@@ -34,7 +34,8 @@ class Protection:
                 self.primary_cluster == self.secondary_cluster or
                 self.master_cluster not in (self.primary_cluster, self.secondary_cluster) or
                 any(type(v) is not int or v < 100 for v in
-                    (self.primary_vmid, self.secondary_vmid, self.epoch))):
+                    (self.primary_vmid, self.secondary_vmid)) or
+                type(self.epoch) is not int or self.epoch < 1):
             raise DRUnsafe("Invalid PRA protection identity")
 
 
