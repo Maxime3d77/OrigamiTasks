@@ -23,7 +23,7 @@ import time
 
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE / "agents" / "linux"))
-from pra_qmp_incremental import QMP, Disk, backup
+from pra_qmp_incremental import QMP, Disk, ReplicationError, backup
 
 
 def run(*args, timeout=120):
@@ -50,15 +50,16 @@ def port():
 
 
 @contextlib.contextmanager
-def qemu_source(root, disk):
+def qemu_source(root, disks):
     qmp_socket = root / "test-qmp.sock"
     args = [
         "qemu-system-x86_64", "-nodefaults", "-machine", "none", "-S",
         "-display", "none", "-monitor", "none", "-accel", "tcg",
         "-qmp", f"unix:{qmp_socket},server=on,wait=off",
-        "-blockdev", f"driver=file,node-name=src-file,filename={disk}",
-        "-blockdev", "driver=qcow2,node-name=drive-scsi0,file=src-file",
     ]
+    for slot, disk in sorted(disks.items()):
+        args.extend(["-blockdev", f"driver=file,node-name=file-{slot},filename={disk}",
+                     "-blockdev", f"driver=qcow2,node-name=drive-{slot},file=file-{slot}"])
     proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         wait(lambda: qmp_socket.exists() or proc.poll() is not None)
@@ -67,8 +68,9 @@ def qemu_source(root, disk):
                                proc.stderr.read().decode(errors="replace")[-2000:])
         with QMP(str(qmp_socket)) as qmp:
             names = [item.get("node-name") for item in qmp.execute("query-named-block-nodes")]
-            if "drive-scsi0" not in names:
-                raise RuntimeError("QMP graph missing explicit source node: " + repr(names))
+            expected = {"drive-" + slot for slot in disks}
+            if not expected.issubset(set(names)):
+                raise RuntimeError("QMP graph missing source nodes: " + repr(names))
             yield qmp
     finally:
         if proc.poll() is None:
@@ -80,7 +82,7 @@ def qemu_source(root, disk):
                 proc.wait(timeout=10)
         proc.stdout.close()
         proc.stderr.close()
-
+        qmp_socket.unlink(missing_ok=True)
 
 @contextlib.contextmanager
 def nbd(image):
@@ -116,51 +118,80 @@ def main():
     with tempfile.TemporaryDirectory(prefix="origamitasks-qmp-e2e-") as path:
         root = Path(path)
         size = 64 * 1024 * 1024
-        src, seed, delta = [root / name for name in
-                            ("source.qcow2", "seed.qcow2", "delta.qcow2")]
-        run("qemu-img", "create", "-f", "qcow2", str(src), str(size))
-        run("qemu-io", "-f", "qcow2", "-c", "write -P 0x17 0 64k", str(src))
-        with qemu_source(root, src) as qmp:
-            fullbitmap = "origami_106_scsi0"
-            run("qemu-img", "create", "-f", "qcow2", str(seed), str(size))
-            with nbd(seed) as nbd_port:
+        slots = ("scsi0", "scsi1")
+        sources = {slot: root / (slot + "-source.qcow2") for slot in slots}
+        seeds = {slot: root / (slot + "-seed.qcow2") for slot in slots}
+        deltas = {slot: root / (slot + "-delta.qcow2") for slot in slots}
+        bitmap = {slot: "origami_106_" + slot for slot in slots}
+        for index, slot in enumerate(slots):
+            run("qemu-img", "create", "-f", "qcow2", str(sources[slot]), str(size))
+            run("qemu-io", "-f", "qcow2", "-c",
+                f"write -P {0x17 + index} 0 64k", str(sources[slot]))
+
+        with qemu_source(root, sources) as qmp:
+            for slot in slots:
+                run("qemu-img", "create", "-f", "qcow2", str(seeds[slot]), str(size))
+            with contextlib.ExitStack() as stack:
+                ports = {slot: stack.enter_context(nbd(seeds[slot])) for slot in slots}
                 result = backup(qmp, [
-                    Disk(source="drive-scsi0", bitmap=fullbitmap,
-                         host="127.0.0.1", port=nbd_port)
+                    Disk(source="drive-" + slot, bitmap=bitmap[slot],
+                         host="127.0.0.1", port=ports[slot])
+                    for slot in slots
                 ], "full", timeout=35)
                 assert result["qmp_jobs_completed"] is True
-                assert not result["standby_vm_started"]
+                assert result["disks"] == 2 and not result["standby_vm_started"]
 
-            run("qemu-img", "check", "-f", "qcow2", str(seed))
-            run("qemu-io", "-f", "qcow2", "-c", "read -P 0x17 0 64k", str(seed))
-            # Test writes through the running QEMU process to ensure the
-            # dirty bitmap sees actual source changes.
-            response = qmp.execute("human-monitor-command", {
-                "command-line": 'qemu-io drive-scsi0 "write -P 0x38 128k 64k"'
-            })
-            if isinstance(response, str) and "error" in response.lower():
-                raise AssertionError("QEMU failed simulated guest write: " + response)
+            for index, slot in enumerate(slots):
+                run("qemu-img", "check", "-f", "qcow2", str(seeds[slot]))
+                run("qemu-io", "-f", "qcow2", "-c",
+                    f"read -P {0x17 + index} 0 64k", str(seeds[slot]))
+                response = qmp.execute("human-monitor-command", {
+                    "command-line": f'qemu-io drive-{slot} "write -P {0x38 + index} 128k 64k"'
+                })
+                if isinstance(response, str) and "error" in response.lower():
+                    raise AssertionError("QEMU failed simulated guest write: " + response)
 
-            run("qemu-img", "create", "-f", "qcow2", "-F", "qcow2",
-                "-b", str(seed), str(delta))
-            with nbd(delta) as nbd_port:
+                run("qemu-img", "create", "-f", "qcow2", "-F", "qcow2",
+                    "-b", str(seeds[slot]), str(deltas[slot]))
+            with contextlib.ExitStack() as stack:
+                ports = {slot: stack.enter_context(nbd(deltas[slot])) for slot in slots}
                 result = backup(qmp, [
-                    Disk(source="drive-scsi0", bitmap=fullbitmap,
-                         host="127.0.0.1", port=nbd_port)
+                    Disk(source="drive-" + slot, bitmap=bitmap[slot],
+                         host="127.0.0.1", port=ports[slot])
+                    for slot in slots
                 ], "incremental", timeout=35)
                 assert result["qmp_jobs_completed"] is True
 
-        run("qemu-img", "check", "-f", "qcow2", str(seed))
-        run("qemu-img", "check", "-f", "qcow2", str(delta))
-        run("qemu-io", "-f", "qcow2", "-c", "read -P 0x17 0 64k", str(delta))
-        run("qemu-io", "-f", "qcow2", "-c", "read -P 0x38 128k 64k", str(delta))
-        # Historical generation is immutable.
-        run("qemu-io", "-f", "qcow2", "-c", "read -P 0x00 128k 64k", str(seed))
-        info = json.loads(run("qemu-img", "info", "--backing-chain", "--output=json", str(delta)))
-        assert len(info) == 2, info
-        assert Path(info[1]["filename"]) == seed
-        print("PASS: real QMP full+incremental over loopback NBD, QCOW2 chain, immutable base")
-        print("NOTE: QEMU process is a synthetic fixture; no PVE, guest OS, fencing or failover tested")
+        for index, slot in enumerate(slots):
+            seed, delta = seeds[slot], deltas[slot]
+            run("qemu-img", "check", "-f", "qcow2", str(seed))
+            run("qemu-img", "check", "-f", "qcow2", str(delta))
+            run("qemu-io", "-f", "qcow2", "-c",
+                f"read -P {0x17 + index} 0 64k", str(delta))
+            run("qemu-io", "-f", "qcow2", "-c",
+                f"read -P {0x38 + index} 128k 64k", str(delta))
+            # The already-committed seed stays immutable.
+            run("qemu-io", "-f", "qcow2", "-c",
+                "read -P 0x00 128k 64k", str(seed))
+            chain = json.loads(run("qemu-img", "info", "--backing-chain",
+                                   "--output=json", str(delta)))
+            assert len(chain) == 2 and Path(chain[1]["filename"]) == seed
+
+        # QEMU restart invalidates every deliberately non-persistent bitmap;
+        # an incremental request MUST fail before opening any NBD target.
+        with qemu_source(root, sources) as restarted:
+            try:
+                backup(restarted, [Disk(source="drive-scsi0", bitmap=bitmap["scsi0"],
+                                        host="127.0.0.1", port=1)],
+                       "incremental", timeout=5)
+            except ReplicationError as exc:
+                if "FULL reseed required" not in str(exc):
+                    raise
+            else:
+                raise AssertionError("Incremental unexpectedly accepted after source restart")
+        print("PASS: real 2-disk QMP full+incremental NBD, immutable QCOW2 base")
+        print("PASS: bitmap loss after source restart correctly forces FULL reseed")
+        print("NOTE: synthetic QEMU process, NOT Proxmox multi-node recovery/fencing")
 
 
 if __name__ == "__main__":
