@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_restore, agent_updates
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_restore, pra_lab_drill, agent_updates
 
 
 @asynccontextmanager
@@ -760,6 +760,77 @@ def dr_pbs_release(vm_id:int,payload:dict[str,Any],request:Request):
     try:
         return pra_restore.release_after_manual_removal(vm_id,payload['approved'],user['username'])
     except (pra_restore.RestoreError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/drills')
+def list_pra_drills(vm_id:int, request:Request):
+    security.require(request,role='admin')
+    return pra_lab_drill.list_drills(vm_id)
+
+
+@app.post('/api/dr/vms/{vm_id}/drills')
+def create_pra_drill(vm_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'restore_job_id','test_vmid','approved'}:
+        raise HTTPException(422,'Paramètres de clonage de recette invalides')
+    try:
+        return pra_lab_drill.prepare(vm_id,payload['restore_job_id'],
+                                     payload['test_vmid'],payload['approved'],user['username'])
+    except (pra_lab_drill.DrillError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/drills/{drill_id}')
+def inspect_pra_drill(vm_id:int,drill_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return pra_lab_drill.inspect(vm_id,drill_id)
+    except (pra_lab_drill.DrillError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/drills/{drill_id}/isolate')
+def isolate_pra_drill(vm_id:int,drill_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'}:
+        raise HTTPException(422,'Confirmation nécessaire')
+    try:
+        return pra_lab_drill.isolate(vm_id,drill_id,payload['approved'],user['username'])
+    except (pra_lab_drill.DrillError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/drills/{drill_id}/start')
+def start_pra_drill(vm_id:int,drill_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'}:
+        raise HTTPException(422,'Confirmation nécessaire')
+    try:
+        return pra_lab_drill.start(vm_id,drill_id,payload['approved'],user['username'])
+    except (pra_lab_drill.DrillError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/drills/{drill_id}/shutdown')
+def shutdown_pra_drill(vm_id:int,drill_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'}:
+        raise HTTPException(422,'Confirmation nécessaire')
+    try:
+        return pra_lab_drill.shutdown(vm_id,drill_id,payload['approved'],user['username'])
+    except (pra_lab_drill.DrillError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/drills/{drill_id}/release')
+def release_pra_drill(vm_id:int,drill_id:int,payload:dict[str,Any],request:Request):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'approved'}:
+        raise HTTPException(422,'Confirmation nécessaire')
+    try:
+        return pra_lab_drill.release(vm_id,drill_id,payload['approved'],user['username'])
+    except (pra_lab_drill.DrillError,dr_protected_vms.ProtectedVMError) as exc:
         raise HTTPException(409,str(exc)) from None
 
 
