@@ -707,6 +707,8 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
       (x.qmp_receiver_available?' · cible pilote QMP DIR':'')]),
     current?.target_storage||pools[0].storage)
   +selectField('Moteur de réplication','engine',engines,current?.engine||'planning_only')
+  +(current?'':'<label class="field"><span>Amorçage automatique (recette LVM uniquement)</span><select name="activate_lab"><option value="no">Ne pas lancer</option><option value="yes">Créer REP_ puis lancer une copie FULL à chaud</option></select></label>'
+    +'<label class="field"><span>Confirmation pour écriture sur stockage de RECETTE</span><input name="lab_confirmation" autocomplete="off" placeholder="DISPOSABLE-LAB-ONLY"></label>')
   +selectField('Fréquence automatique après amorçage','interval_minutes',
     [[15,'15 minutes'],[30,'30 minutes'],[60,'1 heure'],[240,'4 heures'],
      [720,'12 heures'],[1440,'24 heures']],
@@ -734,6 +736,9 @@ async function openPRALvmLabPanel(vmId){
  const vm=(state.drProtectedVMs||[]).find(x=>x.id===Number(vmId));
  if(!vm)return toast('Protection VM introuvable',false);
  const history=(await api('/dr/vms/'+vmId+'/lvm-lab/runs')).items||[];
+ let activations=[];
+ try{activations=(await api('/dr/vms/'+vmId+'/lvm-lab/activations')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
  let pre=null,preError='';
  try{pre=await api('/dr/vms/'+vmId+'/lvm-lab/preflight')}
  catch(ex){preError=ex.message}
@@ -776,6 +781,11 @@ async function openPRALvmLabPanel(vmId){
    +'<input id="praLvmLabCloneVMID" type="number" min="100" step="1" placeholder="Ex. 4301"></label>'
    +'<div class="tool-row"><button class="btn" data-action="dr-vm-lvm-lab-restore" data-id="'+vmId+'" '
    +(restoreReady?'':'disabled')+'>Préparer un clone isolé (arrêté)</button></div>'
+   +'<h3>Journal d’activation de la protection</h3>'
+   +'<div class="table-wrap"><table><thead><tr><th>Activation</th><th>État</th><th>Étape</th><th>Journal</th></tr></thead><tbody>'
+   +(activations.map(x=>'<tr><td>#'+e(x.id)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.phase)+'</td><td>'+e(x.details)
+     +(x.replication_run_id?' · Copie #'+e(x.replication_run_id)+': '+e(x.replication_details||x.replication_status||'en cours'):'')+'</td></tr>').join('')
+     ||'<tr><td colspan="4">Aucune activation automatique</td></tr>')+'</tbody></table></div>'
    +'<h3>Historique des copies LVM de recette</h3>'
    +'<div class="table-wrap"><table><thead><tr><th>Run</th><th>État</th><th>Mode</th><th>Point</th><th>Diagnostic</th>'
    +'</tr></thead><tbody>'+(rows||'<tr><td colspan="5">Aucune copie lancée</td></tr>')+'</tbody></table></div>'
@@ -2248,6 +2258,13 @@ async function handleSubmit(ev){
    target_node:String(f.get('target_node')||''),target_storage:String(f.get('target_storage')||''),
    interval_minutes:Number(f.get('interval_minutes')),engine:String(f.get('engine'))
   };
+  if(!currentId && f.get('activate_lab')==='yes'){
+   if(body.engine!=='qmp_live_incremental')return toast('Choisir le moteur QMP pour amorcer la protection',false);
+   if(String(f.get('lab_confirmation')||'').trim()!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour autoriser la copie de recette',false);
+   body.activate_lab=true;
+   body.lab_confirmation='DISPOSABLE-LAB-ONLY';
+  }
   const button=ev.target.querySelector('[type=submit]');
   if(button)button.disabled=true;
   try{
@@ -2256,8 +2273,9 @@ async function handleSubmit(ev){
    closeModal();state.drProtectedVMs=(await api('/dr/vms')).items;
    state.drVMPlanFilter=String(body.plan_id);
    showPage('protected-vms');
-   toast('VM #'+body.source_vmid+' enregistrée : cible '+result.replica_name+
-         ' (aucune copie lancée à l’enregistrement)');
+   toast(result.activation
+    ?'VM #'+body.source_vmid+' enregistrée : préparation REP_ et copie initiale lancées, consulter Réplication LVM'
+    :'VM #'+body.source_vmid+' enregistrée : aucune copie lancée');
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return;
  }
