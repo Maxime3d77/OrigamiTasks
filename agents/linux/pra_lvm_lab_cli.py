@@ -91,7 +91,14 @@ def main(argv=None):
                                  source_vm_uuid="lab-standalone-stage",
                                  operator_approved=True)
     else:
-        result = {"current": store.current(), "pending": store._read(store.pending),
+        # Status must remain read-only even when the journal root does not
+        # exist. Do not silently create directories for a diagnostic call.
+        if store.root.exists() and not store.root.is_symlink():
+            current = store.current()
+            pending = store._read(store.pending)
+        else:
+            current = pending = None
+        result = {"current": current, "pending": pending,
                   "storage":target.storage,"vmid":target.vmid,
                   "failover_enabled":False}
     print(json.dumps(result, indent=2, sort_keys=True))
