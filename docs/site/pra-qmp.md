@@ -396,3 +396,26 @@ can prepare an isolated independent clone, but requires a distinct
 authorized test and never automatically boots a guest. No new `.env`
 flag is needed; the SQLite migration preserves existing records.
 
+### Prepare a real independent, networkless restore test (never auto-start)
+
+After a `completed` LVM lab full/incremental transfer, the same
+**Copie LVM recette** panel offers **Préparer un clone isolé (arrêté)**.
+Choose a **free VMID across the whole destination cluster** and confirm
+`DISPOSABLE-LAB-ONLY`.
+
+OrigamiTasks requires a matching committed verified LVM checkpoint,
+checks that the standby is still OFF, flattens each disk into **fresh
+PVE-allocated LVs** and creates an independent, stopped
+`PRA_TEST_<VMID>` guest with `onboot=0` and no network interfaces.
+The operation is tracked in the LAB run history as mode `restore`.
+
+This is a **real VM clone preparation, not a boot test**: the machine
+is created but never started by OrigamiTasks; `boot_verified=false`.
+The operator must inspect disk attachments and isolation, then manually
+test guest boot and applications on authorized lab infrastructure.
+The online source and original standby are never started/stopped by the
+restore operation.
+
+A failed or ambiguously acknowledged clone remains `uncertain`; no
+blind retry, LV deletion or automatic promotion is attempted.
+
