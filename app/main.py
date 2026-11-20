@@ -587,6 +587,20 @@ def create_protected_vm(payload:dict[str,Any],request:Request):
     if activate and payload.get('engine')!='qmp_live_incremental':
         raise HTTPException(422,'Activation de recette réservée au moteur QMP')
     clean={k:v for k,v in payload.items() if k not in ('activate_lab','lab_confirmation')}
+    if activate:
+        try:
+            discovered=dr_protected_vms.options(
+                clean.get('plan_id'),clean.get('source_dc_id'),clean.get('target_dc_id'))
+            source=next((x for x in discovered['vms']
+                         if x['vmid']==clean.get('source_vmid')),None)
+            storage=next((x for x in discovered['target_storages']
+                          if x['storage']==clean.get('target_storage')),None)
+            if not source or source['status']!='running':
+                raise ValueError('Amorçage automatique : VM source non allumée')
+            if not storage or storage['type']!='lvm' or not storage.get('snapshot_as_volume_chain') or not storage.get('images'):
+                raise ValueError('Amorçage automatique : choisir un stockage LVM QCOW2 de recette compatible')
+        except (ValueError,dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+            raise HTTPException(422,str(exc)) from None
     try:
         result=dr_protected_vms.save(clean,user['username'])
     except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
