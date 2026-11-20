@@ -5,7 +5,7 @@ only reports evidence and blockers. It deliberately has no start/stop,
 power-control, witness-write, fencing or failover entrypoint. In particular,
 an independent witness cannot be simulated by controller-local state.
 """
-from . import dr_protected_vms, pra_live
+from . import db, dr_protected_vms, pra_live
 
 
 def _gate(code, name, passed, explanation):
@@ -39,21 +39,44 @@ def assess(vm_id):
     target_online = bool(storage and storage.get("node_online") is True
                          and storage.get("node_storage_active") is True)
     backend_implemented = target_backend == "dir-qcow2-cow"
+    lvm_copy = lvm_published = boot_test = None
+    if target_backend == "lvm-qcow2-staging":
+        with db.session() as con:
+            lvm_copy = con.execute(
+                "SELECT status,checkpoint_token,point_at FROM pra_lvm_lab_runs "
+                "WHERE protected_vm_id=? AND mode IN ('full','incremental') "
+                "ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
+            if lvm_copy and lvm_copy["checkpoint_token"]:
+                lvm_published = con.execute(
+                    "SELECT status FROM pra_lvm_publications WHERE protected_vm_id=? "
+                    "AND checkpoint_token=? ORDER BY id DESC LIMIT 1",
+                    (vm_id,lvm_copy["checkpoint_token"])).fetchone()
+            boot_test = con.execute(
+                "SELECT status FROM pra_lvm_boot_tests WHERE protected_vm_id=? "
+                "ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
+        structural = bool(lvm_copy and lvm_copy["status"]=="completed")
+        backend_implemented = bool(structural and lvm_published
+                                   and lvm_published["status"]=="completed")
+    qemu_tested = bool(boot_test and boot_test["status"]=="completed")
 
     checks = [
         _gate("policy", "Politique PRA active", vm.get("state") == "planned",
               "Le groupe PRA et la VM doivent rester actifs"),
         _gate("replication_engine", "Transport PRA opérationnel",
               vm.get("engine") == "qmp_live_incremental" and backend_implemented,
-              "Le pilote QMP DIR existe ; le récepteur LVM est encore en préparation"),
+              "Un checkpoint vérifié et publié est attesté par le contrôleur" if backend_implemented
+              else "Le moteur choisi n'a pas de preuve de publication compatible"),
         _gate("destination", "Nœud et stockage de destination disponibles",
               target_online, "Détection Proxmox et stockage actif confirmés par API" if target_online
               else "Nœud ou stockage indisponible, non vérifié ou sans accès API"),
         _gate("disk_checkpoint", "Dernier checkpoint structurellement vérifié",
               structural, "Images QCOW2 vérifiées hors ligne uniquement" if structural
               else "Aucune preuve structurelle récente pour le dernier transfert"),
-        _gate("isolated_restore", "Démarrage isolé et restauration validés", False,
-              "Il manque un test indépendant de boot de la copie restaurée"),
+        _gate("qemu_test", "Démarrage QEMU d'un clone isolé",
+              qemu_tested, "Test QEMU terminé puis clone arrêté" if qemu_tested
+              else "Aucun test QEMU isolé et arrêté n'a été confirmé"),
+        _gate("isolated_restore", "Boot de l'OS et restauration applicative validés", False,
+              "QEMU running ne prouve pas le démarrage du système invité"),
         _gate("application_health", "Cohérence applicative prouvée", False,
               "Il manque les contrôles OS, applicatifs et transactionnels"),
         _gate("witness", "Témoin indépendant et autorité exclusive", False,
@@ -74,7 +97,8 @@ def assess(vm_id):
         "target_vmid": vm["target_vmid"],
         "engine": vm["engine"],
         "replication_status": last.get("replication_status"),
-        "last_structural_sync": last.get("last_successful_sync") if structural else None,
+        "last_structural_sync": (lvm_copy["point_at"] if lvm_copy and structural
+                                 else last.get("last_successful_sync") if structural else None),
         "target_backend": target_backend,
         "storage_inspection_error": storage_error,
         "checks": checks,
