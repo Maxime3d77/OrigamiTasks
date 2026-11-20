@@ -292,6 +292,13 @@ def list_vms(plan_id=None):
                 "ORDER BY id DESC LIMIT 1",(item["id"],)
             ).fetchone()
         item["lvm_last_publication"]=dict(published) if published else None
+        with db.session() as con:
+            activation=con.execute(
+                "SELECT status,phase,details FROM pra_lvm_activations "
+                "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+        item["lvm_lab_activated"]=activation is not None
+        item["lvm_activation"]=dict(activation) if activation else None
         item["lvm_standby_configured"]=bool(
             published and published["status"]=="completed" and lab
             and lab["status"]=="completed"
