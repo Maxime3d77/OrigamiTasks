@@ -359,3 +359,52 @@ isolés, profils BIOS modernes/UEFI/TPM, quorum de témoin indépendant,
 fencing vérifié, droit de promotion et failback restent non qualifiés et
 ne sont pas activés. **Une PR CI verte ne prouve pas un PRA multi-site.**
 
+## Chantier PRA v1 intégré — branche de recette (non publiée)
+
+Le développement des fonctions PRA restantes se poursuit dans la branche
+`feat/pra-v1-integrated-receiver-lab-20261120` afin de ne pas livrer de
+morceaux de moteur incompatibles les uns avec les autres.
+
+### Première qualification exploitable sans arrêter de VM
+
+Sur un **nœud Proxmox de recette** ayant accès au code de la branche :
+
+```bash
+python3 scripts/pra_lab_preflight.py --storage ID_DU_STOCKAGE --vmid VMID_DE_TEST
+```
+
+Ce script exécute exclusivement des consultations `pvesh get` et
+`qm config`, sans toucher aux disques, VM ou clés privées. Il affiche les
+versions d'outils présentes, les informations de stockage, les options BIOS
+et les limitations de la pile actuelle, sans prétendre autoriser une
+bascule réelle.
+
+Pour vérifier des **chaînes QCOW2 avec les vrais outils QEMU** (uniquement
+dans des répertoires temporaires de test) :
+
+```bash
+python3 -m pytest -q tests/test_pra_real_qemu_checkpoints.py
+```
+
+Nécessite `pytest`, `qemu-img` et `qemu-io`. Le test est ignoré si les
+outils QEMU ne sont pas présents ; ne pas interpréter un `skip` comme un
+résultat de validation. Ne jamais exécuter ces tests sur des images de VM
+de production.
+
+### Noyau bascule/failback
+
+`app/pra_recovery_transaction.py` formalise un flux transactionnel
+nécessitant : approbation externe, preuve de copie avec démarrage et
+application validés, préparation par un témoin indépendant, fencing
+effectivement vérifié de l'ancien maître, attribution d'une nouvelle
+autorité avec epoch, installation d'une garde de démarrage exclusive sur
+l'hyperviseur, puis démarrage sous cette garde.
+
+Il n'est **pas relié à la production** : les adaptateurs de témoin, de
+fencing et de démarrage doivent encore être implémentés avec des preuves
+réelles, authentifiées et résistantes aux partitions réseau. La suite
+automatisée vérifie l'ordre et les cas d'échec, mais ne constitue pas une
+preuve de sécurité intersites.
+
+**Ne pas fusionner cette branche tant que les chemins LVM QMP, EFI/TPM,
+témoin/fencing et validation sur deux clusters de recette ne sont pas prêts.**

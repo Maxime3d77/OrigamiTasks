@@ -309,3 +309,39 @@ UEFI/TPM recovery, real promotion or safe reverse sync/failback. No production
 agents are installed automatically, and no new .env feature switches
 are required.
 
+## Integrated PRA v1 development branch (not a production release)
+
+The remaining PRA functionality is developed under
+`feat/pra-v1-integrated-receiver-lab-20261120` to avoid piecemeal
+production releases that do not compose into a recoverable system.
+
+Read-only preflight on an **authorized lab Proxmox node** with this branch:
+
+```bash
+python3 scripts/pra_lab_preflight.py --storage LAB_STORAGE --vmid LAB_VM_ID
+```
+
+The command only uses `pvesh get` and `qm config`, never touches disks,
+credentials or guest power states.
+
+Real QEMU QCOW2 full/incremental/abort smoke tests use only pytest
+temporary disk images:
+
+```bash
+python3 -m pytest -q tests/test_pra_real_qemu_checkpoints.py
+```
+
+Requires `pytest`, `qemu-img` and `qemu-io`. A test marked skipped due
+to missing QEMU tools does not constitute validation.
+
+`app/pra_recovery_transaction.py` contains the generic transaction
+orchestration contract: signed/verified external approval and witness,
+verified old-master fencing, new witness epoch, hypervisor-enforced start
+guard and guarded target activation. **It is not connected to a real VM
+start API**. Genuine witness, fencing, authenticated proof and start-guard
+adapters remain mandatory before promotion can be enabled. Unit tests
+with mocked providers do not prove safe inter-site behavior.
+
+Do not merge this integrated development branch into production until
+LVM QMP transfer, EFI/TPM, external witness/fencing, isolated guest
+restore and two-cluster failure tests are complete.
