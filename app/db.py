@@ -204,6 +204,21 @@ CREATE TABLE IF NOT EXISTS pra_pbs_restores (
  upid TEXT, created_at TEXT NOT NULL, finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pra_pbs_restore_vm ON pra_pbs_restores(protected_vm_id,id);
+CREATE TABLE IF NOT EXISTS pra_lab_drills (
+ id INTEGER PRIMARY KEY,
+ protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
+ restore_job_id INTEGER NOT NULL REFERENCES pra_pbs_restores(id),
+ test_vmid INTEGER NOT NULL,
+ node TEXT NOT NULL, actor TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN (
+   'creating','cloning','needs_isolation','ready','booting','running',
+   'stopping','stopped','uncertain','failed')),
+ upid TEXT, created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pra_lab_drills_vm
+ ON pra_lab_drills(protected_vm_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pra_lab_drills_target
+ ON pra_lab_drills(test_vmid,protected_vm_id);
 CREATE TABLE IF NOT EXISTS pra_live_runs (
  id INTEGER PRIMARY KEY,
  protected_vm_id INTEGER NOT NULL REFERENCES dr_protected_vms(id) ON DELETE CASCADE,
