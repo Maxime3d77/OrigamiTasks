@@ -285,6 +285,18 @@ def list_vms(plan_id=None):
                 "ORDER BY id DESC LIMIT 1", (item["id"],)
             ).fetchone()
         item["lvm_lab_latest_run"]=dict(lab) if lab else None
+        with db.session() as con:
+            published=con.execute(
+                "SELECT id,status,checkpoint_token,details,updated_at "
+                "FROM pra_lvm_publications WHERE protected_vm_id=? "
+                "ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+        item["lvm_last_publication"]=dict(published) if published else None
+        item["lvm_standby_configured"]=bool(
+            published and published["status"]=="completed" and lab
+            and lab["status"]=="completed"
+            and lab["mode"] in ("full","incremental")
+            and lab["checkpoint_token"]==published["checkpoint_token"])
         # An old 'completed' run predating structural verification is NOT
         # evidence of an intact standby or a safe incremental base.
         item["offline_image_verified"]=bool(latest.get("offline_image_verified", False))
