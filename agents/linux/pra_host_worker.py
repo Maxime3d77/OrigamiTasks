@@ -23,6 +23,7 @@ from pra_checkpoint import CheckpointStore, CheckpointError
 from pra_qmp_incremental import QMP, Disk, backup, ReplicationError
 from pra_lvm_target import PveLvmTarget, LvmTargetError
 from pra_lvm_checkpoint import LvmCheckpointStore, LvmCheckpointError
+from pra_lvm_restore_lab import prepare_clone, RestoreLabError
 
 _VM = re.compile(r"^[1-9][0-9]{0,8}$")
 _NODE = re.compile(r"^(?:scsi|virtio|sata|ide)[0-9]{1,2}$")
@@ -724,6 +725,34 @@ def lvm_lab_verify(data):
             "lab_only": True}
 
 
+def lvm_lab_prepare_clone(data):
+    """Prepare a separate, networkless, powered-OFF lab test VM.
+
+    This is NOT failover. Never attach to the protected standby, never start a
+    guest, and never overwrite an existing Proxmox VMID/volume.
+    """
+    store = _lvm_lab_store(data)
+    requested = data.get("token")
+    if not isinstance(requested, str) or not _TOKEN.fullmatch(requested):
+        raise HostError("Invalid clone checkpoint token")
+    current = store.current()
+    if (not current or current.get("status") != "committed"
+            or current.get("token") != requested or store.pending.exists()):
+        raise HostError("No matching stable LVM checkpoint for clone")
+    ident = vmid(data.get("test_vmid"))
+    config = data.get("source_config")
+    if not isinstance(config, dict):
+        raise HostError("Missing source hardware snapshot")
+    def inspect(vm_number):
+        # A nonlocal/unavailable VMID is checked again via cluster-wide PVE
+        # resource inventory *and* 'qm create' refuses existing VMIDs.
+        return _vm_config(vm_number) if _is_target_stopped(vm_number) else None
+    return prepare_clone(
+        store, vmid=ident, source_config=config, command=cmd,
+        inspect_config=inspect, approved=True, lab_ack=data["lab_ack"],
+    )
+
+
 def lvm_lab_abort(data):
     store = _lvm_lab_store(data)
     token = data.get("token")
@@ -744,7 +773,8 @@ ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "lvm_lab_begin": lvm_lab_begin,
            "lvm_lab_finish": lvm_lab_finish,
            "lvm_lab_verify": lvm_lab_verify,
-           "lvm_lab_abort": lvm_lab_abort}
+           "lvm_lab_abort": lvm_lab_abort,
+           "lvm_lab_prepare_clone": lvm_lab_prepare_clone}
 
 
 def main():
@@ -764,7 +794,7 @@ def main():
         result = ACTIONS[args.action](request)
         print(json.dumps({"ok": True, "result": result}, separators=(",", ":")))
     except (ValueError, KeyError, OSError, ReplicationError,
-            CheckpointError, LvmTargetError, LvmCheckpointError, HostError) as exc:
+            CheckpointError, LvmTargetError, LvmCheckpointError, RestoreLabError, HostError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)[:400]}))
         sys.exit(1)
 
