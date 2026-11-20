@@ -58,7 +58,9 @@ class LvmCheckpointStore:
         self.pending = self.root / "pending.json"
         self.current_file = self.root / "current.json"
         self.owned = self.root / "owned.json"
-        self.lock_file = self.root / ".lock"
+        # Separate from PveLvmTarget allocation lock: nested flock on two
+        # file descriptors of one lock file could deadlock the same worker.
+        self.lock_file = self.root / ".checkpoint.lock"
 
     def _read(self, path):
         if not path.exists():
