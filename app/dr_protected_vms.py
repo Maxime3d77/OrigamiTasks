@@ -313,6 +313,16 @@ def delete(vm_id):
         ).fetchone()
         if pending:
             raise ProtectedVMError("Sauvegarde PBS active ou indéterminée : contrôler la tâche avant suppression")
+        # A completed test restore may still exist as a real VM on the
+        # destination. Never cascade-delete its ownership/history implicitly.
+        restored=con.execute(
+            "SELECT 1 FROM pra_pbs_restores WHERE protected_vm_id=? LIMIT 1",
+            (vm_id,)
+        ).fetchone()
+        if restored:
+            raise ProtectedVMError(
+                "Restauration PBS enregistrée : libérer le suivi après "
+                "avoir vérifié la suppression manuelle de la VM sur Proxmox")
         pending_live=con.execute(
             "SELECT 1 FROM pra_live_runs WHERE protected_vm_id=? "
             "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
