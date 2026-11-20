@@ -723,9 +723,11 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
     pools.map(x=>[x.storage,x.storage+' · '+x.type+(x.shared?' (partagé)':'')+
       (x.snapshot_as_volume_chain?' · chaînes QCOW2 (preview; adaptateur PRA indisponible)':'')+
       (x.qmp_receiver_available?' · cible pilote QMP DIR':'')]),
-    current?.target_storage||pools[0].storage)
+    current?.target_storage||(labCompatible?pools.find(x=>x.type==='lvm'&&x.snapshot_as_volume_chain)?.storage:pools[0].storage))
   +selectField('Moteur de réplication','engine',engines,current?.engine||defaultEngine)
-  +(current?'':'<label class="field"><span>Amorçage automatique (recette LVM uniquement)</span><select name="activate_lab"><option value="yes">Créer REP_ puis lancer une copie FULL à chaud</option><option value="no">Ne pas lancer (planification uniquement)</option></select></label>'
+  +(current?'':'<label class="field"><span>Amorçage automatique (recette LVM uniquement)</span><select name="activate_lab">'+(labCompatible&&src.status==='running'
+       ?'<option value="yes">Créer REP_ puis lancer une copie FULL à chaud</option><option value="no">Ne pas lancer (planification uniquement)</option>'
+       :'<option value="no">Ne pas lancer (planification uniquement)</option><option value="yes">Créer REP_ puis lancer une copie FULL à chaud (stockage LVM requis)</option>')+'</select></label>'
     +'<label class="field"><span>Confirmation pour écriture sur stockage de RECETTE</span><input name="lab_confirmation" autocomplete="off" placeholder="DISPOSABLE-LAB-ONLY"></label>')
   +selectField('Fréquence automatique après amorçage','interval_minutes',
     [[15,'15 minutes'],[30,'30 minutes'],[60,'1 heure'],[240,'4 heures'],
