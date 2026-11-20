@@ -26,7 +26,7 @@ def assess(vm_id):
     storage_error = None
     try:
         storage = dr_protected_vms.storage_readiness(vm_id)
-    except (dr_protected_vms.ProtectedVMError, Exception) as exc:
+    except Exception as exc:
         # Proxmox connectivity is optional for explaining the other gates,
         # but it is NEVER treated as proof that the standby is usable.
         storage = None
