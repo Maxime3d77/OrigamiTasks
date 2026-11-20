@@ -122,3 +122,15 @@ def status(vm_id, job_id):
             "backup_verified":completed and exitstatus=="OK",
             "replica_created":False,
             "note":"Un backup terminé ne prouve pas qu'une VM secours est restaurée ou démarrable."}
+
+
+def list_backups(vm_id):
+    """Return the existing per-VM PBS jobs without contacting hypervisors."""
+    dr_protected_vms._one(vm_id)
+    with db.session() as con:
+        rows=con.execute(
+            "SELECT id,storage,node,status,created_at,finished_at "
+            "FROM pra_pbs_backups WHERE protected_vm_id=? ORDER BY id DESC LIMIT 30",
+            (vm_id,)
+        ).fetchall()
+    return {"items":[dict(row) for row in rows]}
