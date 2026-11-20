@@ -739,10 +739,12 @@ async function openPRALvmLabPanel(vmId){
  const vm=(state.drProtectedVMs||[]).find(x=>x.id===Number(vmId));
  if(!vm)return toast('Protection VM introuvable',false);
  const history=(await api('/dr/vms/'+vmId+'/lvm-lab/runs')).items||[];
- let activations=[],scheduleEvents=[];
+ let activations=[],scheduleEvents=[],bootTests=[];
  try{activations=(await api('/dr/vms/'+vmId+'/lvm-lab/activations')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
  try{scheduleEvents=(await api('/dr/vms/'+vmId+'/lvm-lab/schedule-events')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{bootTests=(await api('/dr/vms/'+vmId+'/lvm-lab/boot-tests')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
  let pre=null,preError='';
  try{pre=await api('/dr/vms/'+vmId+'/lvm-lab/preflight')}
@@ -755,6 +757,10 @@ async function openPRALvmLabPanel(vmId){
  const latestCopy=history.find(x=>['full','incremental'].includes(x.mode));
  const restoreReady=writable&&Boolean(pre?.checkpoint)
    &&latestCopy?.status==='completed'&&latestCopy?.checkpoint_token===pre.checkpoint;
+ const restoredClone=history.find(x=>x.mode==='restore'&&x.status==='completed'
+   &&x.checkpoint_token===pre?.checkpoint);
+ const bootTestActive=bootTests.some(x=>['queued','running','uncertain'].includes(x.status));
+ const canTestBoot=restoreReady&&Boolean(restoredClone)&&!bootTestActive;
  const targetLabel=pre?'Source VM #'+e(pre.source_vmid)+' ON → cible VM #'+e(pre.target_vmid)
    +' OFF · '+e(pre.destination_storage):'Connexion des nœuds non validée';
  const canPrepare=vm.engine==='qmp_live_incremental' && !running;
@@ -781,11 +787,16 @@ async function openPRALvmLabPanel(vmId){
    +'</div>'
    +'<h3>Préparer un clone indépendant pour un test de restauration</h3>'
    +'<p class="hint">Crée une nouvelle VM PRA_TEST_ arrêtée, avec ses propres LV aplatis, '
-   +'sans interface réseau. Le clone ne démarre pas : son boot devra être contrôlé séparément.</p>'
+   +'sans interface réseau. Un test QEMU séparé peut le démarrer puis l’arrêter automatiquement ; cela ne vérifie pas le système invité.</p>'
    +'<label class="field"><span>VMID Proxmox libre pour le clone</span>'
    +'<input id="praLvmLabCloneVMID" type="number" min="100" step="1" placeholder="Ex. 4301"></label>'
    +'<div class="tool-row"><button class="btn" data-action="dr-vm-lvm-lab-restore" data-id="'+vmId+'" '
-   +(restoreReady?'':'disabled')+'>Préparer un clone isolé (arrêté)</button></div>'
+   +(restoreReady?'':'disabled')+'>Préparer un clone isolé (arrêté)</button>'
+   +'<button class="btn" data-action="dr-vm-lvm-lab-test-boot" data-id="'+vmId+'" data-restore-run="'+e(restoredClone?.id||'')+'" '
+   +(canTestBoot?'':'disabled')+'>Tester le démarrage du clone (isolé)</button></div>'
+   +'<div class="table-wrap"><table><thead><tr><th>Test</th><th>Clone</th><th>État</th><th>Journal</th></tr></thead><tbody>'
+   +(bootTests.map(x=>'<tr><td>#'+e(x.id)+'</td><td>VMID '+e(x.test_vmid)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.details)+'</td></tr>').join('')
+     ||'<tr><td colspan="4">Aucun test de démarrage QEMU</td></tr>')+'</tbody></table></div>'
    +'<h3>Journal d’activation de la protection</h3>'
    +'<div class="table-wrap"><table><thead><tr><th>Activation</th><th>État</th><th>Étape</th><th>Journal</th></tr></thead><tbody>'
    +(activations.map(x=>'<tr><td>#'+e(x.id)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.phase)+'</td><td>'+e(x.details)
@@ -2077,6 +2088,22 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
     const result=await api('/dr/vms/'+id+'/lvm-lab/replicate','POST',{mode,confirmation});
     toast('Copie LVM de recette #'+result.run_id+' lancée. Suivre son état ici.');
     state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-test-boot'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   const restore_run_id=Number(b.dataset.restoreRun);
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour tester le clone',false);
+   if(!Number.isInteger(restore_run_id)||restore_run_id<=0)
+    return toast('Aucun clone indépendant vérifié pour le dernier checkpoint',false);
+   if(!confirm('Démarrer puis arrêter réellement le clone PRA_TEST_ sans réseau ? Le système invité ne sera pas validé.'))
+    return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/test-boot','POST',{restore_run_id,confirmation});
+    toast('Test isolé QEMU #'+result.test_id+' enregistré. Suivre les journaux ici.');
     await openPRALvmLabPanel(id);
    }catch(ex){toast(ex.message,false)}
    return;
