@@ -683,18 +683,26 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  if(!r.vms.length)throw Error('Aucune VM QEMU n’a été découverte sur le cluster principal.');
  const src= r.vms.find(x=>x.vmid===vmid)||r.vms[0];
  const candidate=current?.target_vmid||src.vmid;
- const targetDefault=r.target_vmids_in_use.includes(candidate)?'':candidate;
+ const occupied=new Set(r.target_vmids_in_use);
+ let targetDefault=candidate;
+ if(!current&&occupied.has(candidate)){
+  targetDefault=Math.max(100,candidate);
+  while(occupied.has(targetDefault)&&targetDefault<999999999)targetDefault++;
+  if(occupied.has(targetDefault))throw Error('Aucun VMID libre disponible sur la destination.');
+ }
  const nodes=r.target_nodes.filter(x=>x.status==='online');
  const pools=r.target_storages.filter(x=>x.images);
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
+ const labCompatible=pools.some(x=>x.type==='lvm'&&x.snapshot_as_volume_chain);
+ const defaultEngine=labCompatible&&src.status==='running'?'qmp_live_incremental':'planning_only';
  const engines=[['planning_only','Préparation / simulation uniquement'],
-   ['qmp_live_incremental','QEMU à chaud : complet puis incrémental (pilote DIR)'],
+   ['qmp_live_incremental','QEMU à chaud : DIR ou LVM de recette compatible'],
    ['offline_copy','Copie à froid (non disponible)'],
    ['pbs_backup_restore','PBS : sauvegarde réelle manuelle (restauration à intégrer)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
-  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Enregistrer seul ne copie rien. '
-  +'Le moteur QMP exige une cible Proxmox DIR inscriptible, pas un volume Pure RO ni un VG LVM partagé. '
-  +'La première synchronisation est manuelle et crée REP_ arrêtée après contrôle du checkpoint.</div>'
+  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Pour un stockage LVM de recette compatible, '
+  +'l’activation crée REP_ puis lance la première copie FULL à chaud sans autre commande. '
+  +'La réplique reste arrêtée et sans réseau ; aucune bascule de production n’est autorisée.</div>'
   +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)
   +' · '+e(r.source_vm_total??r.vms.length)+' VM QEMU visibles'
   +' · '+e(r.source_lxc_excluded??0)+' conteneur(s) LXC exclus. Si des VM manquent, contrôler les ACL du token Proxmox sur le cluster.</p>'
@@ -709,15 +717,17 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
       (x.snapshot_as_volume_chain?' · chaînes QCOW2 (preview; adaptateur PRA indisponible)':'')+
       (x.qmp_receiver_available?' · cible pilote QMP DIR':'')]),
     current?.target_storage||pools[0].storage)
-  +selectField('Moteur de réplication','engine',engines,current?.engine||'planning_only')
-  +(current?'':'<label class="field"><span>Amorçage automatique (recette LVM uniquement)</span><select name="activate_lab"><option value="no">Ne pas lancer</option><option value="yes">Créer REP_ puis lancer une copie FULL à chaud</option></select></label>'
+  +selectField('Moteur de réplication','engine',engines,current?.engine||defaultEngine)
+  +(current?'':'<label class="field"><span>Amorçage automatique (recette LVM uniquement)</span><select name="activate_lab"><option value="yes">Créer REP_ puis lancer une copie FULL à chaud</option><option value="no">Ne pas lancer (planification uniquement)</option></select></label>'
     +'<label class="field"><span>Confirmation pour écriture sur stockage de RECETTE</span><input name="lab_confirmation" autocomplete="off" placeholder="DISPOSABLE-LAB-ONLY"></label>')
   +selectField('Fréquence automatique après amorçage','interval_minutes',
     [[15,'15 minutes'],[30,'30 minutes'],[60,'1 heure'],[240,'4 heures'],
      [720,'12 heures'],[1440,'24 heures']],
     current?.interval_minutes||60)+'</div>'
-  +'<p class="hint">Noms cibles prévus : REP_&lt;nom de VM&gt;. Le VMID cible doit être libre. '
-  +'Aucune création ou réservation n’est envoyée au cluster de secours.</p>'
+  +'<p class="hint">Noms cibles : REP_&lt;nom de VM&gt;. Un VMID libre est proposé automatiquement. '
+  +'Confirmer la recette LAB-ONLY pour démarrer les opérations réelles sur la destination. '
+  +'Les incrémentaux LVM allouent des volumes épais : la planification s’arrête à la limite '
+  +'de sécurité sans rétention validée.</p>'
   +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer la protection</button>'
   +'<button type="button" class="btn" data-action="modal-close">Annuler</button></div></form>';
  modal('VM protégée · '+e(r.source_name)+' → '+e(r.target_name),body,'',true);
