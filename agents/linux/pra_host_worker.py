@@ -818,6 +818,64 @@ def lvm_lab_prepare_clone(data):
     )
 
 
+def lvm_lab_test_boot(data):
+    """Temporarily boot ONLY a disposable, networkless PRA_TEST clone.
+
+    It is intentionally not a production promotion or guest/application
+    health check. Never start the protected standby or the source.
+    """
+    store = _lvm_lab_store(data)
+    current = store.current()
+    if (not current or current.get("status") != "committed"
+            or current.get("token") != data.get("token") or store.pending.exists()):
+        raise HostError("Boot test checkpoint changed or is pending")
+    test_id = vmid(data.get("test_vmid"))
+    if test_id == store.target.vmid:
+        raise HostError("Protected standby must never be booted in a lab test")
+    volumes = data.get("test_volumes")
+    if not isinstance(volumes, dict) or not volumes or set(volumes) != set(current["disks"]):
+        raise HostError("Missing independent clone disk manifest")
+    if not _is_target_stopped(test_id):
+        raise HostError("Test VM must already exist and be stopped")
+    config = _vm_config(test_id)
+    marker = "ORIGAMITASKS_LAB_CLONE_" + str(store.target.protected_vm_id)
+    markers = set(re.findall(r"[A-Za-z0-9_]+", config.get("description", "")))
+    if (marker not in markers or config.get("onboot", "0") not in ("0", "false")
+            or any(re.fullmatch(r"net[0-9]{1,2}", key) for key in config)
+            or any(key in config for key in ("efidisk0", "tpmstate0"))
+            or config.get("bios", "seabios") != "seabios"):
+        raise HostError("Clone ownership or isolation is not proven")
+    for slot, volid in sorted(volumes.items()):
+        if not _NODE.fullmatch(slot):
+            raise HostError("Invalid clone slot")
+        # Require a distinct PVE volume owned by this disposable VMID.
+        fresh = PveLvmTarget(store.target.storage, test_id, cmd,
+                             protected_vm_id=store.target.protected_vm_id)
+        fresh.resolve_existing(volid)
+        if config.get(slot, "").split(",", 1)[0] != volid:
+            raise HostError("Clone disk attachment differs from recovery record")
+        cmd("qemu-img", "check", "-f", "qcow2",
+            fresh.resolve_existing(volid), timeout=120)
+    started = False
+    try:
+        cmd("qm", "start", str(test_id), timeout=120)
+        started = True
+        if cmd("qm", "status", str(test_id)).strip() != "status: running":
+            raise HostError("Test QEMU process did not enter RUNNING state")
+        evidence = {"test_vmid": test_id, "checkpoint": current["token"],
+                    "qemu_started": True, "guest_boot_verified": False,
+                    "application_verified": False, "network_isolated": True,
+                    "production_failover": False}
+    finally:
+        # Even if qm start times out, the guest may have been started. Stop
+        # the isolated test clone; never issue qm stop against the standby.
+        if started or cmd("qm", "status", str(test_id)).strip() == "status: running":
+            cmd("qm", "stop", str(test_id), timeout=180)
+        if cmd("qm", "status", str(test_id)).strip() != "status: stopped":
+            raise HostError("Test clone shutdown not confirmed; manual intervention required")
+    return dict(evidence, stopped_after_test=True)
+
+
 def lvm_lab_abort(data):
     store = _lvm_lab_store(data)
     token = data.get("token")
@@ -840,7 +898,8 @@ ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "lvm_lab_finish": lvm_lab_finish,
            "lvm_lab_verify": lvm_lab_verify,
            "lvm_lab_abort": lvm_lab_abort,
-           "lvm_lab_prepare_clone": lvm_lab_prepare_clone}
+           "lvm_lab_prepare_clone": lvm_lab_prepare_clone,
+           "lvm_lab_test_boot": lvm_lab_test_boot}
 
 
 def main():
