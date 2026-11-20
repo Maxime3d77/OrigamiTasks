@@ -77,7 +77,8 @@ def check_schedule(schedule, after=None):
 
 
 def tick():
-    from . import pra_lvm_schedule
+    from . import pra_lvm_publish, pra_lvm_schedule
+    pra_lvm_publish.tick()
     pra_lvm_schedule.tick()
     with db.session() as con:
         rows = con.execute('SELECT * FROM jobs WHERE enabled=1 AND next_run_at IS NOT NULL AND next_run_at<=? ORDER BY id', (db.now(),)).fetchall()
