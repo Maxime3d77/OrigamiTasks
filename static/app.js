@@ -609,7 +609,7 @@ function protectedVMsPage(){
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +'<button class="btn tiny" data-action="dr-vm-storage-readiness" data-id="'+vm.id+'">Compatibilité stockage</button>'
    +'<button class="btn tiny" data-action="dr-vm-recovery-readiness" data-id="'+vm.id+'">Préparation bascule</button>'
-   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'">Copie LVM recette</button>':'')
+   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'">Réplication LVM</button>':'')
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
    +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
@@ -747,19 +747,15 @@ async function openPRALvmLabPanel(vmId){
    &&latestCopy?.status==='completed'&&latestCopy?.checkpoint_token===pre.checkpoint;
  const targetLabel=pre?'Source VM #'+e(pre.source_vmid)+' ON → cible VM #'+e(pre.target_vmid)
    +' OFF · '+e(pre.destination_storage):'Connexion des nœuds non validée';
- const labInitCommand='qm create '+vm.target_vmid+' --name REP_TEST_'+vm.target_vmid
-   +' --onboot 0 --description "ORIGAMITASKS_PRA_'+vm.id
-   +' ORIGAMITASKS_LAB_ONLY" --memory 2048 --cores 2';
+ const canPrepare=vm.engine==='qmp_live_incremental' && !running;
  const content='<div class="notice error"><b>RECETTE UNIQUEMENT : vraies écritures sur LVM.</b> '
    +'La cible doit porter ORIGAMITASKS_LAB_ONLY, être arrêtée, sans carte réseau et avec onboot=0. '
    +'Chaque transfert alloue de nouveaux volumes logiques épais, sans suppression automatique. '
    +'Aucune bascule ni aucun démarrage automatique.</div>'
    +'<p><b>'+targetLabel+'</b></p>'
-   +'<details><summary>Préparer la VM de secours vide (nœud Proxmox de recette)</summary>'
-   +'<p class="hint">Protection #'+e(vm.id)+' : créer cette VM seulement si le VMID '+e(vm.target_vmid)
-   +' est encore libre sur tout le cluster de RECETTE. Ne pas ajouter de disque ni réseau ; VM arrêtée.</p>'
-   +'<pre><code>'+e(labInitCommand)+'\nqm status '+e(vm.target_vmid)
-   +'\nqm config '+e(vm.target_vmid)+'</code></pre></details>'
+   +'<div class="tool-row"><button class="btn primary" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
+   +(canPrepare?'':'disabled')+'>Préparer automatiquement la VM de secours</button></div>'
+   +'<p class="hint">OrigamiTasks vérifie le VMID sur le cluster cible, prépare une VM REP_ arrêtée, sans réseau ni disque, et applique les marqueurs de protection. Aucune commande manuelle.</p>'
    +(pre?'<p class="hint">Disques : '+e((pre.disk_slots||[]).join(', '))
       +' · Espace libre : '+e(Math.round(pre.available_bytes/1073741824))+' Gio'
       +' · Dernier checkpoint : '+e(pre.checkpoint||'aucun')+'</p>'
@@ -2029,6 +2025,20 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   }
   if(a==='dr-vm-lvm-lab-open'){
    await openPRALvmLabPanel(id);return;
+  }
+  if(a==='dr-vm-lvm-lab-prepare'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY'){
+    toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour préparer la VM de recette',false);return;
+   }
+   if(!confirm('Créer une VM de secours vide, isolée et arrêtée sur Proxmox ? Aucun disque ni réseau ne sera ajouté.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/prepare-standby','POST',{confirmation});
+    toast(result.created?'VM de secours #'+result.vmid+' créée et vérifiée':'VM de secours #'+result.vmid+' déjà préparée et vérifiée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
   }
   if(a==='dr-vm-lvm-lab-run'){
    const mode=b.dataset.mode;
