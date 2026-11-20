@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.31-rc1 — 2026-11-20 (QMP/LVM DR workflow, LAB ONLY)
+
+- **DR enrollment**: free target VMID suggestion; automatically prepare an OFF, networkless and diskless owned `REP_` VM.
+- **Hot first seed**: one `DISPOSABLE-LAB-ONLY` approval starts preparation and QMP/NBD FULL transfer into QCOW2-on-LVM volumes.
+- **Scheduled incremental**: per-VM cadence only after an acknowledged previous copy and OFF-standby publication. Errors/uncertain checkpoints stop unattended retries.
+- **REP_ publication**: verified LVM volumes are attached to the stopped standby configuration; unsupported EFI/TPM profiles are rejected.
+- **Isolated QEMU clone test**: independent `PRA_TEST_` guest starts without a NIC and is stopped; this is **not OS boot/application proof**.
+- **Auditable histories**: activation, publication, schedule, transfer and clone-test logs. Restart ambiguity is retained.
+- **Storage bound**: thick LVM volume per generation, **8-generation limit** pending safe flatten/retention.
+- **Safety**: production promotion, fencing/witness and reverse sync/failback remain **disabled**. Simulations do not power on a standby.
+- **Deployment**: update controller and PRA agents through the UI; no new `.env` variables.
+- Details: [QMP and LVM laboratory guide](pra-qmp.md).
+
+
 ## 0.3.24-rc1 — 2026-11-19 (QMP pilot, not production validated)
 
 - **Live QMP incremental DR transport**: one full backup, dirty bitmap incremental backups, grouped multi-disk QMP transactions.

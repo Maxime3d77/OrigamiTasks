@@ -1,5 +1,19 @@
 # Historique des modifications
 
+## 0.3.31-rc1 — 20 novembre 2026 (PRA QMP/LVM piloté, RECETTE uniquement)
+
+- **Enrôlement PRA** : choix d'une VM source en marche, VMID cible libre proposé, création automatique d'une VM `REP_` arrêtée, sans réseau ni disque, avec marqueurs d'appartenance.
+- **Amorçage à chaud** : une autorisation `DISPOSABLE-LAB-ONLY` dans le formulaire déclenche préparation, copie FULL QMP/NBD vers des LV QCOW2 et suivi d'activation.
+- **Incrémental planifié** : cadence définie par VM après amorçage vérifié ; aucune relance des copies ambiguës, aucune action avant confirmation de la dernière publication.
+- **Publication sur REP_** : attachement des volumes du dernier checkpoint vérifié, sans démarrer la VM ; le profil EFI/TPM reste refusé.
+- **Test isolé** : clone indépendant `PRA_TEST_`, démarrage QEMU contrôlé sans réseau et arrêt automatique ; **aucune preuve de démarrage OS ni applicatif**.
+- **Journaux** : historiques séparés par VM pour amorçage, publications, planification, copies et tests. États incertains conservés après redémarrage.
+- **Stockage** : LV épais par génération, **limite de 8 générations** sans purge, car la rétention des chaînes QCOW2 n'est pas encore sûre.
+- **Bascule/failback** : simulations et vérification des prérequis disponibles ; **promotion réelle, fencing/witness et réplication inverse restent désactivés**.
+- **Installation** : nouvelle version du contrôleur et mise à jour des agents Linux PRA depuis OrigamiTasks ; aucune nouvelle variable `.env`.
+- Détails : [Guide QMP et pilote LVM](pra-qmp.fr.md).
+
+
 ## 0.3.24-rc1 — 19 novembre 2026 (pilote QMP, non validé en production)
 
 - **Moteur PRA QMP incrémental à chaud** : copie initiale complète, dirty bitmaps, transferts suivants des blocs modifiés et gestion multi-disques par transactions QMP.

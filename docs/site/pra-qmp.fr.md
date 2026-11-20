@@ -1,5 +1,70 @@
 # Réplication QMP incrémentale à chaud — pilote de recette
 
+## Pilote QMP → LVM automatisé depuis l’interface (PR #51)
+
+!!! warning "Recette uniquement — aucune bascule réelle"
+    Cette branche ajoute le pilotage de la copie QMP/LVM à chaud et du secours
+    depuis OrigamiTasks, mais **ne constitue pas un PRA de production**.
+    Les VM EFI/TPM, le démarrage de l’OS, la cohérence applicative,
+    l’autorité de bascule et le retour inverse ne sont pas qualifiés.
+    N’utiliser que des VM et des stockages de recette jetables.
+
+### Enrôlement automatique
+
+1. Installer ou mettre à jour les agents Linux PRA sur les nœuds des deux
+   clusters depuis **Agents**, puis associer chaque agent à son site PRA.
+2. Sous **VM protégées PRA**, choisir la VM source allumée, le nœud de secours
+   et un stockage Proxmox LVM `images` ayant les chaînes QCOW2 activées.
+   OrigamiTasks propose automatiquement un VMID libre.
+3. Choisir le moteur QMP, conserver **Créer REP_ puis lancer une copie FULL**,
+   saisir `DISPOSABLE-LAB-ONLY` pour confirmer la recette, puis enregistrer.
+   Aucune commande `qm create` ou `scp` manuelle n’est demandée.
+4. Le contrôleur vérifie les deux clusters, prépare `REP_` sans NIC ni
+   disque et avec `onboot=0`, puis effectue une copie QMP/NBD à chaud.
+5. Après vérification structurelle du checkpoint LVM, le contrôleur
+   programme son attachement à la configuration de `REP_` arrêtée.
+   **Configurée ne signifie pas testée au démarrage.**
+6. Les incrémentaux planifiés ne démarrent qu’après une copie vérifiée **et**
+   une publication confirmée. Échecs ou état incertain bloquent la reprise.
+7. Le panneau **Réplication LVM** affiche les journaux d’activation,
+   de publication, de planification, de copie et de test de démarrage.
+
+### Vérifier un clone de restauration
+
+Créer un clone indépendant `PRA_TEST_` depuis le dernier point vérifié.
+Le bouton **Tester le démarrage du clone (isolé)** démarre ce clone sans carte
+réseau, vérifie que QEMU atteint `running`, puis l’arrête. Un résultat positif
+**ne vérifie ni le boot complet de l’OS, ni le service applicatif**. Si
+l’arrêt du clone n’est pas confirmé, le test reste **incertain**.
+
+### Limites structurantes
+
+- Les checkpoints LVM sont alloués en volumes **épais** : chaque génération
+  réserve la taille virtuelle des disques plus une marge. Le pilote bloque
+  l’allocation après **8 générations**. Aucune purge automatique n’est sûre
+  tant que les références Proxmox et les chaînes QCOW2 ne sont pas
+  consolidées et validées. Une rétention autonome reste à développer.
+- Le journal de checkpoints est actuellement **local au nœud** ; il ne
+  fournit pas l’autorité et le manifeste distribués nécessaires au
+  redémarrage de `REP_` sur un autre hyperviseur.
+- La bascule de production / synchronisation inverse / failback sont
+  **désactivés**. Leur activation exige un témoin indépendant,
+  un fencing effectivement vérifié, un garde de démarrage sur chaque
+  hyperviseur, et des tests de crash / split-brain.
+- Aucun nouveau paramètre `.env` n’est nécessaire. La mise à jour du
+  contrôleur et celle des agents PRA sont toutes deux obligatoires.
+
+### Tests avant tout usage
+
+Exécuter la CI GitHub, puis tester sur deux clusters de **recette** avec une VM
+sacrificielle : FULL, incrémental, changement de bitmap, saturation de VG,
+échec de connexion, redémarrage de contrôleur, mise à jour du modèle matériel,
+restauration isolée, arrêt du clone et lecture de tous les journaux.
+Un succès CI sans hyperviseurs Proxmox réels n’est pas une certification.
+
+---
+
+
 !!! warning "Non validé pour la production"
     Le transport et l'orchestration sont codés, mais n'ont **pas été testés
     sur les clusters Proxmox AU/SD réels**. Laisser la PR en brouillon tant

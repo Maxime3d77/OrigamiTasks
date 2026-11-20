@@ -580,8 +580,8 @@ function datacenters(){
 }
 
 
-/* A protected VM is a manually selected plan, never an actual running replica.
-   All tests perform read-only GET requests to Proxmox and return BLOCKED. */
+/* A protected VM can run a disposable LAB copy; actual promotion remains
+   blocked until independent fencing and witness controls are proven. */
 function protectedVMsPage(){
  if(!roleAdmin())return title('VM protégées PRA','Administration uniquement.');
  const plans=state.drPlans||[],all=state.drProtectedVMs||[];
@@ -594,24 +594,34 @@ function protectedVMsPage(){
    +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
    +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
    +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
-   +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
+   +'<td><b>'+e(vm.replica_name)+'</b>'
+   +'<div class="muted tinytext">'+(vm.lvm_standby_configured?'Disques publiés sur REP_ · boot non validé':'Réplique non encore publiée')+'</div>'
+   +'<div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
-   +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
-   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point QCOW2 vérifié hors ligne : '+(vm.last_successful_sync?dt(vm.last_successful_sync):'aucun')+'</div>'
-   +'<div class="muted tinytext">Validation du dernier transfert : '+(vm.offline_image_verified?'structurelle, hors ligne':'non vérifiée ou sans transfert')+' · Démarrage non testé</div>'
+   +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)
+     +' min '+(vm.lvm_lab_activated?'(incrémental programmé après amorçage)':'(objectif indicatif)')+'</div>'
+     +(vm.lvm_activation?'<div class="muted tinytext">'+e(vm.lvm_activation.phase)+' · '+e(vm.lvm_activation.details)+'</div>':'')+'</td>'
+   +'<td>'+labelStatus(vm.lvm_lab_latest_run?.status||vm.replication_status)
+     +'<div class="muted tinytext">Dernière copie LVM : '
+     +(vm.lvm_lab_latest_run?.point_at?dt(vm.lvm_lab_latest_run.point_at):(vm.last_successful_sync?dt(vm.last_successful_sync):'aucune'))+'</div>'
+     +'<div class="muted tinytext">Moteur : '+(vm.lvm_lab_latest_run?'QMP → LVM de recette':'QMP → DIR / non configuré')+'</div>'
+   +'<div class="muted tinytext">Validation : '+(vm.lvm_standby_configured?'checkpoint LVM vérifié et attaché, boot non certifié':vm.offline_image_verified?'structurelle DIR, hors ligne':'pas encore certifiée')+'</div>'
    +'<div class="muted tinytext">'+e(vm.last_replication_run?.details||'')+'</div>'
    +(vm.lvm_lab_latest_run?'<div class="muted tinytext"><b>LVM RECETTE :</b> '
      +labelStatus(vm.lvm_lab_latest_run.status)+' · '+e(vm.lvm_lab_latest_run.mode)
-     +' · '+e(vm.lvm_lab_latest_run.details||'')+'</div>':'')+'</td>'
+     +' · '+e(vm.lvm_lab_latest_run.details||'')+'</div>':'')
+   +(vm.lvm_last_publication?'<div class="muted tinytext"><b>REP_ LVM :</b> '
+     +labelStatus(vm.lvm_last_publication.status)+' · '+e(vm.lvm_last_publication.details||'')
+     +'</div>':'')+'</td>'
    +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +'<button class="btn tiny" data-action="dr-vm-storage-readiness" data-id="'+vm.id+'">Compatibilité stockage</button>'
    +'<button class="btn tiny" data-action="dr-vm-recovery-readiness" data-id="'+vm.id+'">Préparation bascule</button>'
-   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'">Copie LVM recette</button>':'')
+   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'">Réplication LVM</button>':'')
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
-   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
+   +(vm.engine==='qmp_live_incremental'&&!vm.lvm_lab_activated?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
@@ -624,7 +634,7 @@ function protectedVMsPage(){
    '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
    +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
   +'<div class="notice dr-safety-notice"><b>QMP expérimental :</b> une synchronisation approuvée peut créer une VM REP_ arrêtée sur stockage DIR inscriptible ; source toujours allumée. '
-  +'Le pilote LVM permet désormais une copie FULL/incrémentale réelle sur LV de RECETTE marqués LAB-ONLY, sans démarrage ni attachement automatique. '
+  +'Copie LVM recette : amorçage REP_, copies FULL/incrémentales et publication, avec limite de 8 générations sans rétention automatique. '
   +'Une vérification QCOW2 hors ligne ne garantit pas le démarrage ni la cohérence applicative. '
    +'Les tests de bascule et de retour restent des simulations : aucune promotion automatique.</div>'
   +'<div class="stats-grid dr-vm-stat-grid">'
@@ -680,18 +690,26 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  if(!r.vms.length)throw Error('Aucune VM QEMU n’a été découverte sur le cluster principal.');
  const src= r.vms.find(x=>x.vmid===vmid)||r.vms[0];
  const candidate=current?.target_vmid||src.vmid;
- const targetDefault=r.target_vmids_in_use.includes(candidate)?'':candidate;
+ const occupied=new Set(r.target_vmids_in_use);
+ let targetDefault=candidate;
+ if(!current&&occupied.has(candidate)){
+  targetDefault=Math.max(100,candidate);
+  while(occupied.has(targetDefault)&&targetDefault<999999999)targetDefault++;
+  if(occupied.has(targetDefault))throw Error('Aucun VMID libre disponible sur la destination.');
+ }
  const nodes=r.target_nodes.filter(x=>x.status==='online');
  const pools=r.target_storages.filter(x=>x.images);
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
+ const labCompatible=pools.some(x=>x.type==='lvm'&&x.snapshot_as_volume_chain);
+ const defaultEngine=labCompatible&&src.status==='running'?'qmp_live_incremental':'planning_only';
  const engines=[['planning_only','Préparation / simulation uniquement'],
-   ['qmp_live_incremental','QEMU à chaud : complet puis incrémental (pilote DIR)'],
+   ['qmp_live_incremental','QEMU à chaud : DIR ou LVM de recette compatible'],
    ['offline_copy','Copie à froid (non disponible)'],
    ['pbs_backup_restore','PBS : sauvegarde réelle manuelle (restauration à intégrer)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
-  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Enregistrer seul ne copie rien. '
-  +'Le moteur QMP exige une cible Proxmox DIR inscriptible, pas un volume Pure RO ni un VG LVM partagé. '
-  +'La première synchronisation est manuelle et crée REP_ arrêtée après contrôle du checkpoint.</div>'
+  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Pour un stockage LVM de recette compatible, '
+  +'l’activation crée REP_ puis lance la première copie FULL à chaud sans autre commande. '
+  +'La réplique reste arrêtée et sans réseau ; aucune bascule de production n’est autorisée.</div>'
   +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)
   +' · '+e(r.source_vm_total??r.vms.length)+' VM QEMU visibles'
   +' · '+e(r.source_lxc_excluded??0)+' conteneur(s) LXC exclus. Si des VM manquent, contrôler les ACL du token Proxmox sur le cluster.</p>'
@@ -705,14 +723,20 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
     pools.map(x=>[x.storage,x.storage+' · '+x.type+(x.shared?' (partagé)':'')+
       (x.snapshot_as_volume_chain?' · chaînes QCOW2 (preview; adaptateur PRA indisponible)':'')+
       (x.qmp_receiver_available?' · cible pilote QMP DIR':'')]),
-    current?.target_storage||pools[0].storage)
-  +selectField('Moteur de réplication','engine',engines,current?.engine||'planning_only')
+    current?.target_storage||(labCompatible?pools.find(x=>x.type==='lvm'&&x.snapshot_as_volume_chain)?.storage:pools[0].storage))
+  +selectField('Moteur de réplication','engine',engines,current?.engine||defaultEngine)
+  +(current?'':'<label class="field"><span>Amorçage automatique (recette LVM uniquement)</span><select name="activate_lab">'+(labCompatible&&src.status==='running'
+       ?'<option value="yes">Créer REP_ puis lancer une copie FULL à chaud</option><option value="no">Ne pas lancer (planification uniquement)</option>'
+       :'<option value="no">Ne pas lancer (planification uniquement)</option><option value="yes">Créer REP_ puis lancer une copie FULL à chaud (stockage LVM requis)</option>')+'</select></label>'
+    +'<label class="field"><span>Confirmation pour écriture sur stockage de RECETTE</span><input name="lab_confirmation" autocomplete="off" placeholder="DISPOSABLE-LAB-ONLY"></label>')
   +selectField('Fréquence automatique après amorçage','interval_minutes',
     [[15,'15 minutes'],[30,'30 minutes'],[60,'1 heure'],[240,'4 heures'],
      [720,'12 heures'],[1440,'24 heures']],
     current?.interval_minutes||60)+'</div>'
-  +'<p class="hint">Noms cibles prévus : REP_&lt;nom de VM&gt;. Le VMID cible doit être libre. '
-  +'Aucune création ou réservation n’est envoyée au cluster de secours.</p>'
+  +'<p class="hint">Noms cibles : REP_&lt;nom de VM&gt;. Un VMID libre est proposé automatiquement. '
+  +'Confirmer la recette LAB-ONLY pour démarrer les opérations réelles sur la destination. '
+  +'Les incrémentaux LVM allouent des volumes épais : la planification s’arrête à la limite '
+  +'de sécurité sans rétention validée.</p>'
   +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer la protection</button>'
   +'<button type="button" class="btn" data-action="modal-close">Annuler</button></div></form>';
  modal('VM protégée · '+e(r.source_name)+' → '+e(r.target_name),body,'',true);
@@ -734,6 +758,15 @@ async function openPRALvmLabPanel(vmId){
  const vm=(state.drProtectedVMs||[]).find(x=>x.id===Number(vmId));
  if(!vm)return toast('Protection VM introuvable',false);
  const history=(await api('/dr/vms/'+vmId+'/lvm-lab/runs')).items||[];
+ let activations=[],scheduleEvents=[],bootTests=[],publications=[];
+ try{publications=(await api('/dr/vms/'+vmId+'/lvm-lab/publications')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{activations=(await api('/dr/vms/'+vmId+'/lvm-lab/activations')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{scheduleEvents=(await api('/dr/vms/'+vmId+'/lvm-lab/schedule-events')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{bootTests=(await api('/dr/vms/'+vmId+'/lvm-lab/boot-tests')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
  let pre=null,preError='';
  try{pre=await api('/dr/vms/'+vmId+'/lvm-lab/preflight')}
  catch(ex){preError=ex.message}
@@ -745,21 +778,25 @@ async function openPRALvmLabPanel(vmId){
  const latestCopy=history.find(x=>['full','incremental'].includes(x.mode));
  const restoreReady=writable&&Boolean(pre?.checkpoint)
    &&latestCopy?.status==='completed'&&latestCopy?.checkpoint_token===pre.checkpoint;
+ const restoredClone=history.find(x=>x.mode==='restore'&&x.status==='completed'
+   &&x.checkpoint_token===pre?.checkpoint);
+ const bootTestActive=bootTests.some(x=>['queued','running','uncertain'].includes(x.status));
+ const canTestBoot=restoreReady&&Boolean(restoredClone)&&!bootTestActive;
  const targetLabel=pre?'Source VM #'+e(pre.source_vmid)+' ON → cible VM #'+e(pre.target_vmid)
    +' OFF · '+e(pre.destination_storage):'Connexion des nœuds non validée';
- const labInitCommand='qm create '+vm.target_vmid+' --name REP_TEST_'+vm.target_vmid
-   +' --onboot 0 --description "ORIGAMITASKS_PRA_'+vm.id
-   +' ORIGAMITASKS_LAB_ONLY" --memory 2048 --cores 2';
+ const canPrepare=vm.engine==='qmp_live_incremental' && !running;
+ const canActivate=vm.engine==='qmp_live_incremental'&&vm.state==='planned'
+   &&activations.length===0&&!running;
  const content='<div class="notice error"><b>RECETTE UNIQUEMENT : vraies écritures sur LVM.</b> '
    +'La cible doit porter ORIGAMITASKS_LAB_ONLY, être arrêtée, sans carte réseau et avec onboot=0. '
    +'Chaque transfert alloue de nouveaux volumes logiques épais, sans suppression automatique. '
    +'Aucune bascule ni aucun démarrage automatique.</div>'
    +'<p><b>'+targetLabel+'</b></p>'
-   +'<details><summary>Préparer la VM de secours vide (nœud Proxmox de recette)</summary>'
-   +'<p class="hint">Protection #'+e(vm.id)+' : créer cette VM seulement si le VMID '+e(vm.target_vmid)
-   +' est encore libre sur tout le cluster de RECETTE. Ne pas ajouter de disque ni réseau ; VM arrêtée.</p>'
-   +'<pre><code>'+e(labInitCommand)+'\nqm status '+e(vm.target_vmid)
-   +'\nqm config '+e(vm.target_vmid)+'</code></pre></details>'
+   +'<div class="tool-row"><button class="btn primary" data-action="dr-vm-lvm-lab-activate" data-id="'+vmId+'" '
+   +(canActivate?'':'disabled')+'>Activer la protection (REP_ + première copie FULL)</button>'
+   +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
+   +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
+   +'<p class="hint">OrigamiTasks vérifie le VMID sur le cluster cible, prépare une VM REP_ arrêtée, sans réseau ni disque, et applique les marqueurs de protection. Aucune commande manuelle.</p>'
    +(pre?'<p class="hint">Disques : '+e((pre.disk_slots||[]).join(', '))
       +' · Espace libre : '+e(Math.round(pre.available_bytes/1073741824))+' Gio'
       +' · Dernier checkpoint : '+e(pre.checkpoint||'aucun')+'</p>'
@@ -775,11 +812,36 @@ async function openPRALvmLabPanel(vmId){
    +'</div>'
    +'<h3>Préparer un clone indépendant pour un test de restauration</h3>'
    +'<p class="hint">Crée une nouvelle VM PRA_TEST_ arrêtée, avec ses propres LV aplatis, '
-   +'sans interface réseau. Le clone ne démarre pas : son boot devra être contrôlé séparément.</p>'
+   +'sans interface réseau. Un test QEMU séparé peut le démarrer puis l’arrêter automatiquement ; cela ne vérifie pas le système invité.</p>'
    +'<label class="field"><span>VMID Proxmox libre pour le clone</span>'
    +'<input id="praLvmLabCloneVMID" type="number" min="100" step="1" placeholder="Ex. 4301"></label>'
    +'<div class="tool-row"><button class="btn" data-action="dr-vm-lvm-lab-restore" data-id="'+vmId+'" '
-   +(restoreReady?'':'disabled')+'>Préparer un clone isolé (arrêté)</button></div>'
+   +(restoreReady?'':'disabled')+'>Préparer un clone isolé (arrêté)</button>'
+   +'<button class="btn" data-action="dr-vm-lvm-lab-test-boot" data-id="'+vmId+'" data-restore-run="'+e(restoredClone?.id||'')+'" '
+   +(canTestBoot?'':'disabled')+'>Tester le démarrage du clone (isolé)</button></div>'
+   +'<div class="table-wrap"><table><thead><tr><th>Test</th><th>Clone</th><th>État</th><th>Journal</th></tr></thead><tbody>'
+   +(bootTests.map(x=>'<tr><td>#'+e(x.id)+'</td><td>VMID '+e(x.test_vmid)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.details)+'</td></tr>').join('')
+     ||'<tr><td colspan="4">Aucun test de démarrage QEMU</td></tr>')+'</tbody></table></div>'
+   +'<h3>Publication de la réplique REP_</h3>'
+   +'<p class="hint">Les volumes vérifiés sont attachés à la configuration Proxmox de REP_ arrêtée. '
+   +'Ce contrôle ne certifie pas le démarrage de la VM ni une bascule réelle.</p>'
+   +'<div class="table-wrap"><table><thead><tr><th>Date</th><th>État</th><th>Journal</th></tr></thead><tbody>'
+   +(publications.map(x=>'<tr><td>'+e(dt(x.updated_at))+'</td><td>'+labelStatus(x.status)
+      +'</td><td>'+e(x.details)+'</td></tr>').join('')
+      ||'<tr><td colspan="3">Aucune publication de disque LVM</td></tr>')+'</tbody></table></div>'
+   +'<h3>Journal d’activation de la protection</h3>'
+   +'<div class="table-wrap"><table><thead><tr><th>Activation</th><th>État</th><th>Étape</th><th>Journal</th></tr></thead><tbody>'
+   +(activations.map(x=>'<tr><td>#'+e(x.id)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.phase)+'</td><td>'+e(x.details)
+     +(x.replication_run_id?' · Copie #'+e(x.replication_run_id)+': '+e(x.replication_details||x.replication_status||'en cours'):'')+'</td></tr>').join('')
+     ||'<tr><td colspan="4">Aucune activation automatique</td></tr>')+'</tbody></table></div>'
+   +'<h3>Journal de planification incrémentale</h3>'
+   +'<p class="hint">Intervalle configuré : '+e(vm.interval_minutes)+' min après la dernière copie terminée. '
+   +'Aucune reprise automatique si le bitmap, les volumes ou les checkpoints sont incertains. '
+   +'Une vérification structurelle ne garantit pas un démarrage.</p>'
+   +'<div class="table-wrap"><table><thead><tr><th>Date</th><th>État</th><th>Journal</th></tr></thead><tbody>'
+   +(scheduleEvents.map(x=>'<tr><td>'+e(dt(x.created_at))+'</td><td>'+labelStatus(x.status)
+      +'</td><td>'+e(x.detail)+'</td></tr>').join('')
+     ||'<tr><td colspan="3">Aucune synchronisation planifiée exécutée</td></tr>')+'</tbody></table></div>'
    +'<h3>Historique des copies LVM de recette</h3>'
    +'<div class="table-wrap"><table><thead><tr><th>Run</th><th>État</th><th>Mode</th><th>Point</th><th>Diagnostic</th>'
    +'</tr></thead><tbody>'+(rows||'<tr><td colspan="5">Aucune copie lancée</td></tr>')+'</tbody></table></div>'
@@ -2030,6 +2092,34 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   if(a==='dr-vm-lvm-lab-open'){
    await openPRALvmLabPanel(id);return;
   }
+  if(a==='dr-vm-lvm-lab-activate'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour lancer le PRA de recette',false);
+   if(!confirm('Créer la réplique REP_ et démarrer la première vraie copie QMP/LVM à chaud ? '
+      +'Le secours reste arrêté et la bascule réelle reste interdite.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/activate','POST',{confirmation});
+    toast('Activation PRA de recette #'+result.activation_id+' lancée : consulter les journaux.');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-prepare'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY'){
+    toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour préparer la VM de recette',false);return;
+   }
+   if(!confirm('Créer une VM de secours vide, isolée et arrêtée sur Proxmox ? Aucun disque ni réseau ne sera ajouté.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/prepare-standby','POST',{confirmation});
+    toast(result.created?'VM de secours #'+result.vmid+' créée et vérifiée':'VM de secours #'+result.vmid+' déjà préparée et vérifiée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
   if(a==='dr-vm-lvm-lab-run'){
    const mode=b.dataset.mode;
    const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
@@ -2044,6 +2134,22 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
     const result=await api('/dr/vms/'+id+'/lvm-lab/replicate','POST',{mode,confirmation});
     toast('Copie LVM de recette #'+result.run_id+' lancée. Suivre son état ici.');
     state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-test-boot'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   const restore_run_id=Number(b.dataset.restoreRun);
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour tester le clone',false);
+   if(!Number.isInteger(restore_run_id)||restore_run_id<=0)
+    return toast('Aucun clone indépendant vérifié pour le dernier checkpoint',false);
+   if(!confirm('Démarrer puis arrêter réellement le clone PRA_TEST_ sans réseau ? Le système invité ne sera pas validé.'))
+    return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/test-boot','POST',{restore_run_id,confirmation});
+    toast('Test isolé QEMU #'+result.test_id+' enregistré. Suivre les journaux ici.');
     await openPRALvmLabPanel(id);
    }catch(ex){toast(ex.message,false)}
    return;
@@ -2238,6 +2344,13 @@ async function handleSubmit(ev){
    target_node:String(f.get('target_node')||''),target_storage:String(f.get('target_storage')||''),
    interval_minutes:Number(f.get('interval_minutes')),engine:String(f.get('engine'))
   };
+  if(!currentId && f.get('activate_lab')==='yes'){
+   if(body.engine!=='qmp_live_incremental')return toast('Choisir le moteur QMP pour amorcer la protection',false);
+   if(String(f.get('lab_confirmation')||'').trim()!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour autoriser la copie de recette',false);
+   body.activate_lab=true;
+   body.lab_confirmation='DISPOSABLE-LAB-ONLY';
+  }
   const button=ev.target.querySelector('[type=submit]');
   if(button)button.disabled=true;
   try{
@@ -2246,8 +2359,9 @@ async function handleSubmit(ev){
    closeModal();state.drProtectedVMs=(await api('/dr/vms')).items;
    state.drVMPlanFilter=String(body.plan_id);
    showPage('protected-vms');
-   toast('VM #'+body.source_vmid+' enregistrée : cible '+result.replica_name+
-         ' (aucune copie lancée à l’enregistrement)');
+   toast(result.activation
+    ?'VM #'+body.source_vmid+' enregistrée : préparation REP_ et copie initiale lancées, consulter Réplication LVM'
+    :'VM #'+body.source_vmid+' enregistrée : aucune copie lancée');
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return;
  }

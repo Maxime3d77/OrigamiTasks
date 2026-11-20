@@ -285,6 +285,25 @@ def list_vms(plan_id=None):
                 "ORDER BY id DESC LIMIT 1", (item["id"],)
             ).fetchone()
         item["lvm_lab_latest_run"]=dict(lab) if lab else None
+        with db.session() as con:
+            published=con.execute(
+                "SELECT id,status,checkpoint_token,details,updated_at "
+                "FROM pra_lvm_publications WHERE protected_vm_id=? "
+                "ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+        item["lvm_last_publication"]=dict(published) if published else None
+        with db.session() as con:
+            activation=con.execute(
+                "SELECT status,phase,details FROM pra_lvm_activations "
+                "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+        item["lvm_lab_activated"]=activation is not None
+        item["lvm_activation"]=dict(activation) if activation else None
+        item["lvm_standby_configured"]=bool(
+            published and published["status"]=="completed" and lab
+            and lab["status"]=="completed"
+            and lab["mode"] in ("full","incremental")
+            and lab["checkpoint_token"]==published["checkpoint_token"])
         # An old 'completed' run predating structural verification is NOT
         # evidence of an intact standby or a safe incremental base.
         item["offline_image_verified"]=bool(latest.get("offline_image_verified", False))
@@ -327,6 +346,16 @@ def delete(vm_id):
             "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
         if pending_live:
             raise ProtectedVMError("Réplication active/indéterminée : réconcilier avant suppression")
+        pending_lvm=con.execute(
+            "SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
+        if pending_lvm:
+            raise ProtectedVMError("Réplication LVM active/incertaine : réconcilier avant suppression")
+        active_activation=con.execute(
+            "SELECT 1 FROM pra_lvm_activations WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
+        if active_activation:
+            raise ProtectedVMError("Amorçage PRA actif/incertain : réconcilier avant suppression")
         con.execute("DELETE FROM dr_protected_vms WHERE id=?",(vm_id,))
     return {"ok":True,"vm_config_removed":True,
             "vm_deleted":False,"disks_deleted":False}
