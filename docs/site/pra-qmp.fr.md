@@ -466,3 +466,27 @@ Un clone indépendant préparé via le module `pra_lvm_restore_lab.py` reste
 une opération de test distincte, à valider avant tout démarrage isolé.
 Pas de nouvelle variable `.env` ; la migration de base SQLite est additive.
 
+### Préparer une restauration réelle et isolée (sans démarrage automatique)
+
+Après une copie LVM `completed` depuis la console, le même panneau
+**Copie LVM recette** propose **Préparer un clone isolé (arrêté)**.
+Choisir un **nouveau VMID libre sur tout le cluster de destination**, puis
+confirmer `DISPOSABLE-LAB-ONLY`.
+
+OrigamiTasks vérifie que le dernier checkpoint LVM est le dernier point
+structurellement vérifié et que la VM `REP_` est toujours arrêtée.
+L'assistant **copie et aplatit les images dans de nouveaux LV**, puis crée
+une VM indépendante `PRA_TEST_<VMID>` avec `onboot=0` et sans carte réseau.
+Le test est enregistré dans l'historique comme `restore`.
+
+La VM `PRA_TEST_` est **réellement créée mais reste arrêtée**. Son
+`boot_verified` reste faux. Après un contrôle de l'isolement réseau et des
+disques sur l'hyperviseur de recette, l'administrateur pourra effectuer
+**un test de démarrage manuel**, mesurer le temps de récupération et
+contrôler les fichiers/services. Aucun test de démarrage ni de cohérence
+applicative n'est automatique à cette étape. L'ancienne VM source n'est
+jamais arrêtée, et la VM `REP_` n'est jamais promue.
+
+**Échec ou perte de liaison** : le job passe en `uncertain`, aucun
+nouvel essai ni nettoyage n'est lancé sans réconciliation manuelle.
+
