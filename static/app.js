@@ -785,13 +785,17 @@ async function openPRALvmLabPanel(vmId){
  const targetLabel=pre?'Source VM #'+e(pre.source_vmid)+' ON → cible VM #'+e(pre.target_vmid)
    +' OFF · '+e(pre.destination_storage):'Connexion des nœuds non validée';
  const canPrepare=vm.engine==='qmp_live_incremental' && !running;
+ const canActivate=vm.engine==='qmp_live_incremental'&&vm.state==='planned'
+   &&activations.length===0&&!running;
  const content='<div class="notice error"><b>RECETTE UNIQUEMENT : vraies écritures sur LVM.</b> '
    +'La cible doit porter ORIGAMITASKS_LAB_ONLY, être arrêtée, sans carte réseau et avec onboot=0. '
    +'Chaque transfert alloue de nouveaux volumes logiques épais, sans suppression automatique. '
    +'Aucune bascule ni aucun démarrage automatique.</div>'
    +'<p><b>'+targetLabel+'</b></p>'
-   +'<div class="tool-row"><button class="btn primary" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
-   +(canPrepare?'':'disabled')+'>Préparer automatiquement la VM de secours</button></div>'
+   +'<div class="tool-row"><button class="btn primary" data-action="dr-vm-lvm-lab-activate" data-id="'+vmId+'" '
+   +(canActivate?'':'disabled')+'>Activer la protection (REP_ + première copie FULL)</button>'
+   +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
+   +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
    +'<p class="hint">OrigamiTasks vérifie le VMID sur le cluster cible, prépare une VM REP_ arrêtée, sans réseau ni disque, et applique les marqueurs de protection. Aucune commande manuelle.</p>'
    +(pre?'<p class="hint">Disques : '+e((pre.disk_slots||[]).join(', '))
       +' · Espace libre : '+e(Math.round(pre.available_bytes/1073741824))+' Gio'
@@ -2087,6 +2091,20 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   }
   if(a==='dr-vm-lvm-lab-open'){
    await openPRALvmLabPanel(id);return;
+  }
+  if(a==='dr-vm-lvm-lab-activate'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour lancer le PRA de recette',false);
+   if(!confirm('Créer la réplique REP_ et démarrer la première vraie copie QMP/LVM à chaud ? '
+      +'Le secours reste arrêté et la bascule réelle reste interdite.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/activate','POST',{confirmation});
+    toast('Activation PRA de recette #'+result.activation_id+' lancée : consulter les journaux.');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
   }
   if(a==='dr-vm-lvm-lab-prepare'){
    const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
