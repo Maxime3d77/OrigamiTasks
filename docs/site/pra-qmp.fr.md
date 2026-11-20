@@ -223,3 +223,26 @@ Tant que les étapes **6 à 9** ne sont pas implémentées et validées, les
 commandes de bascule et de retour restent des simulations interdites
 d'exécution sur la production.
 
+## Rapport de préparation à la bascule (v0.3.28-rc1)
+
+Le nouvel écran **Préparation bascule** dans **VM protégées PRA** exploite
+les résultats des contrôles précédents pour expliquer, VM par VM, ce qui
+est vérifié et ce qui empêche une activation de la copie de secours.
+
+L'API administrateur en lecture seule
+`GET /api/dr/vms/{id}/recovery-readiness` indique la dernière copie
+structurellement vérifiée, le type d'adaptateur, le statut de la destination,
+les preuves manquantes et les blocages de récupération.
+
+Ce diagnostic reste volontairement **fail-closed** : même avec une copie QCOW2
+vérifiée et un stockage disponible, la bascule n'est jamais autorisée
+sans restauration isolée éprouvée, témoin externe, fencing effectivement
+prouvé, protection contre le double démarrage, tests applicatifs et
+reconfiguration réseau contrôlée. Aucun booléen saisi par un administrateur
+dans OrigamiTasks ne vaut preuve de fencing ou de témoin indépendant.
+
+Cette version ne déclenche aucune opération sur un hyperviseur, ne change
+aucun paramètre `.env` et ne nécessite pas une mise à jour des agents
+Proxmox pour afficher ce rapport. Les moteurs de bascule réelle et failback
+restent à développer et à qualifier sur une infrastructure de recette.
+
