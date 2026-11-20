@@ -24,6 +24,7 @@ import time
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE / "agents" / "linux"))
 from pra_qmp_incremental import QMP, Disk, ReplicationError, backup
+from pra_checkpoint import CheckpointError, CheckpointStore
 
 
 def run(*args, timeout=120):
@@ -120,8 +121,11 @@ def main():
         size = 64 * 1024 * 1024
         slots = ("scsi0", "scsi1")
         sources = {slot: root / (slot + "-source.qcow2") for slot in slots}
-        seeds = {slot: root / (slot + "-seed.qcow2") for slot in slots}
-        deltas = {slot: root / (slot + "-delta.qcow2") for slot in slots}
+        checkpoint_root = root / "target-images"
+        checkpoint_root.mkdir()
+        checkpoint = CheckpointStore(checkpoint_root, target_vmid=321)
+        generation = "lab-vm-generation-1"
+        sizes = {slot: size for slot in slots}
         bitmap = {slot: "origami_106_" + slot for slot in slots}
         for index, slot in enumerate(slots):
             run("qemu-img", "create", "-f", "qcow2", str(sources[slot]), str(size))
@@ -129,8 +133,11 @@ def main():
                 f"write -P {0x17 + index} 0 64k", str(sources[slot]))
 
         with qemu_source(root, sources) as qmp:
-            for slot in slots:
-                run("qemu-img", "create", "-f", "qcow2", str(seeds[slot]), str(size))
+            staged = checkpoint.begin("full", sizes, generation)
+            assert checkpoint.current() is None
+            seed_token = staged["token"]
+            seeds = {slot: checkpoint_root / staged["disks"][slot]["file"]
+                     for slot in slots}
             with contextlib.ExitStack() as stack:
                 ports = {slot: stack.enter_context(nbd(seeds[slot])) for slot in slots}
                 result = backup(qmp, [
@@ -140,6 +147,10 @@ def main():
                 ], "full", timeout=35)
                 assert result["qmp_jobs_completed"] is True
                 assert result["disks"] == 2 and not result["standby_vm_started"]
+            committed = checkpoint.commit(seed_token)
+            assert committed["status"] == "committed"
+            assert checkpoint.current()["token"] == seed_token
+            assert not checkpoint.pending.exists()
 
             for index, slot in enumerate(slots):
                 run("qemu-img", "check", "-f", "qcow2", str(seeds[slot]))
@@ -151,8 +162,11 @@ def main():
                 if isinstance(response, str) and "error" in response.lower():
                     raise AssertionError("QEMU failed simulated guest write: " + response)
 
-                run("qemu-img", "create", "-f", "qcow2", "-F", "qcow2",
-                    "-b", str(seeds[slot]), str(deltas[slot]))
+            staged_delta = checkpoint.begin("incremental", sizes, generation)
+            delta_token = staged_delta["token"]
+            assert checkpoint.current()["token"] == seed_token
+            deltas = {slot: checkpoint_root / staged_delta["disks"][slot]["file"]
+                      for slot in slots}
             with contextlib.ExitStack() as stack:
                 ports = {slot: stack.enter_context(nbd(deltas[slot])) for slot in slots}
                 result = backup(qmp, [
@@ -161,6 +175,11 @@ def main():
                     for slot in slots
                 ], "incremental", timeout=35)
                 assert result["qmp_jobs_completed"] is True
+            checkpoint.commit(delta_token)
+            assert checkpoint.current()["token"] == delta_token
+            assert checkpoint.current()["previous_token"] == seed_token
+            assert checkpoint.current()["depth"] == 2
+            assert not checkpoint.pending.exists()
 
         for index, slot in enumerate(slots):
             seed, delta = seeds[slot], deltas[slot]
@@ -177,6 +196,16 @@ def main():
                                    "--output=json", str(delta)))
             assert len(chain) == 2 and Path(chain[1]["filename"]) == seed
 
+        # The target checkpoint manifest is durable and old generations are
+        # retained; QEMU image verification is not a guest boot validation.
+        assert len(checkpoint.owned.read_text()) > 0
+        try:
+            checkpoint.garbage_collect()
+        except CheckpointError as exc:
+            assert "disabled" in str(exc)
+        else:
+            raise AssertionError("Unverified checkpoint GC unexpectedly enabled")
+
         # QEMU restart invalidates every deliberately non-persistent bitmap;
         # an incremental request MUST fail before opening any NBD target.
         with qemu_source(root, sources) as restarted:
@@ -189,7 +218,7 @@ def main():
                     raise
             else:
                 raise AssertionError("Incremental unexpectedly accepted after source restart")
-        print("PASS: real 2-disk QMP full+incremental NBD, immutable QCOW2 base")
+        print("PASS: real 2-disk QMP full+incremental NBD with CheckpointStore atomic commit")
         print("PASS: bitmap loss after source restart correctly forces FULL reseed")
         print("NOTE: synthetic QEMU process, NOT Proxmox multi-node recovery/fencing")
 
