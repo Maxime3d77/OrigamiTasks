@@ -165,7 +165,9 @@ def test_ui_does_not_claim_lvm_recovery_is_production_safe():
     ui=(root/"static/app.js").read_text(encoding="utf-8")
     for phrase in ("Copie LVM recette","DISPOSABLE-LAB-ONLY",
                    "lvm-lab/replicate","lvm-lab/runs",
-                   "Copie complète à chaud","Synchronisation incrémentale"):
+                   "Copie complète à chaud","Synchronisation incrémentale",
+                   "Protection OrigamiTasks #","qm create ",
+                   "ORIGAMITASKS_PRA_"):
         assert phrase in ui
     assert "Bascule réelle interdite" in ui
 
