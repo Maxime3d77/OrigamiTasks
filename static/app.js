@@ -624,7 +624,7 @@ function protectedVMsPage(){
    '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
    +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
   +'<div class="notice dr-safety-notice"><b>QMP expérimental :</b> une synchronisation approuvée peut créer une VM REP_ arrêtée sur stockage DIR inscriptible ; source toujours allumée. '
-  +'Le pilote LVM permet désormais une copie FULL/incrémentale réelle sur LV de RECETTE marqués LAB-ONLY, sans démarrage ni attachement automatique. '
+  +'Copie LVM recette : le pilote permet une copie FULL/incrémentale réelle sur LV marqués LAB-ONLY, sans démarrage ni attachement automatique. '
   +'Une vérification QCOW2 hors ligne ne garantit pas le démarrage ni la cohérence applicative. '
    +'Les tests de bascule et de retour restent des simulations : aucune promotion automatique.</div>'
   +'<div class="stats-grid dr-vm-stat-grid">'
