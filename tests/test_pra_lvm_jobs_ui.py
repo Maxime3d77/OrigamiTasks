@@ -58,8 +58,12 @@ def test_admin_only_and_required_lab_ack(monkeypatch):
                                   headers=h,json={"mode":"full","confirmation":pra_lvm_jobs.LAB_ACK,
                                                   "override_production":True})
             assert malformed.status_code==422
+            # A TestClient keeps login cookies across requests; explicitly
+            # clear them before testing unauthenticated read-only routes.
+            client.cookies.clear()
             assert client.get(f"/api/dr/vms/{vm_id}/lvm-lab/preflight").status_code in (401,403)
             assert client.get(f"/api/dr/vms/{vm_id}/lvm-lab/runs").status_code in (401,403)
+            h=login(client)
             assert client.get(f"/api/dr/vms/{vm_id}/lvm-lab/preflight",headers=h).json()["source_running"]
             assert client.get(f"/api/dr/vms/{vm_id}/lvm-lab/runs",headers=h).json()["items"]==[]
             with db.session() as con:
