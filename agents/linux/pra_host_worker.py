@@ -241,33 +241,36 @@ def target_probe(data):
             "writable": True, "storage_type": "dir"}
 
 
-def _kill_export(store, slot, strict=False):
-    """Never remove a PID file or checkpoint while an NBD writer may exist.
+def _kill_export(store, slot, *, image_name, strict=True):
+    """Fail closed if the exact NBD image process cannot be proven stopped.
 
-    A failed process shutdown, including an unexpected qemu-nbd identity,
-    is an UNCERTAIN state: preserve both the PID file and backing data for
-    operator reconciliation. Silent failure would risk deleting a live
-    exported image during target_abort / target_begin rollback.
+    A shared VM directory can host many backup generations. A PID referring
+    to some other disk in the same directory MUST NOT be killed, and a lost
+    PID file cannot be interpreted as proof that the image is no longer
+    being written to.
     """
+    if (not isinstance(image_name, str)
+            or Path(image_name).name != image_name
+            or not re.fullmatch(r"vm-[0-9]+-disk-[0-9]+\\.qcow2", image_name)):
+        raise HostError("Invalid NBD checkpoint image name")
     pidfile = store.root / (".origami-" + slot + ".pid")
     if not pidfile.exists():
-        return
+        raise HostError("NBD PID missing: must reconcile before deleting/checking image")
     if pidfile.is_symlink():
         raise HostError("Invalid NBD pidfile")
     try:
         pid = int(pidfile.read_text().strip())
         if pid <= 1:
             raise ValueError("Invalid PID")
-        # qemu-nbd must still own exactly this checkpoint directory.
-        process = Path("/proc/" + str(pid) + "/cmdline")
+        proc = Path("/proc/" + str(pid) + "/cmdline")
         try:
-            command = process.read_bytes().replace(b"\\x00", b" ")
+            arguments = proc.read_bytes().split(b"\\x00")
         except FileNotFoundError:
-            # Already dead: its persisted file is stale, not active.
             pidfile.unlink()
             return
-        if b"qemu-nbd" not in command or str(store.root).encode() not in command:
-            raise HostError("NBD owner mismatch: manual intervention required")
+        if (not any(b"qemu-nbd" in a for a in arguments[:1])
+                or str(store.root / image_name).encode() not in arguments):
+            raise HostError("NBD writer identity mismatch: manual reconciliation required")
         os.kill(pid, signal.SIGTERM)
         for _ in range(60):
             try:
@@ -276,7 +279,6 @@ def _kill_export(store, slot, strict=False):
                 pidfile.unlink()
                 return
             time.sleep(0.1)
-        # Even a best-effort abort MUST NOT free live checkpoint images.
         raise HostError("NBD export still active: checkpoint must be reconciled")
     except (ValueError, PermissionError, OSError) as exc:
         raise HostError("NBD export shutdown not verified: preserve checkpoint") from exc
@@ -314,9 +316,12 @@ def target_begin(data):
             ports[slot] = port
         return {"token": checkpoint["token"], "ports": ports, "mode": mode}
     except BaseException:
+        # A qemu-nbd launch can fail after fork, so the launch outcome may be
+        # uncertain. Never automatically unlink the checkpoint here. Keep
+        # its pending manifest and the images until explicit reconciliation.
         for slot in ports:
-            _kill_export(store, slot)
-        store.abort(checkpoint["token"])
+            _kill_export(store, slot,
+                         image_name=checkpoint["disks"][slot]["file"], strict=True)
         raise
 
 
@@ -331,8 +336,8 @@ def target_finish(data):
     pending = store._read(store.pending)
     if not pending or pending["token"] != token:
         raise HostError("Unknown checkpoint")
-    for slot in pending["disks"]:
-        _kill_export(store, slot, strict=True)
+    for slot, disk in pending["disks"].items():
+        _kill_export(store, slot, image_name=disk["file"], strict=True)
     # Successful block copy must be proven by controller before this call.
     if data.get("verified_by_source") is not True:
         raise HostError("Source backup proof missing")
@@ -348,8 +353,8 @@ def target_abort(data):
     pending = store._read(store.pending)
     if not pending or pending.get("token") != token:
         raise HostError("No matching pending checkpoint")
-    for slot in pending["disks"]:
-        _kill_export(store, slot, strict=True)
+    for slot, disk in pending["disks"].items():
+        _kill_export(store, slot, image_name=disk["file"], strict=True)
     return store.abort(token)
 
 
