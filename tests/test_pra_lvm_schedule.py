@@ -24,6 +24,8 @@ class Session:
             return Cursor([self.previous] if self.previous is not None else [])
         if sql.startswith("SELECT 1 FROM pra_live_runs"):
             return Cursor([{"ok":1}] if self.active else [])
+        if sql.startswith("SELECT status FROM pra_lvm_publications"):
+            return Cursor([{"status":"completed"}])
         if sql.startswith("SELECT 1 FROM pra_lvm_schedule_events"):
             return Cursor([{"ok":1}] if self.blocked else [])
         raise AssertionError("Unexpected scheduler SQL: "+sql[:120])
