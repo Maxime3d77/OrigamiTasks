@@ -604,6 +604,7 @@ function protectedVMsPage(){
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +'<button class="btn tiny" data-action="dr-vm-storage-readiness" data-id="'+vm.id+'">Compatibilité stockage</button>'
+   +'<button class="btn tiny" data-action="dr-vm-recovery-readiness" data-id="'+vm.id+'">Préparation bascule</button>'
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
    +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
@@ -1945,7 +1946,24 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
  if(a==='protect-vm-resource'){
   closeModal();openProtectedVMWizard(null,id,Number(b.dataset.vmid));return
  }
- if(a==='dr-vm-storage-readiness'){
+ if(a==='dr-vm-recovery-readiness'){
+   const r=await api('/dr/vms/'+id+'/recovery-readiness');
+   const checks=(r.checks||[]).map(x=>'<tr><td>'+e(x.name)+'</td><td>'
+     +(x.passed?'<span class="status success">Validé</span>':'<span class="status failed">Bloqué</span>')
+     +'</td><td>'+e(x.detail)+'</td></tr>').join('');
+   modal('Préparation bascule PRA · VM #'+e(r.source_vmid),
+     '<div class="notice error"><b>Bascule réelle interdite.</b> '
+     +'Le rapport liste les preuves nécessaires ; aucune action Proxmox ne sera déclenchée.</div>'
+     +'<p><b>Dernier checkpoint vérifié :</b> '
+     +(r.last_structural_sync?dt(r.last_structural_sync):'aucun')
+     +' · <b>Stockage :</b> '+e(r.target_backend||'non confirmé')+'</p>'
+     +'<div class="table-wrap"><table><thead><tr><th>Contrôle</th><th>Résultat</th><th>Explication</th></tr></thead><tbody>'
+     +checks+'</tbody></table></div>'
+     +'<p class="hint">'+e(r.safety_note)+'</p>',
+     '<button class="btn primary" data-action="modal-close">Fermer</button>',true);
+   return;
+  }
+  if(a==='dr-vm-storage-readiness'){
    toast('Analyse des capacités de stockage en lecture seule…');
    const r=await api('/dr/vms/'+id+'/storage-readiness');
    const t=r.target_storage||{};
