@@ -597,7 +597,10 @@ function protectedVMsPage(){
    +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
    +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
-   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point QCOW2 vérifié hors ligne : '+(vm.last_successful_sync?dt(vm.last_successful_sync):'aucun')+'</div>'
+   +'<td>'+labelStatus(vm.lvm_lab_latest_run?.status||vm.replication_status)
+     +'<div class="muted tinytext">Dernière copie LVM : '
+     +(vm.lvm_lab_latest_run?.point_at?dt(vm.lvm_lab_latest_run.point_at):(vm.last_successful_sync?dt(vm.last_successful_sync):'aucune'))+'</div>'
+     +'<div class="muted tinytext">Moteur : '+(vm.lvm_lab_latest_run?'QMP → LVM de recette':'QMP → DIR / non configuré')+'</div>'
    +'<div class="muted tinytext">Validation du dernier transfert : '+(vm.offline_image_verified?'structurelle, hors ligne':'non vérifiée ou sans transfert')+' · Démarrage non testé</div>'
    +'<div class="muted tinytext">'+e(vm.last_replication_run?.details||'')+'</div>'
    +(vm.lvm_lab_latest_run?'<div class="muted tinytext"><b>LVM RECETTE :</b> '
@@ -736,8 +739,10 @@ async function openPRALvmLabPanel(vmId){
  const vm=(state.drProtectedVMs||[]).find(x=>x.id===Number(vmId));
  if(!vm)return toast('Protection VM introuvable',false);
  const history=(await api('/dr/vms/'+vmId+'/lvm-lab/runs')).items||[];
- let activations=[];
+ let activations=[],scheduleEvents=[];
  try{activations=(await api('/dr/vms/'+vmId+'/lvm-lab/activations')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{scheduleEvents=(await api('/dr/vms/'+vmId+'/lvm-lab/schedule-events')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
  let pre=null,preError='';
  try{pre=await api('/dr/vms/'+vmId+'/lvm-lab/preflight')}
@@ -786,6 +791,14 @@ async function openPRALvmLabPanel(vmId){
    +(activations.map(x=>'<tr><td>#'+e(x.id)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.phase)+'</td><td>'+e(x.details)
      +(x.replication_run_id?' · Copie #'+e(x.replication_run_id)+': '+e(x.replication_details||x.replication_status||'en cours'):'')+'</td></tr>').join('')
      ||'<tr><td colspan="4">Aucune activation automatique</td></tr>')+'</tbody></table></div>'
+   +'<h3>Journal de planification incrémentale</h3>'
+   +'<p class="hint">Intervalle configuré : '+e(vm.interval_minutes)+' min après la dernière copie terminée. '
+   +'Aucune reprise automatique si le bitmap, les volumes ou les checkpoints sont incertains. '
+   +'Une vérification structurelle ne garantit pas un démarrage.</p>'
+   +'<div class="table-wrap"><table><thead><tr><th>Date</th><th>État</th><th>Journal</th></tr></thead><tbody>'
+   +(scheduleEvents.map(x=>'<tr><td>'+e(dt(x.created_at))+'</td><td>'+labelStatus(x.status)
+      +'</td><td>'+e(x.detail)+'</td></tr>').join('')
+     ||'<tr><td colspan="3">Aucune synchronisation planifiée exécutée</td></tr>')+'</tbody></table></div>'
    +'<h3>Historique des copies LVM de recette</h3>'
    +'<div class="table-wrap"><table><thead><tr><th>Run</th><th>État</th><th>Mode</th><th>Point</th><th>Diagnostic</th>'
    +'</tr></thead><tbody>'+(rows||'<tr><td colspan="5">Aucune copie lancée</td></tr>')+'</tbody></table></div>'
