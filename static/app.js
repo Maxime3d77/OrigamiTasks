@@ -605,7 +605,10 @@ function protectedVMsPage(){
    +'<div class="muted tinytext">'+e(vm.last_replication_run?.details||'')+'</div>'
    +(vm.lvm_lab_latest_run?'<div class="muted tinytext"><b>LVM RECETTE :</b> '
      +labelStatus(vm.lvm_lab_latest_run.status)+' · '+e(vm.lvm_lab_latest_run.mode)
-     +' · '+e(vm.lvm_lab_latest_run.details||'')+'</div>':'')+'</td>'
+     +' · '+e(vm.lvm_lab_latest_run.details||'')+'</div>':'')
+   +(vm.lvm_last_publication?'<div class="muted tinytext"><b>REP_ LVM :</b> '
+     +labelStatus(vm.lvm_last_publication.status)+' · '+e(vm.lvm_last_publication.details||'')
+     +'</div>':'')+'</td>'
    +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
@@ -749,7 +752,9 @@ async function openPRALvmLabPanel(vmId){
  const vm=(state.drProtectedVMs||[]).find(x=>x.id===Number(vmId));
  if(!vm)return toast('Protection VM introuvable',false);
  const history=(await api('/dr/vms/'+vmId+'/lvm-lab/runs')).items||[];
- let activations=[],scheduleEvents=[],bootTests=[];
+ let activations=[],scheduleEvents=[],bootTests=[],publications=[];
+ try{publications=(await api('/dr/vms/'+vmId+'/lvm-lab/publications')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
  try{activations=(await api('/dr/vms/'+vmId+'/lvm-lab/activations')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
  try{scheduleEvents=(await api('/dr/vms/'+vmId+'/lvm-lab/schedule-events')).items||[]}
@@ -807,6 +812,13 @@ async function openPRALvmLabPanel(vmId){
    +'<div class="table-wrap"><table><thead><tr><th>Test</th><th>Clone</th><th>État</th><th>Journal</th></tr></thead><tbody>'
    +(bootTests.map(x=>'<tr><td>#'+e(x.id)+'</td><td>VMID '+e(x.test_vmid)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.details)+'</td></tr>').join('')
      ||'<tr><td colspan="4">Aucun test de démarrage QEMU</td></tr>')+'</tbody></table></div>'
+   +'<h3>Publication de la réplique REP_</h3>'
+   +'<p class="hint">Les volumes vérifiés sont attachés à la configuration Proxmox de REP_ arrêtée. '
+   +'Ce contrôle ne certifie pas le démarrage de la VM ni une bascule réelle.</p>'
+   +'<div class="table-wrap"><table><thead><tr><th>Date</th><th>État</th><th>Journal</th></tr></thead><tbody>'
+   +(publications.map(x=>'<tr><td>'+e(dt(x.updated_at))+'</td><td>'+labelStatus(x.status)
+      +'</td><td>'+e(x.details)+'</td></tr>').join('')
+      ||'<tr><td colspan="3">Aucune publication de disque LVM</td></tr>')+'</tbody></table></div>'
    +'<h3>Journal d’activation de la protection</h3>'
    +'<div class="table-wrap"><table><thead><tr><th>Activation</th><th>État</th><th>Étape</th><th>Journal</th></tr></thead><tbody>'
    +(activations.map(x=>'<tr><td>#'+e(x.id)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.phase)+'</td><td>'+e(x.details)
