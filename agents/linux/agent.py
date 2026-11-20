@@ -14,7 +14,7 @@ from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHand
 from urllib.error import HTTPError
 
 CONFIG = Path(__file__).with_name('config.json')
-VERSION = '0.3.29'
+VERSION = '0.3.30'
 MODULES_FILE = CONFIG.with_name('modules.json')
 PRA_HEALTH = CONFIG.with_name('pra-state.json')
 
