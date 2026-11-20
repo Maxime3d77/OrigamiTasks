@@ -13,7 +13,9 @@ class Session:
     def __enter__(self): return self
     def __exit__(self, *args): return False
     def execute(self, query, args):
-        return None
+        class Cursor:
+            def fetchone(self): return None
+        return Cursor()
 
 
 @pytest.fixture
