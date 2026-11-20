@@ -758,8 +758,8 @@ async function openPRALvmLabPanel(vmId){
    +'<details><summary>Préparer la VM de secours vide (nœud Proxmox de recette)</summary>'
    +'<p class="hint">Protection #'+e(vm.id)+' : créer cette VM seulement si le VMID '+e(vm.target_vmid)
    +' est encore libre sur tout le cluster de RECETTE. Ne pas ajouter de disque ni réseau ; VM arrêtée.</p>'
-   +'<pre><code>'+e(labInitCommand)+'\\nqm status '+e(vm.target_vmid)
-   +'\\nqm config '+e(vm.target_vmid)+'</code></pre></details>'
+   +'<pre><code>'+e(labInitCommand)+'\nqm status '+e(vm.target_vmid)
+   +'\nqm config '+e(vm.target_vmid)+'</code></pre></details>'
    +(pre?'<p class="hint">Disques : '+e((pre.disk_slots||[]).join(', '))
       +' · Espace libre : '+e(Math.round(pre.available_bytes/1073741824))+' Gio'
       +' · Dernier checkpoint : '+e(pre.checkpoint||'aucun')+'</p>'
