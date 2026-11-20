@@ -200,6 +200,29 @@ def inspect(vm_id,drill_id):
     owner,conf=_owned_drill(vm,drill,dc,cred,resources)
     running=owner.get("status")=="running"
     networks=sorted(k for k in conf if _NET.fullmatch(k))
+    # A PVE start task may have been accepted but is not yet reflected in
+    # /cluster/resources. Until the task finishes do NOT mark the VM ready
+    # for another start. The same applies to graceful shutdown.
+    if drill["status"] in ("booting","stopping"):
+        task=_get(dc,cred,"/api2/json/nodes/"+quote(drill["node"],safe="")+
+                  "/tasks/"+quote(drill["upid"],safe="")+"/status")
+        if not isinstance(task,dict):
+            raise DrillError("Statut de démarrage/arrêt indisponible")
+        if task.get("status")!="stopped":
+            return {"drill_id":drill_id,"status":drill["status"],
+                    "test_vmid":drill["test_vmid"],"network_isolated":not networks,
+                    "ready_for_boot":False,"boot_tested":False,
+                    "can_promote":False}
+        if task.get("exitstatus")!="OK":
+            with db.session() as con:
+                con.execute("UPDATE pra_lab_drills SET status='uncertain' WHERE id=?",
+                            (drill_id,))
+            raise DrillError("Opération du clone échouée : état à réconcilier")
+        if drill["status"]=="booting" and not running:
+            with db.session() as con:
+                con.execute("UPDATE pra_lab_drills SET status='uncertain' WHERE id=?",
+                            (drill_id,))
+            raise DrillError("Démarrage accepté mais VM non confirmée allumée")
     ready=not networks and not running
     status=("running" if running else
             "ready" if ready else "needs_isolation")
@@ -209,7 +232,8 @@ def inspect(vm_id,drill_id):
     return {"drill_id":drill_id,"status":status,"test_vmid":drill["test_vmid"],
             "network_devices":networks,"network_isolated":not networks,
             "ready_for_boot":ready,
-            "boot_tested":running,
+            "boot_tested":False,
+            "hypervisor_running":running,
             "app_health_verified":False,"can_promote":False,
             "source_vm_stopped":False,"standby_vm_started":False}
 
