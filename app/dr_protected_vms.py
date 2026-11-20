@@ -327,6 +327,16 @@ def delete(vm_id):
             "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
         if pending_live:
             raise ProtectedVMError("Réplication active/indéterminée : réconcilier avant suppression")
+        pending_lvm=con.execute(
+            "SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
+        if pending_lvm:
+            raise ProtectedVMError("Réplication LVM active/incertaine : réconcilier avant suppression")
+        active_activation=con.execute(
+            "SELECT 1 FROM pra_lvm_activations WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
+        if active_activation:
+            raise ProtectedVMError("Amorçage PRA actif/incertain : réconcilier avant suppression")
         con.execute("DELETE FROM dr_protected_vms WHERE id=?",(vm_id,))
     return {"ok":True,"vm_config_removed":True,
             "vm_deleted":False,"disks_deleted":False}
