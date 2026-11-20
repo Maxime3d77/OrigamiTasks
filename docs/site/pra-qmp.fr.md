@@ -246,3 +246,116 @@ aucun paramètre `.env` et ne nécessite pas une mise à jour des agents
 Proxmox pour afficher ce rapport. Les moteurs de bascule réelle et failback
 restent à développer et à qualifier sur une infrastructure de recette.
 
+## Vérification QMP réelle automatisée — v0.3.29-rc1
+
+Le workflow GitHub Actions `CI / Real QEMU QMP/NBD full + incremental
+smoke test` installe de vrais exécutables QEMU et effectue les tests suivants
+sur des fichiers **temporaires jetables**, et non sur les VM de production :
+
+- Démarrage d'un processus QEMU avec deux disques QCOW2 distincts.
+- Copie initiale via QMP `blockdev-backup` et deux serveurs NBD locaux.
+- Commit réel des deux disques dans `CheckpointStore`, manifeste atomique.
+- Écritures sur les disques de la source QEMU active, puis copie incrémentale
+  avec dirty bitmap vers deux overlays QCOW2.
+- Contrôle `qemu-img check` et lecture des motifs de données, vérification
+  du chaînage et de l'immuabilité du checkpoint initial.
+- Redémarrage de la source QEMU, perte des bitmaps volatils et refus d'un
+  incrémental sans nouvel amorçage.
+- Vérification que le mécanisme de rétention refuse toujours une suppression
+  automatique non prouvée.
+
+Les essais réels ont permis de corriger une **incompatibilité QMP** : la
+transaction de copie initiale combine `block-dirty-bitmap-add` et
+`blockdev-backup`, pour laquelle `completion-mode=grouped` n'est pas
+autorisé par QEMU. Les copies incrémentales composées exclusivement de
+jobs de sauvegarde conservent ce mode groupé.
+
+L'assistant cible impose maintenant un arrêt **prouvé** de chaque processus
+`qemu-nbd` avant de publier, d'abandonner ou de supprimer un checkpoint.
+Un PID absent, un processus qui pointe vers un autre disque ou un arrêt
+incertain préservent les images et obligent une réconciliation. Une erreur
+d'initialisation NBD n'efface plus automatiquement la génération en cours.
+
+### Limites des essais
+
+Cette campagne teste une **copie technique QEMU/NBD réelle**, mais sans
+hyperviseur Proxmox, sans deux nœuds SSH distincts, sans démarrage d'OS,
+sans baie de stockage, sans adaptateur LVM actif et sans témoin/fencing.
+Elle ne vaut donc **pas** qualification d'un PRA multi-clusters. Les essais
+terrain sur deux clusters de recette restent obligatoires pour compléter
+la matrice de qualification PRA.
+
+## Version d'intégration PRA 0.3.29 — protocole de recette complet
+
+Cette livraison est destinée à la **recette Proxmox** avant toute promotion
+production, et rassemble le moteur QMP, la copie initiale et incrémentale,
+les checkpoints atomiques DIR, les premières fonctions de destination LVM et
+les tests automatisés sur de vrais QEMU/NBD. La copie source reste allumée.
+La destination de secours demeure arrêtée.
+
+### Ce qui est automatisé et vérifié en CI
+
+- Deux disques de la source QEMU sauvegardés en pleine activité vers deux
+  serveurs NBD locaux via le moteur QMP réel. Checkpoints DIR atomiques.
+- Écritures de données puis réplication incrémentale sur deux overlays QCOW2 ;
+  contrôles des motifs de données, des chaînes et de la génération initiale.
+- Arrêt/redémarrage de QEMU, perte des bitmaps volatils et obligation d'un
+  nouvel amorçage complet.
+- Compatibilité QCOW2 sur véritables périphériques blocs temporaires
+  (/dev/loop), sans utiliser de LUN ou de baie réelle.
+- Protection contre la suppression d'un checkpoint tandis qu'un export NBD
+  est encore actif, et garde anti-perte de référence de processus.
+- Contrats de préparation LVM avec allocations via Proxmox, journalisation
+  durable sur le nœud, vérification de chaînes et refus des volumes étrangers.
+
+### Protocole manuel sur deux clusters Proxmox de test
+
+**Préconditions impératives :** VM source sans données importantes, allumée
+et sans EFI/TPM/PCI passthrough ; VM cible préexistante sur un **autre
+cluster**, VMID distinct, arrêtée, `onboot=0`, **aucune carte réseau**
+et description contenant les deux marqueurs
+`ORIGAMITASKS_PRA_<id de protection>` et
+`ORIGAMITASKS_LAB_ONLY`. La destination doit utiliser un stockage de
+type `lvm` avec `snapshot-as-volume-chain=1` et disposer de la capacité
+nécessaire pour des LV épaisses. Les deux nœuds doivent avoir un agent
+OrigamiTasks Linux mis à jour et un accès SSH approuvé par le contrôleur.
+Ne pas utiliser les pools PROD.
+
+Depuis la console OrigamiTasks, une fois la protection QMP définie dans
+l'interface avec le stockage LVM cible et les agents installés sur les
+nœuds de **recette uniquement** :
+
+```bash
+docker exec origamitasks python -m app.pra_lvm_lab --vm-id 17
+docker exec origamitasks python -m app.pra_lvm_lab --vm-id 17 --execute --lab-confirm DISPOSABLE-LAB-ONLY
+docker exec origamitasks python -m app.pra_lvm_lab --vm-id 17 --incremental --execute --lab-confirm DISPOSABLE-LAB-ONLY
+```
+
+Remplacer `17` par l'identifiant **de la protection PRA** de la VM de
+recette, et non par son VMID Proxmox. Le premier appel est **en lecture
+seule** ; les appels avec `--execute` allouent réellement des LV et
+transfèrent des données. Les checkpoints incertains sont conservés pour
+réconciliation et empêchent les incréments suivants.
+
+L'outil de diagnostic sur le nœud de test propose aussi :
+
+```bash
+python3 /usr/local/lib/origamitasks-pra/pra_lvm_lab_cli.py \
+  --storage LAB-LVM --vmid 3301 --protection-id 17 inspect
+```
+
+**Attention :** le module `pra_lvm_restore_lab.py` prépare un clone
+indépendant et arrêté à partir du dernier point LVM validé ; son interface
+Python n'est pas encore une fonctionnalité exposée dans l'interface web,
+et ne démarre jamais automatiquement la copie. Aucun retour d'état
+`boot_verified`, cohérence applicative, témoin indépendant ou fencing n'est
+attesté par les tests de copie.
+
+### Limites bloquantes avant production
+
+La journalisation LVM est encore **locale au nœud cible**, donc ne permet
+pas de reprendre la propriété de la VM après perte du nœud. Les démarrages
+isolés, profils BIOS modernes/UEFI/TPM, quorum de témoin indépendant,
+fencing vérifié, droit de promotion et failback restent non qualifiés et
+ne sont pas activés. **Une PR CI verte ne prouve pas un PRA multi-site.**
+

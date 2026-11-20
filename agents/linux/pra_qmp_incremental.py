@@ -231,10 +231,14 @@ def backup(qmp, disks, mode, timeout=3600):
         # Transaction establishes one cross-disk backup point. It does NOT
         # provide guest application-consistency without fsfreeze/VSS.
         snapshot_epoch = time.time()
-        qmp.execute("transaction", {
-            "actions": actions,
-            "properties": {"completion-mode": "grouped"}
-        })
+        # QEMU rejects grouped job-completion semantics when a transaction
+        # also contains bitmap-add actions. FULL seed must atomically create
+        # the dirty bitmaps alongside the backup actions, so omit properties.
+        # INCREMENTAL contains backup actions only and can use grouped jobs.
+        options = {"actions": actions}
+        if mode == "incremental":
+            options["properties"] = {"completion-mode": "grouped"}
+        qmp.execute("transaction", options)
         started = True
         _job_result(qmp, jobs, timeout)
         return {
