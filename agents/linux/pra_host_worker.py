@@ -790,6 +790,89 @@ def lvm_lab_verify(data):
             "lab_only": True}
 
 
+def lvm_lab_publish_standby(data):
+    """Attach only a proven committed QCOW2/LVM generation to an OFF REP_ VM.
+
+    This prepares a boot *configuration*, not a proven bootable guest or a
+    production promotion. Old thick volumes are retained, never freed.
+    """
+    store = _lvm_lab_store(data)
+    token = data.get("token")
+    if not isinstance(token, str) or not _TOKEN.fullmatch(token):
+        raise HostError("Missing exact published checkpoint identity")
+    current = store.current()
+    if (not current or current.get("status") != "committed"
+            or current.get("token") != token or store.pending.exists()):
+        raise HostError("LVM checkpoint is not committed and immutable")
+    verification = lvm_lab_verify(data)
+    if verification.get("verified_offline") is not True:
+        raise HostError("Checkpoint structural verification missing")
+    hardware = data.get("source_config")
+    if not isinstance(hardware, dict):
+        raise HostError("Source hardware profile unavailable")
+    if (hardware.get("bios", "seabios") != "seabios"
+            or any(k in hardware for k in ("efidisk0", "tpmstate0"))):
+        raise HostError("UEFI/TPM profile not qualified for LVM lab publish")
+    def numeric(key, default, maxval):
+        value = str(hardware.get(key, default))
+        if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= maxval:
+            raise HostError("Unsafe VM hardware option: " + key)
+        return value
+    name = data.get("name")
+    if not isinstance(name, str) or not re.fullmatch(r"REP_[A-Za-z0-9_-]{1,50}", name):
+        raise HostError("Invalid standby name")
+    config = _vm_config(store.target.vmid)
+    if not config.get("name", "").startswith("REP_"):
+        raise HostError("Destination VM must be a reserved REP_")
+    if any(k in config for k in ("efidisk0", "tpmstate0")):
+        raise HostError("Destination EFI/TPM profile unsupported")
+    ledger = store._read(store.owned)
+    if not isinstance(ledger, dict) or not isinstance(ledger.get("generations"), list):
+        raise HostError("Missing host LVM ownership ledger")
+    allowed = {volid for generation in ledger["generations"]
+               if isinstance(generation, dict)
+               for volid in generation.get("volids", []) if isinstance(volid, str)}
+    expected = {}
+    for slot, detail in sorted(current["disks"].items()):
+        if not _NODE.fullmatch(slot) or not isinstance(detail, dict):
+            raise HostError("Invalid checkpoint disk configuration")
+        volid = detail.get("volid")
+        if volid not in allowed:
+            raise HostError("Checkpoint volume not present in ownership ledger")
+        store.target.resolve_existing(volid)
+        expected[slot] = volid
+    if not expected:
+        raise HostError("No validated checkpoint disks")
+    scsihw = hardware.get("scsihw")
+    if scsihw is not None and scsihw not in (
+            "virtio-scsi-pci", "virtio-scsi-single", "lsi", "megasas", "pvscsi"):
+        raise HostError("Unsupported source SCSI controller")
+    args = ["qm", "set", str(store.target.vmid),
+            "--onboot", "0",
+            "--memory", numeric("memory", "2048", 2097152),
+            "--cores", numeric("cores", "2", 512),
+            "--sockets", numeric("sockets", "1", 16)]
+    if scsihw is not None:
+        args.extend(["--scsihw", scsihw])
+    for slot, volid in sorted(expected.items()):
+        args.extend(["--" + slot, volid])
+    args.extend(["--boot", "order=" + sorted(expected)[0]])
+    # All checks above are read-only. This sole PVE configuration update does
+    # not start the standby or alter source storage.
+    cmd(*args, timeout=180)
+    final = _vm_config(store.target.vmid)
+    if (not _is_target_stopped(store.target.vmid)
+            or any(re.fullmatch(r"net[0-9]{1,2}", k) for k in final)):
+        raise HostError("Standby isolation or stopped status lost during publish")
+    for slot, volid in expected.items():
+        if final.get(slot, "").split(",", 1)[0] != volid:
+            raise HostError("Standby disk attachment did not match checkpoint")
+    return {"checkpoint_token": token, "standby_configured": True,
+            "target_stopped": True, "network_isolated": True,
+            "attached_volumes": expected, "boot_tested": False,
+            "application_verified": False, "failover_authorized": False}
+
+
 def lvm_lab_prepare_clone(data):
     """Prepare a separate, networkless, powered-OFF lab test VM.
 
@@ -906,6 +989,7 @@ ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "lvm_lab_finish": lvm_lab_finish,
            "lvm_lab_verify": lvm_lab_verify,
            "lvm_lab_abort": lvm_lab_abort,
+           "lvm_lab_publish_standby": lvm_lab_publish_standby,
            "lvm_lab_prepare_clone": lvm_lab_prepare_clone,
            "lvm_lab_test_boot": lvm_lab_test_boot}
 
