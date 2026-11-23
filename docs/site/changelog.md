@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.42-rc1 — 2026-11-23: isolated guest OS evidence and read-only DR network preview
+
+- **Human-observed guest login:** admins may select a completed, networkless restored clone, enter `OS-LOGIN-VERIFIED` and record a brief console-login observation. The audit stores actor, timestamp, clone VMID, exact immutable checkpoint and observation text; never credentials. This is NOT an automated guest or application health test.
+- A previously observed clone remains in history when incrementals advance, but cannot be reused as evidence for a newer checkpoint. Recovery readiness distinguishes human-observed OS login from application evidence and still **always blocks production promotion** without independent witness, fencing and host start guard.
+- **Read-only DR network preview:** inspect source NIC model/bridge/VLAN and available target Proxmox bridges. Matching bridge names are suggestions only; VLAN trunks, routing, IP/MAC exclusivity and actual connectivity are NOT verified. No NIC is attached to REP_ or PRA_TEST_, no start/stop or failover action is implemented.
+- Manager `0.3.42-rc1`, Linux/Windows bundled agents `0.3.42`. Upgrade source and target Proxmox agents from OrigamiTasks before running the network preview.
+- LAB-only tests: validated clone console login, checkpoint freshness, missing destination bridge, invalid network mapping, read-only host operations, and failover remaining blocked.
+
+
 ## 0.3.33-rc1 — 2026-11-23 (PRA diagnostics and usability)
 
 - **Fix blocked PRA activation:** allowlist controller-to-host actions `lvm_lab_prepare_standby`, `lvm_lab_publish_standby`, and `lvm_lab_test_boot` explicitly. The local `Action PRA non autorisée` rejection occurred before contacting Proxmox.
