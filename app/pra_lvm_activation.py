@@ -327,6 +327,13 @@ def reconcile_empty_allocation(vm_id, actor, confirmation, token):
         if con.execute("SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
                        "AND status IN ('queued','running') LIMIT 1",(vm_id,)).fetchone():
             raise ValueError("Transfert LVM encore actif")
+        if con.execute("SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+                       "AND status='uncertain' AND id<>? LIMIT 1",
+                       (vm_id,run["id"])).fetchone():
+            raise ValueError("Autres transferts LVM incertains : réconciliation manuelle")
+        if con.execute("SELECT 1 FROM pra_lvm_activations WHERE protected_vm_id=? "
+                       "AND status IN ('queued','running') LIMIT 1",(vm_id,)).fetchone():
+            raise ValueError("Autre activation PRA en cours")
         if con.execute("SELECT 1 FROM pra_live_runs WHERE protected_vm_id=? "
                        "AND status IN ('queued','running','uncertain') LIMIT 1",
                        (vm_id,)).fetchone():
@@ -364,6 +371,9 @@ def reconcile_empty_allocation(vm_id, actor, confirmation, token):
         if (not newest or newest["id"]!=last["id"] or newest["status"]!="uncertain"
                 or not current or current["id"]!=run["id"] or current["status"]!="uncertain"):
             raise ValueError("Journal archivé mais historique modifié : intervention requise")
+        if con.execute("SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+                       "AND status IN ('queued','running') LIMIT 1",(vm_id,)).fetchone():
+            raise ValueError("Nouveau transfert détecté après l'archivage")
         con.execute("UPDATE pra_lvm_lab_runs SET status='failed',details=? WHERE id=?",
                     ("Échec pré-allocation confirmé ; journal conservé en archive, aucun LV libéré",
                      run["id"]))
