@@ -235,3 +235,56 @@ def test_lvm_generation_diagnostic_reports_pending_without_mutation(monkeypatch,
     assert result["pending"]["status"]=="staged_only"
     assert result["pending"]["volumes"]==["lab:vm-183-disk-12.qcow2"]
     assert pending.exists()
+
+
+def test_lvm_generation_diagnostic_detects_unjournaled_lv_without_mutating(monkeypatch,tmp_path):
+    from types import SimpleNamespace
+    journal=tmp_path/"lab"/"183"
+    journal.mkdir(parents=True)
+    token="72c4f9ab271c46a39d2967c1ab2bbe97"
+    pending=journal/"pending.json"
+    pending.write_text(json.dumps({
+        "token":token,"status":"uncertain","mode":"full",
+        "planned":["scsi0"],"allocated":{},"failure_category":"PVE_LVM_ALLOC_INVALID_VOLUME_NAME",
+    }))
+    expected="vm-183-disk-"+str(int(token[:12],16))+".qcow2"
+    target=SimpleNamespace(storage="lab",vmid=183,protected_vm_id=1,
+                           inspect=lambda:{"vgname":"SD-PP-vg"})
+    store=SimpleNamespace(root=journal,pending=pending,target=target,
+        current_file=journal/"current.json",owned=journal/"owned.json",
+        _read=lambda p:json.loads(p.read_text()) if p.exists() else None)
+    monkeypatch.setattr(host,"_lvm_lab_store",lambda _:store)
+    calls=[]
+    def command(*args,**kwargs):
+        calls.append(args)
+        assert args==("lvs","--reportformat","json","-o","vg_name,lv_name")
+        return json.dumps({"report":[{"lv":[
+            {"vg_name":"SD-PP-vg","lv_name":expected},
+            {"vg_name":"OTHER-vg","lv_name":"foreign-disk"}]}]})
+    monkeypatch.setattr(host,"cmd",command)
+    report=host.lvm_lab_diagnose_generation({"vmid":183})
+    assert report["state"]=="pending"
+    assert report["inventory_checked"] is True
+    assert report["predicted_allocations"]==[{
+        "slot":"scsi0","name":expected,"present":True}]
+    assert report["pending"]["failure_category"]=="PVE_LVM_ALLOC_INVALID_VOLUME_NAME"
+    assert len(calls)==1 and pending.exists()
+
+
+def test_lvm_generation_diagnostic_does_not_claim_absence_if_lvs_fails(monkeypatch,tmp_path):
+    from types import SimpleNamespace
+    journal=tmp_path/"lab"/"183"
+    journal.mkdir(parents=True)
+    pending=journal/"pending.json"
+    pending.write_text(json.dumps({"token":"a"*32,"planned":["scsi0"],"allocated":{}}))
+    store=SimpleNamespace(root=journal,pending=pending,
+        current_file=journal/"current.json",owned=journal/"owned.json",
+        target=SimpleNamespace(vmid=183,inspect=lambda:{"vgname":"VG"}),
+        _read=lambda p:json.loads(p.read_text()) if p.exists() else None)
+    monkeypatch.setattr(host,"_lvm_lab_store",lambda _:store)
+    monkeypatch.setattr(host,"cmd",lambda *a,**kw:(_ for _ in ()).throw(
+        host.HostError("Host operation rejected: lvs")))
+    report=host.lvm_lab_diagnose_generation({"vmid":183})
+    assert report["inventory_checked"] is False
+    assert report["predicted_allocations"][0]["present"] is None
+    assert report["requires_reconciliation"] is True
