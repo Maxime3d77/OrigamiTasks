@@ -25,10 +25,10 @@ def test_supported_lab_host_actions_are_explicitly_whitelisted():
 
 
 def test_manager_agent_bundle_versions_are_aligned():
-    assert config.APP_VERSION == '0.3.33-rc1'
+    assert config.APP_VERSION == '0.3.34-rc1'
     versions=agent_updates.available_versions()
-    assert versions=={'linux':'0.3.33','windows':'0.3.33'}
-    assert not agent_updates.outdated('0.3.34','0.3.33')
+    assert versions=={'linux':'0.3.34','windows':'0.3.34'}
+    assert not agent_updates.outdated('0.3.35','0.3.34')
 
 
 def test_protection_ui_search_and_diagnostics_are_connected():
