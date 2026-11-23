@@ -797,7 +797,7 @@ async function openPRALvmLabPanel(vmId){
    &&activations.length===0&&!running;
  const canRetryAuthorizationBug=Boolean(activations[0]?.status==='uncertain'
    &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
-   &&String(activations[0]?.details||'').includes('LiveReplicationError: Action PRA non autorisée')
+   &&/LiveReplicationError\s*:\s*Action PRA non autorisée/.test(String(activations[0]?.details||''))
    &&history.length===0);
  const activation=activations[0]||null;
  const content='<div class="panel"><h3>Diagnostic de la protection #'+e(vm.id)+'</h3>'
@@ -818,6 +818,8 @@ async function openPRALvmLabPanel(vmId){
    +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
    +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
    +'<p class="hint">OrigamiTasks vérifie le VMID sur le cluster cible, prépare une VM REP_ arrêtée, sans réseau ni disque, et applique les marqueurs de protection. Aucune commande manuelle.</p>'
+   +(!pre&&canRetryAuthorizationBug?'<p class="hint">Prévol de copie indisponible car la VM REP_ n’a pas encore été créée. '
+     +'Utiliser « Relancer après correction du refus local » : cette action prépare REP_ avant de refaire le prévol.</p>':'')
    +(pre?'<p class="hint">Disques : '+e((pre.disk_slots||[]).join(', '))
       +' · Espace libre : '+e(Math.round(pre.available_bytes/1073741824))+' Gio'
       +' · Dernier checkpoint : '+e(pre.checkpoint||'aucun')+'</p>'
