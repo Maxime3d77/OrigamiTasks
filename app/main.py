@@ -792,6 +792,20 @@ def get_lvm_lab_schedule_events(vm_id:int,request:Request):
         raise HTTPException(404,str(exc)) from None
 
 
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/reconcile-provision')
+def reconcile_uncertain_lvm_provision(vm_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation de recette requise')
+    try:
+        return pra_lvm_activation.reconcile_failed_provision(
+            vm_id,user['username'],payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Inventaire Proxmox non confirmé : aucune reprise lancée') from None
+
+
 @app.post('/api/dr/vms/{vm_id}/lvm-lab/retry-local-error')
 def retry_lvm_activation_after_allowlist_fix(vm_id:int,request:Request,payload:dict[str,Any]):
     user=security.require(request,role='admin',mutate=True)
