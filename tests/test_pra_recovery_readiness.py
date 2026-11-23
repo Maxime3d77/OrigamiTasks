@@ -90,3 +90,41 @@ def test_recovery_readiness_endpoint_requires_auth():
     with TestClient(app) as client:
         response=client.get("/api/dr/vms/71/recovery-readiness")
         assert response.status_code in (401,403)
+
+
+def test_human_observed_os_login_never_authorizes_real_failover(monkeypatch):
+    from contextlib import contextmanager
+    fake_vm(monkeypatch)
+    fake_storage(monkeypatch, backend="lvm-qcow2-staging")
+    fake_verified_run(monkeypatch)
+    class Row:
+        def __init__(self,value):self.value=value
+        def fetchone(self):return self.value
+    class DB:
+        def execute(self,sql,args=()):
+            if "FROM pra_lvm_lab_runs" in sql:
+                return Row({"status":"completed","checkpoint_token":"f"*32,
+                            "point_at":"2026-11-23T10:00:00+00:00"})
+            if "FROM pra_lvm_publications" in sql:
+                return Row({"status":"completed"})
+            if "FROM pra_lvm_boot_tests" in sql:
+                return Row({"status":"completed"})
+            raise AssertionError(sql)
+    @contextmanager
+    def fake_session():
+        yield DB()
+    monkeypatch.setattr(gates.db,"session",fake_session)
+    monkeypatch.setattr(gates.pra_lvm_guest_evidence,"current",lambda _: {
+        "actor":"admin","test_vmid":4301,
+        "checkpoint_token":"f"*32})
+    report=gates.assess(71)
+    checks={x["code"]:x["passed"] for x in report["checks"]}
+    assert checks["isolated_restore"] is True
+    assert checks["application_health"] is False
+    assert checks["witness"] is False
+    assert checks["fencing"] is False
+    assert checks["start_guard"] is False
+    assert checks["network"] is False
+    assert report["can_promote"] is False
+    assert report["can_failback"] is False
+    assert report["readiness"]=="blocked"
