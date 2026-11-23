@@ -145,3 +145,22 @@ def diagnose_source(vm_id):
             or not isinstance(result.get("stage"),str)):
         raise ValueError("Diagnostic QMP source non confirmé")
     return result
+
+
+def diagnose_generation(vm_id):
+    """No writes, no retry, no discard of LVM/PVE checkpoint state."""
+    vm=dr_protected_vms._one(vm_id)
+    pra_live._scope(vm)
+    ssh=pra_live._connect(
+        pra_live._remote_ssh_binding(vm["target_site_id"],vm["target_node"]))
+    try:
+        report=pra_live._run_helper(ssh,"lvm_lab_diagnose_generation",{
+            "vmid":vm["target_vmid"],"protected_vm_id":vm["id"],
+            "storage":vm["target_storage"],"lab_ack":LAB_ACK
+        },timeout=90)
+    finally:
+        ssh.close()
+    if (report.get("state") not in ("empty","pending","committed")
+            or type(report.get("requires_reconciliation")) is not bool):
+        raise ValueError("Journal LVM distant non confirmé")
+    return report
