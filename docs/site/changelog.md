@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.33-rc1 — 2026-11-23 (PRA diagnostics and usability)
+
+- **Fix blocked PRA activation:** allowlist controller-to-host actions `lvm_lab_prepare_standby`, `lvm_lab_publish_standby`, and `lvm_lab_test_boot` explicitly. The local `Action PRA non autorisée` rejection occurred before contacting Proxmox.
+- **Targeted recovery:** an administrator may retry *only* this exact pre-SSH authorization bug when no replication job was ever recorded. All other uncertain transfers remain blocked until safely reconciled.
+- **VM selector:** locale-aware alphabetical sorting, search by VM name/ID/node, free target VMID suggestions after source changes, and a read-only live target VMID availability probe.
+- **Replica identity:** optional protection reference/ticket and note in the OrigamiTasks policy, included in the newly created `REP_` description together with source VM name/VMID/node and mandatory ownership markers.
+- **Per-VM diagnostics:** click the source or replica name to see activation phase, failure, publication, copy and isolated boot-test history. An uncertain activation is no longer presented as simply preparing.
+- **Audit trail:** administrator filters for DR, agents, jobs, security and system activities, plus server-filtered text search.
+- **Release parity:** manager `0.3.33-rc1`; bundled Linux/Windows agents `0.3.33`. Actual installed agent versions remain independent; newer versions are never treated as stale.
+- **Production failover and reverse failback are still disabled.** LAB-only controls remain in place.
+
+
 ## 0.3.31-rc1 — 2026-11-20 (QMP/LVM DR workflow, LAB ONLY)
 
 - **DR enrollment**: free target VMID suggestion; automatically prepare an OFF, networkless and diskless owned `REP_` VM.
