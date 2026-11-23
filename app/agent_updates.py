@@ -94,7 +94,7 @@ def _remote(job):
             names=["agent.ps1"] if job["platform"]=="windows" else ["agent.py","pra_worker.py","pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"]
             for name in names:
                 src=ROOT/("windows" if job["platform"]=="windows" else "linux")/name
-                with sftp.file(stage+"_"+name,"xb") as f:
+                with sftp.file(stage+"_"+name,"wb") as f:
                     f.write(src.read_bytes())
                 if job["platform"]=="linux":
                     sftp.chmod(stage+"_"+name,0o600)
