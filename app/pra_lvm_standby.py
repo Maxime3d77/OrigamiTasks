@@ -59,6 +59,11 @@ def prepare(vm_id, confirmation):
             "protected_vm_id": vm["id"],
             "storage": vm["target_storage"],
             "name": vm["replica_name"],
+            "source_name": vm["source_name"],
+            "source_vmid": vm["source_vmid"],
+            "source_node": vm["source_node"],
+            "protection_note": vm.get("protection_note") or "",
+            "reference": vm.get("reference") or "",
             "lab_ack": LAB_ACK
         }, timeout=180)
     finally:
