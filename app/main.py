@@ -815,6 +815,15 @@ def activate_existing_lvm_protection(vm_id:int, request:Request, payload:dict[st
         raise HTTPException(409,str(exc)) from None
 
 
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/steps')
+def get_lvm_activation_steps(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_activation.steps(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
 @app.get('/api/dr/vms/{vm_id}/lvm-lab/activations')
 def list_lvm_lab_activations(vm_id:int,request:Request):
     security.require(request,role='admin')
