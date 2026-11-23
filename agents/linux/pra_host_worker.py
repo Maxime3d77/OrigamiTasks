@@ -613,6 +613,23 @@ def lvm_lab_prepare_standby(data):
     store.inspect()
     store._node_capacity()
     marker = "ORIGAMITASKS_PRA_" + str(protected)
+    source_name = data.get("source_name")
+    source_node = data.get("source_node")
+    source_vmid = data.get("source_vmid")
+    reference = data.get("reference", "")
+    note = data.get("protection_note", "")
+    if (not isinstance(source_name,str) or len(source_name)>120
+            or not isinstance(source_node,str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}",source_node)
+            or type(source_vmid) is not int or source_vmid < 100
+            or not isinstance(reference,str) or len(reference)>80
+            or not isinstance(note,str) or len(note)>240
+            or any(ord(ch)<32 for ch in source_name+reference+note)):
+        raise HostError("Invalid source identity or descriptive metadata")
+    description = (marker+" ORIGAMITASKS_LAB_ONLY"
+                   +" | Réplique PRA de "+source_name+" (VMID "+str(source_vmid)
+                   +" sur "+source_node+")"
+                   +(" | Référence: "+reference if reference else "")
+                   +(" | Commentaire: "+note if note else ""))
     def inspect_existing():
         resources = json.loads(cmd("pvesh", "get", "/cluster/resources",
                                    "--type", "vm", "--output-format", "json"))
@@ -642,7 +659,7 @@ def lvm_lab_prepare_standby(data):
 
     cmd("qm", "create", str(ident), "--name", name, "--onboot", "0",
         "--memory", "2048", "--cores", "2",
-        "--description", marker + " ORIGAMITASKS_LAB_ONLY", timeout=90)
+        "--description", description, timeout=90)
     existing = inspect_existing()
     if not existing or existing.get("type") != "qemu":
         raise HostError("Created standby not visible in cluster inventory")
