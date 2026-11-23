@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drProtectedVMs:[],drVMOptions:null,drVMPlanFilter:'all',drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],agentUpdates:{items:[],available_versions:{}},folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drProtectedVMs:[],drVMOptions:null,drVMPlanFilter:'all',auditCategory:'all',auditSearch:'',drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],agentUpdates:{items:[],available_versions:{}},folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +10,7 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{},cache:'no-store'};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drProtectedVMs=(await api('/dr/vms')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items;state.agentUpdates=await api('/agents/updates')}catch{}}
+async function load(){try{state.managerVersion=(await api('/health')).version}catch{}const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drProtectedVMs=(await api('/dr/vms')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items;state.agentUpdates=await api('/agents/updates')}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
@@ -358,7 +358,7 @@ function agentsPage(){
   +'<div class="table-wrap"><table><thead><tr><th>Nom / hôte</th><th>OS / version</th><th>Groupe</th>'
   +'<th>État</th><th>Modules & synchronisation</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
   +'<tbody>'+(cards||'<tr><td colspan="9">Aucun agent installé.</td></tr>')+'</tbody></table></div></div>'
-  +'<div class="panel"><div class="panel-title"><h2>Mises à jour des agents</h2><span class="hint">Versions fournies par la console : Linux '+e(targetVersions.linux||'—')+' / Windows '+e(targetVersions.windows||'—')+'</span></div>'
+  +'<div class="panel"><div class="panel-title"><h2>Mises à jour des agents</h2><span class="hint">Manager '+e(state.managerVersion||'—')+' · Agents intégrés Linux '+e(targetVersions.linux||'—')+' / Windows '+e(targetVersions.windows||'—')+' (versions réellement installées détaillées ci-dessus)</span></div>'
   +'<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Version</th><th>État</th><th>Demande</th></tr></thead><tbody>'
   +((state.agentUpdates?.items||[]).slice(0,15).map(j=>'<tr><td>'+e(j.host)+'</td><td>'+e(j.from_version)+' → '+e(j.target_version)+'</td><td>'+labelStatus(j.status)+'</td><td>'+dt(j.created_at)+(j.error?'<div class="hint">'+e(j.error)+'</div>':'')+'</td></tr>').join('')||'<tr><td colspan="4">Aucune mise à jour demandée.</td></tr>')
   +'</tbody></table></div></div>'
@@ -589,7 +589,7 @@ function protectedVMsPage(){
  const current=selected==='all'?all:all.filter(x=>String(x.plan_id)===String(selected));
  const tableRows=current.map(vm=>{
   const last=vm.last_check||{};
-  return '<tr><td><b>'+e(vm.source_name||'VM #'+vm.source_vmid)+'</b>'
+  return '<tr><td><button class="text-btn" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'" title="Ouvrir le diagnostic PRA">'+e(vm.source_name||'VM #'+vm.source_vmid)+'</button>'
    +'<div class="muted tinytext">Protection OrigamiTasks #'+e(vm.id)+'</div>'
    +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
    +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
@@ -598,7 +598,9 @@ function protectedVMsPage(){
    +'<div class="muted tinytext">'+(vm.lvm_standby_configured?'Disques publiés sur REP_ · boot non validé':'Réplique non encore publiée')+'</div>'
    +'<div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
-   +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)
+   +'<td>'+labelStatus(vm.lvm_effective_status==='uncertain'?'failed':vm.state)
+     +(vm.lvm_activation?.status==='uncertain'?'<div class="muted tinytext">Activation bloquée : '+e(vm.lvm_activation.details||'')+'</div>':'')
+     +'<div class="muted tinytext">'+e(vm.interval_minutes)
      +' min '+(vm.lvm_lab_activated?'(incrémental programmé après amorçage)':'(objectif indicatif)')+'</div>'
      +(vm.lvm_activation?'<div class="muted tinytext">'+e(vm.lvm_activation.phase)+' · '+e(vm.lvm_activation.details)+'</div>':'')+'</td>'
    +'<td>'+labelStatus(vm.lvm_lab_latest_run?.status||vm.replication_status)
@@ -714,9 +716,11 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
   +' · '+e(r.source_vm_total??r.vms.length)+' VM QEMU visibles'
   +' · '+e(r.source_lxc_excluded??0)+' conteneur(s) LXC exclus. Si des VM manquent, contrôler les ACL du token Proxmox sur le cluster.</p>'
   +'<div class="form-grid">'
-  +selectField('VM source (choix manuel)','source_vmid',
-    r.vms.map(v=>[v.vmid,v.vmid+' — '+v.name+' · '+v.node+' ['+v.status+']']),src.vmid)
+  +'<label class="field"><span>Rechercher une VM (nom ou VMID)</span><input id="praVMSearch" placeholder="Rechercher parmi '+e(r.vms.length)+' VM..." autocomplete="off"></label>'
+  +selectField('VM source (ordre alphabétique)','source_vmid',
+    [...r.vms].sort((a,b)=>a.name.localeCompare(b.name,'fr',{sensitivity:'base',numeric:true})).map(v=>[v.vmid,v.name+' — #'+v.vmid+' · '+v.node+' ['+v.status+']']),src.vmid)
   +field('VMID cible réservé pour REP_','target_vmid',targetDefault,'number')
+  +'<div class="tool-row"><button class="btn tiny" type="button" data-action="dr-vm-check-vmid">Vérifier VMID sur Proxmox</button><span id="praVMIDStatus" class="hint">Vérification en temps réel disponible</span></div>'
   +selectField('Nœud Proxmox cible','target_node',
     nodes.map(x=>[x.name,x.name]),current?.target_node||nodes[0].name)
   +selectField('Stockage cible','target_storage',
@@ -729,6 +733,8 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
        ?'<option value="yes">Créer REP_ puis lancer une copie FULL à chaud</option><option value="no">Ne pas lancer (planification uniquement)</option>'
        :'<option value="no">Ne pas lancer (planification uniquement)</option><option value="yes">Créer REP_ puis lancer une copie FULL à chaud (stockage LVM requis)</option>')+'</select></label>'
     +'<label class="field"><span>Confirmation pour écriture sur stockage de RECETTE</span><input name="lab_confirmation" autocomplete="off" placeholder="DISPOSABLE-LAB-ONLY"></label>')
+  +'<label class="field"><span>Référence / ticket PRA (facultatif)</span><input name="reference" maxlength="80" value="'+e(current?.reference||'')+'" placeholder="Ex. REDMINE-40230"></label>'
+  +'<label class="field"><span>Commentaire de protection (facultatif)</span><input name="protection_note" maxlength="240" value="'+e(current?.protection_note||'')+'" placeholder="Description de cette protection"></label>'
   +selectField('Fréquence automatique après amorçage','interval_minutes',
     [[15,'15 minutes'],[30,'30 minutes'],[60,'1 heure'],[240,'4 heures'],
      [720,'12 heures'],[1440,'24 heures']],
@@ -787,7 +793,15 @@ async function openPRALvmLabPanel(vmId){
  const canPrepare=vm.engine==='qmp_live_incremental' && !running;
  const canActivate=vm.engine==='qmp_live_incremental'&&vm.state==='planned'
    &&activations.length===0&&!running;
- const content='<div class="notice error"><b>RECETTE UNIQUEMENT : vraies écritures sur LVM.</b> '
+ const activation=activations[0]||null;
+ const content='<div class="panel"><h3>Diagnostic de la protection #'+e(vm.id)+'</h3>'
+   +'<p><b>Source : </b>'+e(vm.source_name)+' (#'+e(vm.source_vmid)+') sur '+e(vm.source_node)
+   +' → <b>Secours :</b> '+e(vm.replica_name)+' (#'+e(vm.target_vmid)+') sur '+e(vm.target_node)+'</p>'
+   +'<p><b>Phase :</b> '+e(activation?.phase||'non démarrée')+' · <b>État :</b> '
+   +labelStatus(activation?.status||'not_configured')+'</p>'
+   +(activation?.details?'<div class="notice '+(activation.status==='uncertain'?'error':'')+'">'+e(activation.details)+'</div>':'')
+   +'<p class="hint">Référence : '+e(vm.reference||'—')+' · Commentaire : '+e(vm.protection_note||'—')+'</p></div>'
+   +'<div class="notice error"><b>RECETTE UNIQUEMENT : vraies écritures sur LVM.</b> '
    +'La cible doit porter ORIGAMITASKS_LAB_ONLY, être arrêtée, sans carte réseau et avec onboot=0. '
    +'Chaque transfert alloue de nouveaux volumes logiques épais, sans suppression automatique. '
    +'Aucune bascule ni aucun démarrage automatique.</div>'
@@ -1190,7 +1204,11 @@ function renderUpdateVersion(data){
   +(!fresh&&w.checked_at?'<div class="notice error">Dernière vérification trop ancienne : relancer un contrôle Git.</div>':'')
   +(w.error?'<div class="notice error">'+e(w.error)+'</div>':'');
 }
-function audit(){return title('Journal d’audit','Traçabilité des connexions, modifications, exécutions et opérations Git.')+`<div class="panel" id="auditTable">Chargement...</div>`}
+function audit(){return title('Journal d’audit','Traçabilité des connexions, modifications, exécutions et opérations Git.')
+  +'<div class="panel"><div class="tool-row"><label class="field"><span>Catégorie</span><select id="auditCategory">'
+  +option([['all','Tous'],['pra','PRA / Proxmox'],['agents','Agents / installations'],['jobs','Jobs / exécutions'],['security','Connexions / sécurité'],['system','Mises à jour / système']],state.auditCategory||'all')
+  +'</select></label><label class="field"><span>Rechercher</span><input id="auditSearch" value="'+e(state.auditSearch||'')+'" placeholder="Action, auteur, VMID, détails..."></label>'
+  +'<button class="btn" data-action="audit-refresh">Rechercher / Actualiser</button></div><div id="auditTable">Chargement...</div></div>'}
 function modal(title,body,footer='',wide=false){$('#modalRoot').innerHTML=`<div class="modal-overlay"><div class="modal ${wide?'xl':''}" role="dialog" aria-modal="true"><div class="modal-head"><h2>${title}</h2><button class="close" data-action="modal-close" aria-label="Fermer">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div></div>`}
 function closeModal(){$('#modalRoot').innerHTML='';state.editor=null}
 async function webhookManager(id){const job=state.jobs.find(j=>j.id===id);try{const r=await api('/jobs/'+id+'/webhook');modal('Webhook · '+e(job?.name||id),`<p class="muted">Déclenchez ce workflow via un événement externe, avec un jeton secret distinct.</p><div class="field"><span>Endpoint (requête POST)</span><input readonly value="${e(location.origin+'/api/hooks/'+id)}"></div><p>${r.enabled?'<span class="status success">Webhook actif</span>':'<span class="status">Webhook désactivé</span>'}</p><div class="notice">Envoyez le jeton dans l’en-tête <span class="code-inline">X-Origami-Webhook-Token</span>. Un corps JSON optionnel fournit des variables accessibles comme <span class="code-inline">{{ var.ticket_id }}</span>. Le jeton n’est affiché qu’à la création/rotation.</div>`,`<button class="btn" data-action="modal-close">Fermer</button>${r.enabled?`<button class="btn danger" data-action="disable-webhook" data-id="${id}">Désactiver</button>`:''}<button class="btn primary" data-action="rotate-webhook" data-id="${id}">${r.enabled?'↻ Régénérer le jeton':'＋ Activer'}</button>`)}catch(ex){toast(ex.message,false)}}
@@ -1897,7 +1915,7 @@ steps.forEach((s,i)=>{const x=coords[i].x,y=coords[i].y;svg+=`<g class="step-nod
 async function saveEditor(){captureEditor();const j=state.editor;if(!j.name.trim())return toast('Saisis un nom de workflow',false);try{if(j.id){await api('/jobs/'+j.id,'PUT',j)}else await api('/jobs','POST',j);toast('Workflow enregistré');closeModal();await refresh();showPage('jobs')}catch(ex){toast(ex.message,false)}}
 async function runJob(id){try{const r=await api('/jobs/'+id+'/run','POST');toast('Exécution #'+r.run_id+' mise en file');await refresh();showPage('runs');await openRun(r.run_id)}catch(ex){toast(ex.message,false)}}
 async function openRun(id){try{const r=await api('/runs/'+id);state.selectedRun=r;modal('Exécution #'+r.id+' — '+e(r.job_name),`<div class="tool-row">${labelStatus(r.status)}<span class="hint">Déclenché par ${e(r.requested_by)} · ${dt(r.queued_at)}</span></div>${r.error?`<div class="notice error">${e(r.error)}</div>`:''}${r.notification_status?`<div class="notice">Notification e-mail : ${e(r.notification_status==='sent'?'envoyée':r.notification_status==='failed'?'échec de l’envoi':r.notification_status==='skipped'?'non demandée pour ce statut':'désactivée')}${r.notification_error?' · '+e(r.notification_error):''}</div>`:''}<h3>Résultats par étape</h3>${r.steps.map(s=>`<div class="step-log"><div class="step-header">${labelStatus(s.status)}<b>${e(s.name)}</b><span class="muted">${e(s.type)} · essai ${s.attempt} · code ${s.exit_code??'—'}</span></div><pre>${e(s.output||'(aucune sortie)')}</pre></div>`).join('')||'<p class="muted">Exécution en attente. Réactualisez dans quelques secondes.</p>'}`,`<button class="btn" data-action="run-detail" data-id="${id}">↻ Actualiser</button><button class="btn primary" data-action="modal-close">Fermer</button>`,true)}catch(ex){toast(ex.message,false)}}
-async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit')).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateVersionSummary').innerHTML=renderUpdateVersion(u);$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
+async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit?category='+encodeURIComponent(state.auditCategory||'all')+'&search='+encodeURIComponent(state.auditSearch||''))).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateVersionSummary').innerHTML=renderUpdateVersion(u);$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
 function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP();if(state.page==='agents')scheduleAgentBatchPoll()}
 async function refresh(){await load();render()}
 async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='overview-tab'){state.dashboardTab=b.dataset.value||'tasks';render();return}
@@ -2091,6 +2109,26 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   }
   if(a==='dr-vm-lvm-lab-open'){
    await openPRALvmLabPanel(id);return;
+  }
+  if(a==='dr-vm-check-vmid'){
+   const form=document.getElementById('drVMConfigForm'),r=state.drVMOptions;
+   if(!form||!r)return;
+   const field=form.elements.namedItem('target_vmid'),msg=document.getElementById('praVMIDStatus');
+   msg.textContent='Vérification en cours...';
+   try{
+    const report=await api('/dr/vms/check-target-vmid?plan_id='+r.plan_id
+       +'&source_dc_id='+r.source_dc_id+'&target_dc_id='+r.target_dc_id
+       +'&vmid='+encodeURIComponent(field.value));
+    msg.textContent=report.free?'VMID '+report.requested_vmid+' libre sur le cluster cible'
+       :'VMID occupé. Proposition libre : '+report.suggested_vmid;
+    if(!report.free){field.value=report.suggested_vmid;toast('VMID occupé : VMID '+report.suggested_vmid+' proposé')}
+   }catch(ex){msg.textContent='Échec vérification : '+ex.message;toast(ex.message,false)}
+   return;
+  }
+  if(a==='audit-refresh'){
+   state.auditSearch=document.getElementById('auditSearch')?.value||'';
+   state.auditCategory=document.getElementById('auditCategory')?.value||'all';
+   hydrateAdmins();return;
   }
   if(a==='dr-vm-lvm-lab-activate'){
    const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
@@ -2342,8 +2380,11 @@ async function handleSubmit(ev){
    plan_id:r.plan_id,source_dc_id:r.source_dc_id,target_dc_id:r.target_dc_id,
    source_vmid:Number(f.get('source_vmid')),target_vmid:Number(f.get('target_vmid')),
    target_node:String(f.get('target_node')||''),target_storage:String(f.get('target_storage')||''),
-   interval_minutes:Number(f.get('interval_minutes')),engine:String(f.get('engine'))
+   interval_minutes:Number(f.get('interval_minutes')),engine:String(f.get('engine')),
+   reference:String(f.get('reference')||'').trim(),protection_note:String(f.get('protection_note')||'').trim()
   };
+  if((r.target_vmids_in_use||[]).includes(body.target_vmid)&&!currentId)
+   return toast('VMID cible déjà utilisé sur le dernier inventaire : sélectionner un VMID libre',false);
   if(!currentId && f.get('activate_lab')==='yes'){
    if(body.engine!=='qmp_live_incremental')return toast('Choisir le moteur QMP pour amorcer la protection',false);
    if(String(f.get('lab_confirmation')||'').trim()!=='DISPOSABLE-LAB-ONLY')
@@ -2652,6 +2693,15 @@ async function bootstrap(){document.addEventListener('submit',handleSubmit);
   graphZoomTo((state.graphZoom||1)*(ev.deltaY>0?0.9:1.1),ev.clientX,ev.clientY);
  },{passive:false});
 try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initialisation:',ex)}try{const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);$('#userAvatar').textContent=initials();await load();showPage('dashboard')}catch{$('#auth').hidden=false;$('#application').hidden=true}document.addEventListener('click',handleClick);document.addEventListener('input',ev=>{
+ if(ev.target.id==='praVMSearch'){
+  const selector=document.querySelector('#drVMConfigForm [name="source_vmid"]'),q=ev.target.value.toLowerCase().trim();
+  if(selector){const prev=selector.value;
+    const choices=(state.drVMOptions?.vms||[]).filter(v=>(v.name+' '+v.vmid+' '+v.node).toLowerCase().includes(q))
+       .sort((a,b)=>a.name.localeCompare(b.name,'fr',{sensitivity:'base',numeric:true}));
+    selector.innerHTML=option(choices.map(v=>[v.vmid,v.name+' — #'+v.vmid+' · '+v.node+' ['+v.status+']']),prev);
+    if(choices.some(v=>String(v.vmid)===prev))selector.value=prev;
+  }
+ }
  if(ev.target.id==='credentialSearch'){state.credentialSearch=ev.target.value;filterCredentialRows()}
  if(ev.target.matches('#credentialTestForm [name="manual_host"]')){
   const panel=document.getElementById('sshHostTrustPanel');
