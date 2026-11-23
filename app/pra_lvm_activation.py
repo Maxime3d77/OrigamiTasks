@@ -125,6 +125,68 @@ def retry_authorization_bug(vm_id, actor, confirmation):
     return start(vm_id,actor,confirmation)
 
 
+def reconcile_failed_provision(vm_id, actor, confirmation):
+    """Safely retry ONLY a confirmed finished host provisioning command.
+
+    For an uncertain remote qm create, a *fresh* cluster API inventory MUST
+    show the target VMID absent. If it exists or API is unavailable, refuse:
+    never delete/adopt a foreign VM or blindly retry a transfer.
+    """
+    if confirmation != ACK:
+        raise ValueError("Confirmation de recette requise")
+    vm=dr_protected_vms._one(vm_id)
+    if vm["engine"] != "qmp_live_incremental" or vm["state"] != "planned":
+        raise ValueError("Protection QMP non active")
+    with db.session() as con:
+        last=con.execute(
+            "SELECT id,status,phase,details,replication_run_id "
+            "FROM pra_lvm_activations WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",
+            (vm_id,)).fetchone()
+        if (not last or last["status"] != "uncertain"
+                or last["phase"] != "blocked"
+                or last["replication_run_id"] is not None
+                or not re.search(
+                    r"LiveReplicationError\\s*:\\s*Échec commande agent PRA\\s*:\\s*lvm_lab_prepare_standby",
+                    str(last["details"]))):
+            raise ValueError("Cet échec n'est pas une préparation de VM identifiable")
+        if con.execute(
+            "SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? LIMIT 1",
+            (vm_id,)).fetchone():
+            raise ValueError("Un transfert LVM existe : réconciliation manuelle obligatoire")
+    # Inventory is fetched OUTSIDE the mutation lock, but immediately before
+    # the retry. The host also performs an atomic cluster-wide VMID recheck
+    # before issuing qm create, preventing accidental foreign-VM adoption.
+    _,_,resources=dr_protected_vms._inventory(vm["target_dc_id"])
+    if not isinstance(resources,list) or not any(
+            r.get("type")=="node" and r.get("node")==vm["target_node"]
+            and r.get("status")=="online" for r in resources):
+        raise ValueError("Inventaire ou nœud Proxmox non confirmé : reprise interdite")
+    if any(r.get("type") in ("qemu","lxc") and
+           r.get("vmid")==vm["target_vmid"] for r in resources):
+        raise ValueError("Le VMID cible existe : inspecter sa configuration avant toute reprise")
+    with db.session() as con:
+        con.execute("BEGIN IMMEDIATE")
+        last_again=con.execute(
+            "SELECT id,status,phase,replication_run_id FROM pra_lvm_activations "
+            "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",
+            (vm_id,)).fetchone()
+        if (not last_again or last_again["id"]!=last["id"]
+                or last_again["status"]!="uncertain"
+                or last_again["phase"]!="blocked"
+                or last_again["replication_run_id"] is not None):
+            raise ValueError("État de l'activation modifié : nouvelle inspection nécessaire")
+        if con.execute(
+            "SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? LIMIT 1",
+            (vm_id,)).fetchone():
+            raise ValueError("Un transfert LVM existe désormais : reprise interdite")
+        con.execute("UPDATE pra_lvm_activations SET status='failed',"
+                    "details='Préparation non confirmée ; VMID absent du cluster après réconciliation',"
+                    "updated_at=? WHERE id=?",(db.now(),last["id"]))
+    db.audit(actor,"pra.lvm.lab.activation.provision_reconciled",vm_id,
+             "activation="+str(last["id"])+" ; VMID cible absent lors du contrôle API")
+    return start(vm_id,actor,confirmation)
+
+
 def steps(vm_id):
     """Chronological, per-protection activation trace; no remote side effects."""
     dr_protected_vms._one(vm_id)
