@@ -89,3 +89,21 @@ def test_known_pre_ssh_rejection_only_can_be_retried(monkeypatch):
     monkeypatch.setattr(pra_lvm_activation,'start',lambda *args:started.append(args) or {'status':'queued'})
     assert pra_lvm_activation.retry_authorization_bug(vm_id,'admin','DISPOSABLE-LAB-ONLY')['status']=='queued'
     assert started==[(vm_id,'admin','DISPOSABLE-LAB-ONLY')]
+
+
+def test_lvm_provision_available_on_controller_and_on_host():
+    from app import pra_live
+    source=(ROOT/'agents/linux/pra_host_worker.py').read_text()
+    assert source.count('"lvm_lab_prepare_standby": lvm_lab_prepare_standby')==1
+    assert '"lvm_lab_prepare_standby"' in (ROOT/'app/pra_live.py').read_text()
+    assert 'def lvm_lab_prepare_standby(data):' in source
+
+
+def test_update_errors_report_safe_stage_not_remote_secrets():
+    source=(ROOT/'app/agent_updates.py').read_text()
+    for phase in ('ORIGAMI_STAGE_VALIDATE','ORIGAMI_STAGE_BACKUP',
+                  'ORIGAMI_STAGE_INSTALL','ORIGAMI_STAGE_RESTART',
+                  'ORIGAMI_STAGE_HEALTH'):
+        assert phase in source
+    assert "str(exc)[:400]" in source
+    assert 'Remplacement distant non confirmé' not in source
