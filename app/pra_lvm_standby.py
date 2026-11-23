@@ -126,3 +126,22 @@ def verify_existing(vm_id):
     if state.get("pending") or state.get("checkpoint"):
         raise ValueError("Checkpoint LVM présent ou incertain : réconciliation manuelle obligatoire")
     return owned
+
+
+def diagnose_source(vm_id):
+    """Check the source with the actual PRA helper, without copy/guest mutation."""
+    from . import pra_lvm_lab
+    vm=dr_protected_vms._one(vm_id)
+    info=pra_lvm_lab._runtime(vm)
+    ssh=pra_live._connect(info["source"])
+    try:
+        result=pra_live._run_helper(ssh,"source_diagnose",{
+            "vmid":vm["source_vmid"],"slots":info["slots"]
+        },timeout=90)
+    finally:
+        ssh.close()
+    if (type(result.get("ready")) is not bool
+            or result.get("vmid") != vm["source_vmid"]
+            or not isinstance(result.get("stage"),str)):
+        raise ValueError("Diagnostic QMP source non confirmé")
+    return result
