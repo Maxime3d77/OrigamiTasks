@@ -87,3 +87,20 @@ def test_reject_unverified_host_response(setup, monkeypatch):
     with pytest.raises(ValueError, match="confirm"):
         pra_lvm_standby.prepare(17,"DISPOSABLE-LAB-ONLY")
     assert conn.closed
+
+
+def test_existing_owned_target_with_stale_inventory_state_is_host_verified(setup):
+    vm, source, target, events, conn = setup
+    target.append({"type":"qemu","vmid":4301,"node":"pve-backup","status":"unknown"})
+    result=pra_lvm_standby.prepare(17,"DISPOSABLE-LAB-ONLY")
+    assert result["target_stopped"] is True
+    assert events[0][0]=="lvm_lab_prepare_standby"
+    assert events[0][1]["protected_vm_id"]==17
+
+
+def test_existing_running_target_is_rejected_without_remote_mutation(setup):
+    vm, source, target, events, conn=setup
+    target.append({"type":"qemu","vmid":4301,"node":"pve-backup","status":"running"})
+    with pytest.raises(ValueError,match="en marche"):
+        pra_lvm_standby.prepare(17,"DISPOSABLE-LAB-ONLY")
+    assert events==[]
