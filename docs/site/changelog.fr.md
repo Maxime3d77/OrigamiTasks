@@ -1,5 +1,21 @@
 # Historique des modifications
 
+## 0.3.42-rc1 — 23 novembre 2026 : attestation du boot OS et prévol réseau PRA
+
+- **Validation humaine du clone** : après restauration, l'administrateur peut sélectionner le run de clone isolé, confirmer `OS-LOGIN-VERIFIED` et préciser l'observation (ex. connexion root réussie dans la console). OrigamiTasks conserve opérateur, date, VMID du clone, checkpoint exact et commentaire dans un historique dédié. Aucun mot de passe n'est requis ni conservé.
+- Une attestation sur un ancien checkpoint reste consultable, mais **ne valide pas les générations incrémentales suivantes**. Le rapport de préparation à la bascule distingue cette observation humaine de la validation applicative (toujours non confirmée).
+- **Prévisualisation réseau de secours en lecture seule** : le helper récupère la configuration `net*` de la VM source et les bridges disponibles sur le nœud cible. Une correspondance de nom est seulement une suggestion ; la présence du bridge ne valide pas VLAN, trunk, routage, IP, MAC ni isolation. Aucune interface n'est ajoutée à la VM `REP_` ou au clone.
+- Le rapport de bascule demeure `blocked` : **aucun witness indépendant, fencing, garde de démarrage, bascule réelle ou failback n'est activé**. Les fonctions de configuration réseau et de promotion restent à développer et à qualifier hors production.
+- Manager `0.3.42-rc1`, agents intégrés Linux/Windows `0.3.42`. Mettre à jour les agents Proxmox source et secours depuis l'interface avant le prévol réseau.
+
+### Tests de recette à effectuer
+1. Sur le clone `PRA_TEST_`, confirmer le démarrage de l'OS et ouvrir une session console ; enregistrer la preuve avec le run de restauration exact. Vérifier qu'aucun secret n'est demandé ou enregistré.
+2. Déclencher un incrémental après l'attestation : cette preuve devient historique et ne doit plus être présentée comme une validation du checkpoint courant.
+3. Ouvrir `Prévisualiser le réseau de secours` : comparer chaque `net0` et son bridge/VLAN à la source puis aux bridges proposés sur la destination. Vérifier que la VM `REP_` n'acquiert aucune carte réseau.
+4. Ouvrir `Préparation bascule` : les contrôles fencing, witness, réseau et validation applicative doivent rester bloquants, même si le boot OS a été attesté.
+5. Faire des tests de panne **en recette seulement** : interface Proxmox indisponible, bridge manquant, checkpoint périmé, clone non isolé, erreurs QMP/LVM, et vérifier que la réplication reste fail-closed.
+
+
 ## 0.3.41-rc1 — 23 novembre 2026 : correction pvesm alloc et réconciliation encadrée
 
 - **Cause du refus d'allocation identifiée** : le pilote envoyait la taille virtuelle QMP en octets à `pvesm alloc`, dont l'argument `size` s'exprime en Kio. Une VM de 5 Gio provoquait une demande équivalente à 5 Tio. Correction : `ceil(bytes/1024)` avant appel Proxmox, sans modifier les tailles virtuelles inscrites dans les checkpoints.
