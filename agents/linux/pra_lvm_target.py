@@ -256,8 +256,16 @@ class PveLvmTarget:
                              name, str(size), "--format", "qcow2")
                     record["allocated"][slot] = {"volid": volid, "size": size}
                     _atomic(journal_file, record)
-            except BaseException:
+            except BaseException as exc:
+                # Persist only a bounded, allowlisted code. The PVE CLI may
+                # have created a volume without returning success: NEVER
+                # delete it or clear the journal merely because allocated={}
                 record["status"] = "uncertain"
+                category = str(exc)
+                if re.fullmatch(r"PVE_LVM_ALLOC_[A-Z_]{1,50}", category):
+                    record["failure_category"] = category
+                else:
+                    record["failure_category"] = "PVE_LVM_ALLOC_UNCONFIRMED"
                 _atomic(journal_file, record)
                 raise
             record["status"] = "staged_only"
