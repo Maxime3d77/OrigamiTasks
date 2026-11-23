@@ -165,7 +165,7 @@ def _run_helper(ssh, action, data, timeout=60):
                 # Show only a known marker and allowlisted CLI category.
                 stage = re.match(
                     r"^(PRA_STEP_(?:STORAGE_CONFIG|STORAGE_CAPACITY|"
-                    r"CLUSTER_INVENTORY|VM_CREATE|POST_CREATE_INVENTORY))\\s*:",
+                    r"CLUSTER_INVENTORY|VM_CREATE|POST_CREATE_INVENTORY))\s*:",
                     reported,
                 )
                 if stage:
