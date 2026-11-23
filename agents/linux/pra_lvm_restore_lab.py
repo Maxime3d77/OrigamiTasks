@@ -110,7 +110,7 @@ def prepare_clone(store, *, vmid, source_config, command, inspect_config,
             raise RestoreLabError("Cloned disk still depends on another image")
         command("qemu-img","check","-f","qcow2",dest,timeout=120)
         fresh[slot]=record["volid"]
-    name="PRA_TEST_"+str(vmid)
+    name="PRA-TEST-"+str(vmid)  # PVE qm --name must be DNS-format (no underscores)
     marker="ORIGAMITASKS_LAB_CLONE_"+str(store.target.protected_vm_id)
     args=["qm","create",str(vmid),"--name",name,"--onboot","0",
           "--description",marker,
