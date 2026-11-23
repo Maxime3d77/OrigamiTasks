@@ -88,3 +88,44 @@ def test_proxmox_logical_replica_name_is_dns_compatible():
         host.pve_guest_name("REP_invalid name")
     with pytest.raises(host.HostError):
         host.pve_guest_name("REP_--")
+
+
+def test_standby_qm_create_uses_dns_name_and_preserves_policy_markers(monkeypatch):
+    class Store:
+        def __init__(self,*args,**kwargs): pass
+        def inspect(self): return {"type":"lvm"}
+        def _node_capacity(self): return ("sd-bearnaise",1024*1024)
+    monkeypatch.setattr(host,"PveLvmTarget",Store)
+    monkeypatch.setattr(host.socket,"gethostname",lambda:"sd-bearnaise")
+    monkeypatch.setattr(host,"_is_target_stopped",lambda _:True)
+    created=False
+    description=""
+    qname=""
+    calls=[]
+    def command(*argv,timeout=25):
+        nonlocal created,description,qname
+        calls.append(argv)
+        if argv[:2]==("pvesh","get"):
+            return json.dumps([{"vmid":183,"node":"sd-bearnaise","type":"qemu"}] if created else [])
+        if argv[:2]==("qm","create"):
+            created=True
+            qname=argv[argv.index("--name")+1]
+            description=argv[argv.index("--description")+1]
+            return ""
+        raise AssertionError(argv)
+    monkeypatch.setattr(host,"cmd",command)
+    monkeypatch.setattr(host,"_vm_config",lambda _:{
+        "name":qname,"description":description,"onboot":"0",
+    })
+    result=host.lvm_lab_prepare_standby({
+        "vmid":183,"protected_vm_id":1,"storage":"lab-lvm",
+        "name":"REP_vl-bbiokou","lab_ack":"DISPOSABLE-LAB-ONLY",
+        "source_name":"vl-bbiokou","source_node":"au-dodo",
+        "source_vmid":183,"reference":"","protection_note":"",
+    })
+    assert result["created"] is True
+    assert qname=="REP-vl-bbiokou"
+    assert "ORIGAMITASKS_PRA_1" in description
+    assert "ORIGAMITASKS_LAB_ONLY" in description
+    assert "vl-bbiokou" in description
+    assert all(x[:2] not in [("qm","start"),("qm","stop")] for x in calls)
