@@ -122,7 +122,8 @@ def _connect(binding):
 
 
 def _run_helper(ssh, action, data, timeout=60):
-    if action not in {"source_diagnose", "source_probe", "source_copy", "source_dismiss",
+    if action not in {"source_network_inventory", "destination_network_inventory",
+                       "source_diagnose", "source_probe", "source_copy", "source_dismiss",
                       "target_probe", "target_begin",
                       "target_finish", "target_abort", "target_publish", "target_verify",
                        "lvm_lab_probe", "lvm_lab_begin", "lvm_lab_finish",
