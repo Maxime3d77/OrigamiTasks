@@ -87,17 +87,29 @@ def _remote(job):
         raise UpdateError("Clé d'hôte SSH non approuvée ou modifiée")
     client,_=_ssh(None,{"host":job["host"],"port":job["port"]},credential(job["credential_id"]),120)
     try:
-        sftp=client.open_sftp()
         try:
-            base=sftp.normalize(".").rstrip("/")
+            sftp=client.open_sftp()
+        except OSError:
+            raise UpdateError("Ouverture du canal SFTP impossible (vérifier sous-système SFTP et droits SSH)") from None
+        try:
+            try:
+                base=sftp.normalize(".").rstrip("/")
+            except OSError:
+                raise UpdateError("Résolution du répertoire SFTP impossible") from None
             stage=base+"/origami_upgrade_"+secrets.token_hex(12)
             names=["agent.ps1"] if job["platform"]=="windows" else ["agent.py","pra_worker.py","pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"]
             for name in names:
                 src=ROOT/("windows" if job["platform"]=="windows" else "linux")/name
-                with sftp.file(stage+"_"+name,"wb") as f:
-                    f.write(src.read_bytes())
-                if job["platform"]=="linux":
-                    sftp.chmod(stage+"_"+name,0o600)
+                try:
+                    # Unique random staging path. Match the initial installer:
+                    # some OpenSSH SFTP backends reject the exclusive 'x' flag.
+                    with sftp.file(stage+"_"+name,"wb") as f:
+                        f.write(src.read_bytes())
+                    if job["platform"]=="linux":
+                        sftp.chmod(stage+"_"+name,0o600)
+                except OSError:
+                    raise UpdateError("Transfert SFTP refusé (fichier "+name+
+                                      " ; vérifier répertoire distant, permissions et espace libre)") from None
         finally:
             sftp.close()
         if job["platform"]=="linux":
