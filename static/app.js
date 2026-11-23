@@ -594,7 +594,7 @@ function protectedVMsPage(){
    +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
    +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
    +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
-   +'<td><b>'+e(vm.replica_name)+'</b>'
+   +'<td><button class="text-btn" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'" title="Journal de réplication et diagnostic">'+e(vm.replica_name)+'</button>'
    +'<div class="muted tinytext">'+(vm.lvm_standby_configured?'Disques publiés sur REP_ · boot non validé':'Réplique non encore publiée')+'</div>'
    +'<div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
@@ -2710,6 +2710,14 @@ async function bootstrap(){document.addEventListener('submit',handleSubmit);
   graphZoomTo((state.graphZoom||1)*(ev.deltaY>0?0.9:1.1),ev.clientX,ev.clientY);
  },{passive:false});
 try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initialisation:',ex)}try{const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);$('#userAvatar').textContent=initials();await load();showPage('dashboard')}catch{$('#auth').hidden=false;$('#application').hidden=true}document.addEventListener('click',handleClick);document.addEventListener('input',ev=>{
+ if(ev.target.closest('#drVMConfigForm')&&ev.target.name==='target_vmid'){
+  const status=document.getElementById('praVMIDStatus'),occupied=state.drVMOptions?.target_vmids_in_use||[];
+  if(status){const n=Number(ev.target.value);
+    status.textContent=Number.isInteger(n)&&n>=100
+       ?(occupied.includes(n)?'VMID occupé dans le dernier inventaire : utiliser Vérifier VMID':'VMID apparemment libre — vérifier avant la création')
+       :'VMID non valide';
+  }
+ }
  if(ev.target.id==='praVMSearch'){
   const selector=document.querySelector('#drVMConfigForm [name="source_vmid"]'),q=ev.target.value.toLowerCase().trim();
   if(selector){const prev=selector.value;
@@ -2734,6 +2742,21 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',async ev=>{
  if(ev.target.id==='drVMPlanFilter'){
   state.drVMPlanFilter=String(ev.target.value||'all');render();return;
+ }
+ if(ev.target.name==='source_vmid'&&ev.target.closest('#drVMConfigForm')){
+  const form=ev.target.closest('form'),r=state.drVMOptions;
+  const vm=(r?.vms||[]).find(x=>x.vmid===Number(ev.target.value));
+  if(vm&&!state.drVMWizard?.existingId){
+   const used=new Set(r.target_vmids_in_use||[]);
+   let candidate=vm.vmid;
+   while(used.has(candidate)&&candidate<999999999)candidate++;
+   if(!used.has(candidate)){
+    form.elements.namedItem('target_vmid').value=candidate;
+    const status=document.getElementById('praVMIDStatus');
+    if(status)status.textContent='Proposition libre #'+candidate+' (dernier inventaire) — vérification en temps réel disponible';
+   }
+  }
+  return;
  }
  if(ev.target.name==='dr_vm_plan'&&ev.target.closest('#drVMSourceForm')){
   const form=ev.target.closest('form'),planId=Number(ev.target.value);
