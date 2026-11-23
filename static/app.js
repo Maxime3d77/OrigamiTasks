@@ -832,6 +832,7 @@ async function openPRALvmLabPanel(vmId){
    +(canRetryAuthorizationBug?'<button class="btn primary" data-action="dr-vm-lvm-lab-retry-allowlist" data-id="'+vmId+'">Relancer après correction du refus local</button>':'')
    +(canRetryProvision?'<button class="btn primary" data-action="dr-vm-lvm-lab-reconcile-provision" data-id="'+vmId+'">Vérifier le VMID cible et reprendre la préparation</button>':'')
    +(canResumeOwned?'<button class="btn primary" data-action="dr-vm-lvm-lab-resume-owned" data-id="'+vmId+'">Vérifier REP_ existante et reprendre la copie FULL</button>':'')
+   +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose-generation" data-id="'+vmId+'">Inspecter la génération LVM (lecture seule)</button>'
    +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose-source" data-id="'+vmId+'">Diagnostiquer QMP source (lecture seule)</button>'
    +(canResumeSource?'<button class="btn primary" data-action="dr-vm-lvm-lab-resume-source" data-id="'+vmId+'">Vérifier la source et reprendre la copie FULL</button>':'')
    +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose" data-id="'+vmId+'">Diagnostiquer Proxmox (lecture seule)</button>'
@@ -2162,6 +2163,26 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    state.auditSearch=document.getElementById('auditSearch')?.value||'';
    state.auditCategory=document.getElementById('auditCategory')?.value||'all';
    hydrateAdmins();return;
+  }
+  if(a==='dr-vm-lvm-lab-diagnose-generation'){
+   try{
+    const r=await api('/dr/vms/'+id+'/lvm-lab/diagnose-generation');
+    const record=(x,label)=>'<div class="panel"><b>'+label+'</b><p>État : '+e(x?.status||'aucun')
+       +' · Mode : '+e(x?.mode||'—')+' · Jeton : '+e(x?.token||'—')+'</p>'
+       +'<p>Disques : '+e((x?.slots||[]).join(', ')||'—')+'</p>'
+       +'<p>Volumes déclarés : '+e((x?.volumes||[]).join(', ')||'—')+'</p></div>';
+    modal('Générations LVM — diagnostic sans écriture',
+      '<div class="notice '+(r.requires_reconciliation?'error':'')+'"><b>'
+      +(r.requires_reconciliation?'Réconciliation requise : ne pas relancer FULL, ni supprimer les LV.'
+         :'Aucune génération en attente déclarée par le journal local.')
+      +'</b> · État : '+e(r.state)+' · Générations historiques : '+e(r.generation_count)+'</div>'
+      +record(r.pending,'Génération en attente')
+      +record(r.current,'Dernière génération publiée')
+      +'<p>Fichiers PID NBD : '+e((r.pid_files||[]).join(', ')||'aucun')+'</p>'
+      +'<p class="hint">Lecture seule : ces informations ne prouvent pas à elles seules que les LV ou processus NBD sont inactifs.</p>',
+      '<button class="btn" data-action="modal-close">Fermer</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
   }
   if(a==='dr-vm-lvm-lab-diagnose-source'){
    try{
