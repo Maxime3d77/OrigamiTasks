@@ -797,6 +797,10 @@ async function openPRALvmLabPanel(vmId){
    && !activations.some(x=>['queued','running','uncertain'].includes(x.status));
  const canActivate=vm.engine==='qmp_live_incremental'&&vm.state==='planned'
    &&activations.length===0&&!running;
+ const canResumeSource=Boolean(activations[0]?.status==='uncertain'
+   &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
+   &&String(activations[0]?.details||'').includes('source_probe')
+   &&history.length===0);
  const canResumeOwned=Boolean(activations[0]?.status==='uncertain'
    &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
    &&String(activations[0]?.details||'').includes('LAB target VM must exist, be stopped and have exclusive VMID')
@@ -828,6 +832,8 @@ async function openPRALvmLabPanel(vmId){
    +(canRetryAuthorizationBug?'<button class="btn primary" data-action="dr-vm-lvm-lab-retry-allowlist" data-id="'+vmId+'">Relancer après correction du refus local</button>':'')
    +(canRetryProvision?'<button class="btn primary" data-action="dr-vm-lvm-lab-reconcile-provision" data-id="'+vmId+'">Vérifier le VMID cible et reprendre la préparation</button>':'')
    +(canResumeOwned?'<button class="btn primary" data-action="dr-vm-lvm-lab-resume-owned" data-id="'+vmId+'">Vérifier REP_ existante et reprendre la copie FULL</button>':'')
+   +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose-source" data-id="'+vmId+'">Diagnostiquer QMP source (lecture seule)</button>'
+   +(canResumeSource?'<button class="btn primary" data-action="dr-vm-lvm-lab-resume-source" data-id="'+vmId+'">Vérifier la source et reprendre la copie FULL</button>':'')
    +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose" data-id="'+vmId+'">Diagnostiquer Proxmox (lecture seule)</button>'
    +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
    +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
@@ -2156,6 +2162,32 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    state.auditSearch=document.getElementById('auditSearch')?.value||'';
    state.auditCategory=document.getElementById('auditCategory')?.value||'all';
    hydrateAdmins();return;
+  }
+  if(a==='dr-vm-lvm-lab-diagnose-source'){
+   try{
+    const report=await api('/dr/vms/'+id+'/lvm-lab/diagnose-source');
+    modal('Diagnostic QMP source — VM #'+e(report.vmid),
+      '<div class="notice '+(report.ready?'':'error')+'"><b>'
+       +(report.ready?'Source QMP accessible':'Source QMP non validée')
+       +'</b> · Étape : '+e(report.stage)+' · '+e(report.message)+'</div>'
+       +(report.ready?'<p>Disques détectés : '+e((report.slots||[]).join(', '))
+            +' · Jobs Origami actifs : '+e(report.active_jobs)+'</p>':'')
+       +'<p class="hint">Diagnostic en lecture seule : aucune copie, aucun arrêt de VM.</p>',
+      '<button class="btn" data-action="modal-close">Fermer</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-resume-source'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')return toast('Saisir DISPOSABLE-LAB-ONLY',false);
+   if(!confirm('Vérifier le QMP source et la propriété de REP_ arrêtée, et reprendre la première copie FULL uniquement si aucun transfert LVM n’existe ?'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/resume-source','POST',{confirmation});
+    toast('Vérification réussie ; activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
   }
   if(a==='dr-vm-lvm-lab-diagnose'){
    try{
