@@ -88,6 +88,35 @@ def start(vm_id, actor, confirmation):
     return {"activation_id":identifier,"status":"queued","lab_only":True}
 
 
+def retry_authorization_bug(vm_id, actor, confirmation):
+    """Requeue only the known controller allowlist failure BEFORE host IO.
+
+    Never retry a failed or ambiguous copy. All other uncertain states require
+    external reconciliation of the QMP jobs and volume journal.
+    """
+    if confirmation != ACK:
+        raise ValueError("Confirmation de recette requise")
+    with db.session() as con:
+        con.execute("BEGIN IMMEDIATE")
+        last=con.execute(
+            "SELECT id,status,phase,details,replication_run_id FROM pra_lvm_activations "
+            "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
+        if (not last or last["status"]!="uncertain" or last["phase"]!="blocked"
+                or last["replication_run_id"] is not None
+                or "LiveReplicationError: Action PRA non autorisée" not in last["details"]):
+            raise ValueError("Reprise automatique interdite : contrôler les écritures et les volumes")
+        copies=con.execute("SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? LIMIT 1",
+                           (vm_id,)).fetchone()
+        if copies:
+            raise ValueError("Un transfert a déjà été enregistré : vérification manuelle obligatoire")
+        con.execute("UPDATE pra_lvm_activations SET status='failed',"
+                    "details='Ancien échec local de liste blanche, remplacé par reprise contrôlée',"
+                    "updated_at=? WHERE id=?",(db.now(),last["id"]))
+    db.audit(actor,"pra.lvm.lab.activation.local_error_reconciled",vm_id,
+             "Ancien run #"+str(last["id"])+" : refus local avant toute commande distante")
+    return start(vm_id,actor,confirmation)
+
+
 def status(vm_id):
     dr_protected_vms._one(vm_id)
     with db.session() as con:
