@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.40-rc1 — 23 novembre 2026 : vérification des volumes LVM non journalisés
+
+- La tentative FULL sur `sd-bearnaise` a laissé un `pending` de statut `uncertain`, `allocated={}`, sans génération publiée ni PID NBD. Le journal est créé AVANT `pvesm alloc` : aucun volume *journalisé* ne signifie pas qu'aucun LV n'a réellement été créé.
+- Le diagnostic existant **Inspecter la génération LVM (lecture seule)** recalcule maintenant, pour chaque disque planifié, le nom exact attendu du volume à partir du jeton. Il interroge l'inventaire **réel du VG avec `lvs`**, indique le résultat `Présent` / `Non trouvé` / `Non vérifié`, sans supprimer ni modifier de LV.
+- Le helper classe également les prochains refus de `pvesm alloc` en catégories sûres (volume existant, espace, permissions, nom incorrect, format ou LVM) et enregistre uniquement le code de la catégorie dans le journal d'échec. Les détails complets de la commande et des erreurs système ne sont pas transmis à l'interface.
+- **La réconciliation ne supprime rien et n'autorise pas une nouvelle copie FULL** tant qu'aucune procédure de libération des générations n'est validée. L'absence dans un inventaire ponctuel n'est pas une preuve suffisante pour une purge automatique.
+- Manager `0.3.40-rc1` / agents intégrés `0.3.40`. Mettre à jour `sd-bearnaise` depuis l'interface Agents, puis réexécuter ce diagnostic. Les sources et les VMs restent inchangées.
+
+
 ## 0.3.39-rc1 — 23 novembre 2026 : journal des générations LVM de recette
 
 - La VM de secours `REP-vl-bbiokou` est bien créée sur `sd-bearnaise` et la source QMP est vérifiée (`scsi0`). Après l'amorçage, `lvm_lab_begin` a échoué et laissé une génération LVM non résolue. **Ne pas lancer une nouvelle FULL ou purger les LV à l'aveugle.**
