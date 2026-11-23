@@ -240,6 +240,61 @@ def resume_owned_standby(vm_id, actor, confirmation):
     return start(vm_id,actor,confirmation)
 
 
+def resume_source_probe(vm_id,actor,confirmation):
+    """Resume only a read-only QMP source probe failure before LVM allocation.
+
+    Refuse all other uncertain failures or any recorded transfer, and require
+    direct source QMP and owned target host verification before replay.
+    """
+    if confirmation!=ACK:
+        raise ValueError("Confirmation de recette requise")
+    vm=dr_protected_vms._one(vm_id)
+    if vm["engine"]!="qmp_live_incremental" or vm["state"]!="planned":
+        raise ValueError("Protection PRA inactive ou incompatible")
+    with db.session() as con:
+        last=con.execute(
+            "SELECT id,status,phase,details,replication_run_id FROM pra_lvm_activations "
+            "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
+        if (not last or last["status"]!="uncertain" or last["phase"]!="blocked"
+                or last["replication_run_id"] is not None
+                or not re.search(r"source_probe",str(last["details"]))):
+            raise ValueError("Dernier échec non reconnu comme prévol source QMP")
+        if con.execute(
+            "SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? LIMIT 1",(vm_id,)
+        ).fetchone():
+            raise ValueError("Historique de transfert LVM présent : reprise automatique interdite")
+        if con.execute(
+            "SELECT 1 FROM pra_live_runs WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain') LIMIT 1",(vm_id,)
+        ).fetchone():
+            raise ValueError("Job QMP non réconcilié : reprise interdite")
+    # No mutation below until both independent host checks are confirmed.
+    pra_lvm_standby.verify_existing(vm_id)
+    report=pra_lvm_standby.diagnose_source(vm_id)
+    if report.get("ready") is not True or report.get("active_jobs"):
+        raise ValueError("Diagnostic source non validé : "+str(report.get("stage","QMP"))[:40])
+    with db.session() as con:
+        con.execute("BEGIN IMMEDIATE")
+        current=con.execute(
+            "SELECT id,status,phase,replication_run_id FROM pra_lvm_activations "
+            "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
+        if (not current or current["id"]!=last["id"]
+                or current["status"]!="uncertain" or current["phase"]!="blocked"
+                or current["replication_run_id"] is not None):
+            raise ValueError("Activation modifiée pendant les contrôles")
+        if con.execute(
+            "SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? LIMIT 1",(vm_id,)
+        ).fetchone():
+            raise ValueError("Transfert démarré pendant les contrôles")
+        con.execute("UPDATE pra_lvm_activations SET status='failed',"
+                    "details=?,updated_at=? WHERE id=?",(
+                        "Prévol source réconcilié ; reprise contrôlée sans réinitialisation du secours",
+                        db.now(),last["id"]))
+    db.audit(actor,"pra.lvm.lab.activation.source_probe_reconciled",vm_id,
+             "activation="+str(last["id"])+" ; hôte source QMP et REP_ validés sans écriture")
+    return start(vm_id,actor,confirmation)
+
+
 def steps(vm_id):
     """Chronological, per-protection activation trace; no remote side effects."""
     dr_protected_vms._one(vm_id)
