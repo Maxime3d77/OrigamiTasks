@@ -764,10 +764,12 @@ async function openPRALvmLabPanel(vmId){
  const vm=(state.drProtectedVMs||[]).find(x=>x.id===Number(vmId));
  if(!vm)return toast('Protection VM introuvable',false);
  const history=(await api('/dr/vms/'+vmId+'/lvm-lab/runs')).items||[];
- let activations=[],scheduleEvents=[],bootTests=[],publications=[];
+ let activations=[],scheduleEvents=[],bootTests=[],publications=[],stepHistory=[];
  try{publications=(await api('/dr/vms/'+vmId+'/lvm-lab/publications')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
  try{activations=(await api('/dr/vms/'+vmId+'/lvm-lab/activations')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{stepHistory=(await api('/dr/vms/'+vmId+'/lvm-lab/steps')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
  try{scheduleEvents=(await api('/dr/vms/'+vmId+'/lvm-lab/schedule-events')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
@@ -848,6 +850,10 @@ async function openPRALvmLabPanel(vmId){
    +(publications.map(x=>'<tr><td>'+e(dt(x.updated_at))+'</td><td>'+labelStatus(x.status)
       +'</td><td>'+e(x.details)+'</td></tr>').join('')
       ||'<tr><td colspan="3">Aucune publication de disque LVM</td></tr>')+'</tbody></table></div>'
+   +'<h3>Débogage : étapes de la protection</h3>'
+   +'<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Étape</th><th>Diagnostic</th></tr></thead><tbody>'
+   +(stepHistory.map(x=>'<tr><td>'+e(dt(x.created_at))+'</td><td>'+e(x.action.replace('pra.lvm.lab.activation.',''))+'</td><td>'+e(x.detail)+'</td></tr>').join('')
+       ||'<tr><td colspan="3">Aucune étape reçue</td></tr>')+'</tbody></table></div>'
    +'<h3>Journal d’activation de la protection</h3>'
    +'<div class="table-wrap"><table><thead><tr><th>Activation</th><th>État</th><th>Étape</th><th>Journal</th></tr></thead><tbody>'
    +(activations.map(x=>'<tr><td>#'+e(x.id)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.phase)+'</td><td>'+e(x.details)
