@@ -5,7 +5,7 @@ only reports evidence and blockers. It deliberately has no start/stop,
 power-control, witness-write, fencing or failover entrypoint. In particular,
 an independent witness cannot be simulated by controller-local state.
 """
-from . import db, dr_protected_vms, pra_live
+from . import db, dr_protected_vms, pra_live, pra_lvm_guest_evidence
 
 
 def _gate(code, name, passed, explanation):
@@ -58,6 +58,10 @@ def assess(vm_id):
         backend_implemented = bool(structural and lvm_published
                                    and lvm_published["status"]=="completed")
     qemu_tested = bool(boot_test and boot_test["status"]=="completed")
+    # A console-login observation is human-reported, checkpoint-specific and
+    # never equivalent to proof of application health or fencing.
+    os_observation = (pra_lvm_guest_evidence.current(vm_id)
+                      if target_backend == "lvm-qcow2-staging" else None)
 
     checks = [
         _gate("policy", "Politique PRA active", vm.get("state") == "planned",
@@ -75,8 +79,13 @@ def assess(vm_id):
         _gate("qemu_test", "Démarrage QEMU d'un clone isolé",
               qemu_tested, "Test QEMU terminé puis clone arrêté" if qemu_tested
               else "Aucun test QEMU isolé et arrêté n'a été confirmé"),
-        _gate("isolated_restore", "Boot de l'OS et restauration applicative validés", False,
-              "QEMU running ne prouve pas le démarrage du système invité"),
+        _gate("isolated_restore", "Connexion à l'OS restauré observée",
+              bool(os_observation),
+              ("Observée par "+os_observation["actor"]+" sur clone #"
+               +str(os_observation["test_vmid"])+" pour le checkpoint courant ; "
+               "preuve humaine, non automatisée et sans validation applicative")
+              if os_observation else
+              "Aucun contrôle de connexion OS enregistré pour le dernier checkpoint"),
         _gate("application_health", "Cohérence applicative prouvée", False,
               "Il manque les contrôles OS, applicatifs et transactionnels"),
         _gate("witness", "Témoin indépendant et autorité exclusive", False,
