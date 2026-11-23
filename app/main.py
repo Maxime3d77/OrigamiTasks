@@ -734,6 +734,18 @@ def get_vm_storage_readiness(vm_id:int,request:Request):
         raise HTTPException(503,'Découverte du stockage : API Proxmox indisponible ou non autorisée') from None
 
 
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/diagnose-standby')
+def diagnose_lvm_lab_standby(vm_id:int, request:Request):
+    security.require(request,role='admin')
+    from . import pra_lvm_standby
+    try:
+        return pra_lvm_standby.diagnose(vm_id)
+    except (ValueError,dr_protected_vms.ProtectedVMError,pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Diagnostic Proxmox non disponible') from None
+
+
 @app.post('/api/dr/vms/{vm_id}/lvm-lab/prepare-standby')
 def prepare_lvm_lab_standby(vm_id:int, request:Request, payload:dict[str,Any]):
     user=security.require(request,role='admin',mutate=True)
