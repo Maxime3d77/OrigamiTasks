@@ -42,6 +42,22 @@ def cmd(*args, timeout=25):
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise HostError("Required host command unavailable") from exc
     if r.returncode:
+        if len(args)>1 and args[:2]==("pvesm","alloc"):
+            # Never return raw stdout/stderr (may contain sensitive data).
+            diagnostic=((r.stderr or "")+" "+(r.stdout or "")).lower()
+            categories=(
+                (("already exists","exists already","existiert bereits"),"VOLUME_EXISTS"),
+                (("not enough free space","insufficient free","no space left","not enough space"),"INSUFFICIENT_SPACE"),
+                (("invalid volume","invalid name","invalid filename","illegal name"),"INVALID_VOLUME_NAME"),
+                (("permission denied","operation not permitted","access denied"),"PERMISSION_DENIED"),
+                (("format mismatch","unsupported format","not supported","does not support"),"FORMAT_UNSUPPORTED"),
+                (("lvcreate","logical volume"),"LVM_CREATION_FAILED"),
+                (("storage does not exist","storage not found","unknown storage"),"STORAGE_NOT_FOUND"),
+            )
+            category=next((label for terms,label in categories
+                           if any(term in diagnostic for term in terms)),
+                          "ALLOCATION_REJECTED")
+            raise HostError("PVE_LVM_ALLOC_"+category)
         raise HostError("Host operation rejected: " + args[0])
     return r.stdout
 
