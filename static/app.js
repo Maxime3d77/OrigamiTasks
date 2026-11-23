@@ -795,6 +795,10 @@ async function openPRALvmLabPanel(vmId){
  const canPrepare=vm.engine==='qmp_live_incremental' && !running;
  const canActivate=vm.engine==='qmp_live_incremental'&&vm.state==='planned'
    &&activations.length===0&&!running;
+ const canRetryProvision=Boolean(activations[0]?.status==='uncertain'
+   &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
+   &&/LiveReplicationError\s*:\s*Échec commande agent PRA\s*:\s*lvm_lab_prepare_standby/.test(
+      String(activations[0]?.details||''))&&history.length===0);
  const canRetryAuthorizationBug=Boolean(activations[0]?.status==='uncertain'
    &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
    &&/LiveReplicationError\s*:\s*Action PRA non autorisée/.test(String(activations[0]?.details||''))
@@ -815,6 +819,7 @@ async function openPRALvmLabPanel(vmId){
    +'<div class="tool-row"><button class="btn primary" data-action="dr-vm-lvm-lab-activate" data-id="'+vmId+'" '
    +(canActivate?'':'disabled')+'>Activer la protection (REP_ + première copie FULL)</button>'
    +(canRetryAuthorizationBug?'<button class="btn primary" data-action="dr-vm-lvm-lab-retry-allowlist" data-id="'+vmId+'">Relancer après correction du refus local</button>':'')
+   +(canRetryProvision?'<button class="btn primary" data-action="dr-vm-lvm-lab-reconcile-provision" data-id="'+vmId+'">Vérifier le VMID cible et reprendre la préparation</button>':'')
    +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
    +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
    +'<p class="hint">OrigamiTasks vérifie le VMID sur le cluster cible, prépare une VM REP_ arrêtée, sans réseau ni disque, et applique les marqueurs de protection. Aucune commande manuelle.</p>'
@@ -2142,6 +2147,19 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    state.auditSearch=document.getElementById('auditSearch')?.value||'';
    state.auditCategory=document.getElementById('auditCategory')?.value||'all';
    hydrateAdmins();return;
+  }
+  if(a==='dr-vm-lvm-lab-reconcile-provision'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Saisir DISPOSABLE-LAB-ONLY',false);
+   if(!confirm('Vérifier l’absence du VMID sur le cluster Proxmox cible avant toute nouvelle préparation ? Si la VM existe, la reprise sera refusée.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/reconcile-provision','POST',{confirmation});
+    toast('Réconciliation confirmée : activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
   }
   if(a==='dr-vm-lvm-lab-retry-allowlist'){
    const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
