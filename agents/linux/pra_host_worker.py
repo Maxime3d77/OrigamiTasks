@@ -592,6 +592,62 @@ def _lvm_lab_store(data):
     return LvmCheckpointStore(target)
 
 
+def lvm_lab_diagnose_standby(data):
+    """Read-only staged diagnostic of storage and cluster availability.
+
+    No qm create/set/start, no volume allocation or journal modifications.
+    Error text is restricted to a fixed stage and command category.
+    """
+    ident = vmid(data.get("vmid"))
+    store = PveLvmTarget(data["storage"], ident, cmd,
+                         protected_vm_id=data.get("protected_vm_id"))
+    checks = []
+    def inspect(stage, operation):
+        try:
+            result = operation()
+            checks.append({"stage": stage, "ok": True,
+                           "message": "Vérification Proxmox réussie"})
+            return result
+        except (HostError, LvmTargetError, ValueError) as exc:
+            error = str(exc)
+            kind = "pvesh" if "pvesh" in error else (
+                "qm" if "qm" in error else "compatibilité ou droits Proxmox")
+            checks.append({"stage": stage, "ok": False,
+                           "message": "Échec "+kind+" ; vérifier l’API et les permissions"})
+            return None
+
+    storage = inspect("STORAGE_CONFIG", store.inspect)
+    if storage is None:
+        return {"checks": checks, "ready_for_creation": False,
+                "target_exists": None, "vmid": ident}
+    capacity = inspect("STORAGE_CAPACITY", store._node_capacity)
+    if capacity is None:
+        return {"checks": checks, "ready_for_creation": False,
+                "target_exists": None, "vmid": ident}
+    raw = inspect("CLUSTER_INVENTORY",
+                  lambda: cmd("pvesh", "get", "/cluster/resources",
+                              "--type", "vm", "--output-format", "json"))
+    if raw is None:
+        return {"checks": checks, "ready_for_creation": False,
+                "target_exists": None, "vmid": ident}
+    try:
+        data_set = json.loads(raw)
+        if not isinstance(data_set, list):
+            raise ValueError("Invalid inventory")
+        matching = [x for x in data_set if isinstance(x, dict)
+                    and x.get("vmid") == ident]
+    except (ValueError, TypeError):
+        checks.append({"stage": "CLUSTER_INVENTORY_PARSE", "ok": False,
+                       "message": "Inventaire Proxmox invalide"})
+        return {"checks": checks, "ready_for_creation": False,
+                "target_exists": None, "vmid": ident}
+    checks.append({"stage": "VMID_AVAILABILITY", "ok": not matching,
+                   "message": "VMID libre" if not matching
+                   else "VMID présent sur le cluster : ne pas recréer la VM"})
+    return {"checks": checks, "ready_for_creation": not matching,
+            "target_exists": bool(matching), "vmid": ident}
+
+
 def lvm_lab_prepare_standby(data):
     """Create only an owned, powered-off, networkless LAB VM.
 
@@ -1008,6 +1064,7 @@ ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
            "target_publish": target_publish, "target_verify": target_verify,
+           "lvm_lab_diagnose_standby": lvm_lab_diagnose_standby,
            "lvm_lab_prepare_standby": lvm_lab_prepare_standby,
            "lvm_lab_probe": lvm_lab_probe,
            "lvm_lab_begin": lvm_lab_begin,
