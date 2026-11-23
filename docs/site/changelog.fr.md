@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.37-rc1 — 23 novembre 2026 : diagnostic QMP de la VM source
+
+- Après création et vérification de la réplique `REP-vl-bbiokou`, la première copie FULL peut bloquer sur `source_probe` (le helper source QMP). Le nouveau bouton **Diagnostiquer QMP source (lecture seule)** vérifie l'inventaire matériel, l'état de la source, l'accès QMP et les nœuds de disques sans copier de bloc ni arrêter la VM.
+- Les messages sont classés sans données sensibles : `DISK_INVENTORY`, `HARDWARE`, `POWER`, `QMP_SOCKET`, `QMP_BLOCKS`, `QM_COMMAND`, `QEMU_PROCESS` ou `QMP_QUERY`. Le détail de la commande ou de l'exception non fiable reste local au nœud.
+- Le bouton **Vérifier la source et reprendre la copie FULL** n'est disponible que si la dernière activation est `uncertain` pour `source_probe`, sans run de transfert enregistré. Le contrôleur exige une réplique déjà possédée et arrêtée, aucun checkpoint LVM et un diagnostic QMP source validé ; il conserve les anciennes tentatives et ne supprime rien.
+- Manager `0.3.37-rc1`, agents embarqués `0.3.37` afin d'installer le helper QMP source sur `au-dodo`. Le serveur `sd-bearnaise` doit également disposer du helper de vérification des marqueurs.
+- Les tests logiciels ne qualifient pas une récupération OS ou une bascule réelle. Recette LAB-ONLY uniquement.
+
+
 ## 0.3.36-rc1 — 23 novembre 2026 : reprise du secours REP_ déjà créé
 
 - La création de VM `REP-vl-bbiokou` peut réussir alors que l'inventaire Proxmox remonte encore un statut non confirmé. Le contrôleur ne prend plus ce statut comme preuve d'échec : il fait une nouvelle vérification **directement sur le nœud** des marqueurs `ORIGAMITASKS_PRA_<id>` et `ORIGAMITASKS_LAB_ONLY`, du nom DNS, de la VM arrêtée, sans réseau, et de l'autoboot désactivé.
