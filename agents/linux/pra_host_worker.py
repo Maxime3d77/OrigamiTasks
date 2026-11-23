@@ -608,6 +608,43 @@ def _lvm_lab_store(data):
     return LvmCheckpointStore(target)
 
 
+def lvm_lab_validate_standby(data):
+    """Read-only proof that an existing guest belongs exclusively to this policy.
+
+    Never adopt a VM simply because its VMID exists. Verify ownership,
+    node, name, stopped state, isolation and disabled autoboot on the host.
+    """
+    ident=vmid(data.get("vmid"))
+    protected=data.get("protected_vm_id")
+    logical=data.get("name")
+    if type(protected) is not int or protected<=0:
+        raise HostError("Invalid protection identity")
+    name=pve_guest_name(logical)
+    resources=json.loads(cmd("pvesh","get","/cluster/resources",
+                             "--type","vm","--output-format","json"))
+    if not isinstance(resources,list):
+        raise HostError("Cluster VM inventory unavailable")
+    candidates=[r for r in resources if isinstance(r,dict) and r.get("vmid")==ident]
+    if len(candidates)!=1 or candidates[0].get("type")!="qemu" or candidates[0].get("node")!=socket.gethostname().split(".")[0]:
+        raise HostError("Target VMID missing, duplicated or belongs to another node")
+    if not _is_target_stopped(ident):
+        raise HostError("Existing standby VM must be stopped")
+    config=_vm_config(ident)
+    markers=set(re.findall(r"[A-Za-z0-9_]+",config.get("description","")))
+    if ("ORIGAMITASKS_PRA_"+str(protected) not in markers
+            or "ORIGAMITASKS_LAB_ONLY" not in markers):
+        raise HostError("Existing standby belongs to another protection or is unmarked")
+    if config.get("name") != name:
+        raise HostError("Existing standby name does not match this protection")
+    if config.get("onboot","0") not in ("0","false"):
+        raise HostError("Existing standby autoboot is enabled")
+    if any(re.fullmatch(r"net[0-9]{1,2}",key) for key in config):
+        raise HostError("Existing standby is not network-isolated")
+    return {"owned":True,"vmid":ident,"target_stopped":True,
+            "network_isolated":True,"lab_only":True,
+            "name":name,"node":candidates[0]["node"]}
+
+
 def lvm_lab_diagnose_standby(data):
     """Read-only staged diagnostic of storage and cluster availability.
 
@@ -1084,6 +1121,7 @@ ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
            "target_publish": target_publish, "target_verify": target_verify,
+           "lvm_lab_validate_standby": lvm_lab_validate_standby,
            "lvm_lab_diagnose_standby": lvm_lab_diagnose_standby,
            "lvm_lab_prepare_standby": lvm_lab_prepare_standby,
            "lvm_lab_probe": lvm_lab_probe,
