@@ -127,7 +127,7 @@ def _run_helper(ssh, action, data, timeout=60):
                       "target_finish", "target_abort", "target_publish", "target_verify",
                        "lvm_lab_probe", "lvm_lab_begin", "lvm_lab_finish",
                        "lvm_lab_verify", "lvm_lab_abort", "lvm_lab_prepare_clone",
-                       "lvm_lab_prepare_standby", "lvm_lab_validate_standby", "lvm_lab_diagnose_standby", "lvm_lab_publish_standby",
+                       "lvm_lab_prepare_standby", "lvm_lab_validate_standby", "lvm_lab_diagnose_standby", "lvm_lab_diagnose_generation", "lvm_lab_publish_standby",
                        "lvm_lab_test_boot"}:
         raise LiveReplicationError("Action PRA non autorisée")
     encoded = base64.b64encode(json.dumps(data, separators=(",", ":")).encode()).decode()
