@@ -164,3 +164,53 @@ def test_uncertain_provision_will_not_retry_after_transfer(monkeypatch):
     monkeypatch.setattr(pra_lvm_activation.db,'session',lambda:C())
     with pytest.raises(ValueError,match='préparation de VM identifiable'):
         pra_lvm_activation.reconcile_failed_provision(17,'admin','DISPOSABLE-LAB-ONLY')
+
+
+def test_resume_existing_owned_standby_after_failed_preflight(monkeypatch):
+    from app import pra_lvm_activation
+    vm={'id':1,'engine':'qmp_live_incremental','state':'planned'}
+    entry={'id':5,'status':'uncertain','phase':'blocked','replication_run_id':None,
+           'details':('Activation non confirmée : LabJobError : LAB target VM must '
+                      'exist, be stopped and have exclusive VMID')}
+    class DbSession:
+        def __enter__(self):return self
+        def __exit__(self,*a):return False
+        def execute(self,sql,args=()):
+            class R:
+                def __init__(self,row=None):self.row=row
+                def fetchone(self):return self.row
+            if "FROM pra_lvm_activations" in sql:return R(entry)
+            return R()
+    monkeypatch.setattr(pra_lvm_activation.db,"session",lambda:DbSession())
+    monkeypatch.setattr(pra_lvm_activation.db,"audit",lambda *args:None)
+    monkeypatch.setattr(pra_lvm_activation.db,"now",lambda:"2026-11-23")
+    monkeypatch.setattr(pra_lvm_activation.dr_protected_vms,"_one",lambda _:vm)
+    calls=[]
+    monkeypatch.setattr(pra_lvm_activation.pra_lvm_standby,"verify_existing",
+                        lambda _:(calls.append("host verified") or {"owned":True}))
+    monkeypatch.setattr(pra_lvm_activation,"start",
+                        lambda *args:{"status":"queued","activation_id":6})
+    assert pra_lvm_activation.resume_owned_standby(
+        1,"admin","DISPOSABLE-LAB-ONLY")["activation_id"]==6
+    assert calls==["host verified"]
+
+
+def test_resume_rejects_if_host_cannot_prove_ownership(monkeypatch):
+    from app import pra_lvm_activation
+    vm={'id':1,'engine':'qmp_live_incremental','state':'planned'}
+    entry={'id':5,'status':'uncertain','phase':'blocked','replication_run_id':None,
+           'details':'LabJobError : LAB target VM must exist, be stopped and have exclusive VMID'}
+    class DB:
+        def __enter__(self):return self
+        def __exit__(self,*a):return False
+        def execute(self,sql,args=()):
+            class R:
+                def __init__(self,entry):self.entry=entry
+                def fetchone(self):return self.entry
+            return R(entry if "FROM pra_lvm_activations" in sql else None)
+    monkeypatch.setattr(pra_lvm_activation.db,"session",lambda:DB())
+    monkeypatch.setattr(pra_lvm_activation.dr_protected_vms,"_one",lambda _:vm)
+    monkeypatch.setattr(pra_lvm_activation.pra_lvm_standby,"verify_existing",
+                        lambda _:(_ for _ in ()).throw(ValueError("foreign target")))
+    with pytest.raises(ValueError,match="foreign"):
+        pra_lvm_activation.resume_owned_standby(1,"admin","DISPOSABLE-LAB-ONLY")
