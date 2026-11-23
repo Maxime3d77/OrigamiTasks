@@ -1,5 +1,15 @@
 # Historique des modifications
 
+## 0.3.41-rc1 — 23 novembre 2026 : correction pvesm alloc et réconciliation encadrée
+
+- **Cause du refus d'allocation identifiée** : le pilote envoyait la taille virtuelle QMP en octets à `pvesm alloc`, dont l'argument `size` s'exprime en Kio. Une VM de 5 Gio provoquait une demande équivalente à 5 Tio. Correction : `ceil(bytes/1024)` avant appel Proxmox, sans modifier les tailles virtuelles inscrites dans les checkpoints.
+- **Nouvelle reprise de recette depuis l'interface** : si le dernier run FULL est `uncertain` pour `lvm_lab_begin`, que le pending journal ne déclare aucun LV et que le volume attendu est absent de l'inventaire réel du VG, l'administrateur peut cliquer **« Vérifier, archiver et reprendre la copie FULL »**. L'action exige la confirmation `DISPOSABLE-LAB-ONLY`, un diagnostic QMP source sans job actif, la vérification de propriété de `REP_` arrêtée, l'absence de PID NBD, checkpoint publié ou autre run incertain.
+- Le helper refait l'inventaire LV sous verrou, puis **archive `pending.json` sous `reconciled-no-lv-<token>.json`** sans supprimer ni détacher aucun LV. L'historique de l'ancienne tentative est conservé et une nouvelle activation peut seulement ensuite démarrer.
+- **Refus automatique** si un LV existe, que l'inventaire est ambigu, qu'un autre run est en cours, ou qu'une génération partielle a été enregistrée. Aucune reprise aveugle ou purge générale n'est autorisée.
+- Manager `0.3.41-rc1`, agents Linux/Windows `0.3.41`. Mettre à jour le manager puis `sd-bearnaise` et `au-dodo` avant la reprise. Tests de conversion Kio, journal conservé, LV présent refusé et diagnostics inchangés.
+- Le dispositif reste **LAB-ONLY** : pas de bascule réelle, de fencing ni de failback ; la CI ne remplace pas une validation sur les Proxmox physiques.
+
+
 ## 0.3.40-rc1 — 23 novembre 2026 : vérification des volumes LVM non journalisés
 
 - La tentative FULL sur `sd-bearnaise` a laissé un `pending` de statut `uncertain`, `allocated={}`, sans génération publiée ni PID NBD. Le journal est créé AVANT `pvesm alloc` : aucun volume *journalisé* ne signifie pas qu'aucun LV n'a réellement été créé.
