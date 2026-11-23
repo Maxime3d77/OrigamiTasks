@@ -252,8 +252,12 @@ class PveLvmTarget:
                     size = validated["disks"][slot]
                     name = "vm-" + str(self.vmid) + "-disk-" + str(sequence + index) + ".qcow2"
                     volid = self.storage + ":" + name
+                    # QMP reports virtual-size in BYTES; pvesm alloc expects
+                    # KiB. Passing raw QMP bytes requests 1024x the intended LV.
+                    # Round up rather than underallocating a non-KiB disk.
+                    size_kib = (size + 1023) // 1024
                     self.run("pvesm", "alloc", self.storage, str(self.vmid),
-                             name, str(size), "--format", "qcow2")
+                             name, str(size_kib), "--format", "qcow2")
                     record["allocated"][slot] = {"volid": volid, "size": size}
                     _atomic(journal_file, record)
             except BaseException as exc:
