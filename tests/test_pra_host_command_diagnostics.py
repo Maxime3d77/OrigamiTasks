@@ -160,3 +160,28 @@ def test_foreign_occupied_vmid_is_not_adopted(monkeypatch):
     with pytest.raises(host.HostError,match="another protection"):
         host.lvm_lab_validate_standby({
             "vmid":183,"protected_vm_id":1,"name":"REP_vl-bbiokou"})
+
+
+def test_source_qmp_diagnostic_is_readonly_and_reports_socket_stage(monkeypatch):
+    monkeypatch.setattr(host,"source_probe",lambda data:(_ for _ in ()).throw(
+        host.HostError("VM QMP socket unavailable (VM must be running)")))
+    report=host.source_diagnose({"vmid":183,"slots":["scsi0"]})
+    assert report=={"ready":False,"stage":"QMP_SOCKET",
+                    "message":"Socket QMP indisponible","vmid":183}
+
+
+def test_source_qmp_diagnostic_does_not_leak_raw_qmp_details(monkeypatch):
+    monkeypatch.setattr(host,"source_probe",lambda data:(_ for _ in ()).throw(
+        host.ReplicationError("QMP handshake failed: example private path")))
+    report=host.source_diagnose({"vmid":183,"slots":["scsi0"]})
+    assert report["stage"]=="QMP_QUERY"
+    assert "private path" not in str(report)
+
+
+def test_source_qmp_ui_and_helper_are_explicitly_wired():
+    root=Path(__file__).resolve().parents[1]
+    assert '"source_diagnose": source_diagnose' in (root/"agents/linux/pra_host_worker.py").read_text()
+    assert '"source_diagnose"' in (root/"app/pra_live.py").read_text()
+    ui=(root/"static/app.js").read_text()
+    assert "Diagnostiquer QMP source (lecture seule)" in ui
+    assert "/lvm-lab/resume-source" in ui
