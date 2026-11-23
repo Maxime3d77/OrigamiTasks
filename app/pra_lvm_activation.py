@@ -4,6 +4,7 @@ No automatic reverse synchronization, standby boot or promotion is authorized.
 A controller restart marks in-progress activations uncertain; no blind retry.
 """
 import json
+import re
 import threading
 
 from . import db, dr_protected_vms, pra_lvm_standby, pra_lvm_jobs
@@ -109,7 +110,8 @@ def retry_authorization_bug(vm_id, actor, confirmation):
             "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
         if (not last or last["status"]!="uncertain" or last["phase"]!="blocked"
                 or last["replication_run_id"] is not None
-                or "LiveReplicationError: Action PRA non autorisée" not in last["details"]):
+                or not re.search(r"LiveReplicationError\s*:\s*Action PRA non autorisée",
+                                 str(last["details"]))):
             raise ValueError("Reprise automatique interdite : contrôler les écritures et les volumes")
         copies=con.execute("SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? LIMIT 1",
                            (vm_id,)).fetchone()
