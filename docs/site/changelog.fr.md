@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.35-rc1 — 23 novembre 2026 : correction création de REP_ sur Proxmox
+
+- **Cause de `PRA_STEP_VM_CREATE / commande qm refusée` :** le pilote passait `REP_vl-bbiokou` comme nom de machine à `qm create`. Proxmox impose un nom DNS, donc le caractère souligné `_` est rejeté. OrigamiTasks conserve son nom logique `REP_vl-bbiokou` et ses marqueurs de protection, mais utilise désormais `REP-vl-bbiokou` pour le champ `name` Proxmox.
+- Même normalisation pour les clones de recette : `PRA_TEST_4301` reste le nom logique de test, le nom natif Proxmox est `PRA-TEST-4301`.
+- Le helper vérifie le nom Proxmox attendu avant d'adopter ou publier une VM existante. Le nom natif s'affiche dans le diagnostic de la protection.
+- **Manager `0.3.35-rc1`, agents intégrés `0.3.35`** : mettre à jour le manager puis l'agent du nœud destination afin de diffuser le helper corrigé. Après une activation `uncertain`, vérifier l'absence du VMID via l'API avant d'utiliser la reprise contrôlée ; ne jamais supprimer de VM automatiquement.
+- Tests de non-régression ajoutés pour la génération du nom DNS, le marqueur de protection et la création `qm` sans démarrage.
+
+
 ## 0.3.34-rc1 — 23 novembre 2026 : diagnostic PRA Proxmox sans écriture
 
 - Corrige le manque de précision de `Host operation rejected:` lors de la préparation de `REP_`. Les étapes identifiées sont `STORAGE_CONFIG`, `STORAGE_CAPACITY`, `CLUSTER_INVENTORY`, `VM_CREATE` et `POST_CREATE_INVENTORY`. La console n'affiche pas les arguments libres ou sorties distantes sensibles.
