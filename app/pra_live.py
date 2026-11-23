@@ -161,7 +161,21 @@ def _run_helper(ssh, action, data, timeout=60):
             document = json.loads(output.strip().splitlines()[-1])
             reported = document.get("error", "") if isinstance(document, dict) else ""
             if isinstance(reported, str):
-                reason = next((k for k in known if reported.startswith(k)), "")
+                # The host helper emits stable provisioning stage markers.
+                # Show only a known marker and allowlisted CLI category.
+                stage = re.match(
+                    r"^(PRA_STEP_(?:STORAGE_CONFIG|STORAGE_CAPACITY|"
+                    r"CLUSTER_INVENTORY|VM_CREATE|POST_CREATE_INVENTORY))\\s*:",
+                    reported,
+                )
+                if stage:
+                    cli = re.search(r"Host operation rejected: (pvesh|qm|pvesm|vgs|lvs)", reported)
+                    reason = stage.group(1) + (
+                        " / commande " + cli.group(1) + " refusée" if cli else
+                        " / vérification Proxmox refusée"
+                    )
+                else:
+                    reason = next((k for k in known if reported.startswith(k)), "")
         except (ValueError, IndexError, TypeError):
             pass
         raise LiveReplicationError(
