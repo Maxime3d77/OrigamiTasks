@@ -25,8 +25,11 @@ def prepare(vm_id, confirmation):
                 and r.get("vmid") == vm["target_vmid"]]
     if occupied and (len(occupied) != 1 or occupied[0].get("type") != "qemu"
                      or occupied[0].get("node") != vm["target_node"]
-                     or occupied[0].get("status") != "stopped"):
-        raise ValueError("VMID cible déjà occupé ou VM de secours en marche")
+                     or occupied[0].get("status") == "running"):
+        raise ValueError("VMID cible occupé par une autre ressource, un autre nœud ou VM en marche")
+    # A newly created VM may temporarily be reported as 'unknown'. Do not
+    # reject that cached state: the host helper rechecks its actual qm status,
+    # exact policy ownership, onboot and network isolation before returning.
     storages = dr_protected_vms._storages(dst, dstcred)
     compatible = [s for s in storages
                   if s.get("storage") == vm["target_storage"]
