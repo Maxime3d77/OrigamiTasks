@@ -288,3 +288,73 @@ def test_lvm_generation_diagnostic_does_not_claim_absence_if_lvs_fails(monkeypat
     assert report["inventory_checked"] is False
     assert report["predicted_allocations"][0]["present"] is None
     assert report["requires_reconciliation"] is True
+
+
+def test_empty_pending_reconciliation_preserves_archive_and_never_frees_lv(monkeypatch,tmp_path):
+    from types import SimpleNamespace
+    journal=tmp_path/"lab"/"183"
+    journal.mkdir(parents=True)
+    token="72c4f9ab271c46a39d2967c1ab2bbe97"
+    pending=journal/"pending.json"
+    pending.write_text(json.dumps({
+        "token":token,"status":"uncertain","mode":"full",
+        "planned":["scsi0"],"allocated":{},
+    }))
+    expected="vm-183-disk-"+str(int(token[:12],16))+".qcow2"
+    store=SimpleNamespace(
+        root=journal,pending=pending,current_file=journal/"current.json",
+        owned=journal/"owned.json",
+        lock_file=journal/".checkpoint.lock",
+        target=SimpleNamespace(vmid=183,protected_vm_id=1,storage="lab",
+                               inspect=lambda:{"vgname":"LAB-VG"}),
+        _read=lambda p:json.loads(p.read_text()) if p.exists() else None,
+    )
+    monkeypatch.setattr(host,"_lvm_lab_store",lambda _:store)
+    monkeypatch.setattr(host,"lvm_lab_validate_standby",lambda _:{"owned":True})
+    def readonly(*a,**kw):
+        assert a==("lvs","--reportformat","json","-o","vg_name,lv_name")
+        return json.dumps({"report":[{"lv":[]}]})
+    monkeypatch.setattr(host,"cmd",readonly)
+    response=host.lvm_lab_archive_empty_uncertain({
+        "vmid":183,"protected_vm_id":1,"storage":"lab",
+        "name":"REP_vl-bbiokou","token":token,
+        "lab_ack":"DISPOSABLE-LAB-ONLY"})
+    assert response["archived"] is True
+    assert response["volumes_freed"] == 0
+    assert not pending.exists()
+    archived=journal/("reconciled-no-lv-"+token+".json")
+    assert json.loads(archived.read_text())["token"]==token
+    with pytest.raises(host.HostError):
+        host.lvm_lab_archive_empty_uncertain({
+            "vmid":183,"protected_vm_id":1,"storage":"lab",
+            "name":"REP_vl-bbiokou","token":token,
+            "lab_ack":"DISPOSABLE-LAB-ONLY"})
+
+
+def test_empty_pending_reconciliation_refuses_if_expected_lv_exists(monkeypatch,tmp_path):
+    from types import SimpleNamespace
+    journal=tmp_path/"lab"/"183"
+    journal.mkdir(parents=True)
+    token="72c4f9ab271c46a39d2967c1ab2bbe97"
+    pending=journal/"pending.json"
+    pending.write_text(json.dumps({
+        "token":token,"status":"uncertain","mode":"full",
+        "planned":["scsi0"],"allocated":{},
+    }))
+    expected="vm-183-disk-"+str(int(token[:12],16))+".qcow2"
+    store=SimpleNamespace(
+        root=journal,pending=pending,current_file=journal/"current.json",
+        owned=journal/"owned.json",lock_file=journal/".checkpoint.lock",
+        target=SimpleNamespace(vmid=183,protected_vm_id=1,storage="lab",
+                               inspect=lambda:{"vgname":"LAB-VG"}),
+        _read=lambda p:json.loads(p.read_text()) if p.exists() else None)
+    monkeypatch.setattr(host,"_lvm_lab_store",lambda _:store)
+    monkeypatch.setattr(host,"lvm_lab_validate_standby",lambda _:{"owned":True})
+    monkeypatch.setattr(host,"cmd",lambda *a,**kw:json.dumps({
+        "report":[{"lv":[{"vg_name":"LAB-VG","lv_name":expected}]}]}))
+    with pytest.raises(host.HostError,match="Absence de LV non confirmée"):
+        host.lvm_lab_archive_empty_uncertain({
+            "vmid":183,"protected_vm_id":1,"storage":"lab",
+            "name":"REP_vl-bbiokou","token":token,
+            "lab_ack":"DISPOSABLE-LAB-ONLY"})
+    assert pending.exists()
