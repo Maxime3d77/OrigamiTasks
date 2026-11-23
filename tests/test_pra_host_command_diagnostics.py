@@ -71,7 +71,9 @@ def test_readonly_diagnostic_refuses_existing_cluster_vmid(monkeypatch):
     })
     assert result["target_exists"] is True
     assert result["ready_for_creation"] is False
-    assert result["checks"][-1]["stage"]=="VMID_AVAILABILITY"
+    assert result["checks"][-1]["stage"]=="OWNERSHIP"
+    assert result["checks"][-1]["ok"] is False
+    assert result["owned_standby"] is False
 
 
 def test_ui_exposes_readonly_diagnostic():
