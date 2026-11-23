@@ -1,5 +1,17 @@
 # Historique des modifications
 
+## 0.3.33-rc1 — 23 novembre 2026 (diagnostics PRA et ergonomie)
+
+- **Correction du PRA bloqué :** les actions internes autorisées intègrent désormais explicitement `lvm_lab_prepare_standby`, `lvm_lab_publish_standby` et `lvm_lab_test_boot`. Le refus local `Action PRA non autorisée` survenait avant toute commande Proxmox.
+- **Reprise contrôlée :** bouton réservé à la régression locale *précise*, uniquement si aucune copie n'a été créée, aucun run n'a démarré et aucun appel à l'agent n'a été envoyé ; tout autre état incertain reste bloquant.
+- **Sélection de VM :** liste triée par nom (français, casse ignorée), recherche par nom/VMID/nœud, suggestion automatique d'un VMID libre lors du changement de source, et bouton de vérification en temps réel du VMID cible sur Proxmox.
+- **Commentaires de réplique :** champs `Référence / ticket` et `Commentaire` sur la politique PRA, enregistrés en base et repris, lors de la création de la VM `REP_`, dans la description Proxmox avec nom, VMID et nœud source ainsi que les marqueurs d'appartenance.
+- **Diagnostics :** nom de la source et de `REP_` cliquables dans VM protégées ; vue détaillée de la phase d'activation, des éventuels blocages, des copies, des publications et des tests. L'état de préparation ne masque plus un échec d'activation enregistré.
+- **Audit :** filtres administrateur par PRA, agents/déploiements, jobs, sécurité et système, avec recherche textuelle ; catégories filtrées côté serveur avant limitation de la liste.
+- **Versions :** manager `0.3.33-rc1`, agents Linux/Windows intégrés `0.3.33`. Les versions effectivement rapportées par les agents restent affichées séparément ; aucune rétrogradation automatique d'un agent plus récent.
+- **Sécurité :** aucune bascule réelle et aucun failback activé ; seuls les tests de recette `LAB-ONLY` sont autorisés.
+
+
 ## 0.3.31-rc1 — 20 novembre 2026 (PRA QMP/LVM piloté, RECETTE uniquement)
 
 - **Enrôlement PRA** : choix d'une VM source en marche, VMID cible libre proposé, création automatique d'une VM `REP_` arrêtée, sans réseau ni disque, avec marqueurs d'appartenance.
