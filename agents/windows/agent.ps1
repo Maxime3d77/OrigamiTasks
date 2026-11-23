@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ConfigFile = Join-Path $PSScriptRoot 'config.json'
-$Version = '0.3.35'
+$Version = '0.3.36'
 $ModulesFile = Join-Path $PSScriptRoot 'modules.json'
 
 function Read-AgentConfig {
