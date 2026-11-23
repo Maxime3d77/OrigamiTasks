@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## 0.3.34-rc1 — 23 novembre 2026 : diagnostic PRA Proxmox sans écriture
+
+- Corrige le manque de précision de `Host operation rejected:` lors de la préparation de `REP_`. Les étapes identifiées sont `STORAGE_CONFIG`, `STORAGE_CAPACITY`, `CLUSTER_INVENTORY`, `VM_CREATE` et `POST_CREATE_INVENTORY`. La console n'affiche pas les arguments libres ou sorties distantes sensibles.
+- **Bouton « Diagnostiquer Proxmox (lecture seule) »** : utilisable même en état `uncertain`. Vérifie configuration et capacité LVM, disponibilité de l'inventaire et occupation du VMID sans créer ni supprimer de VM/LV.
+- Le manager et les agents Linux/Windows intégrés passent à **0.3.34** (manager `0.3.34-rc1`), pour permettre de redéployer depuis l'interface le nouveau helper PRA sur les nœuds déjà en `0.3.33`.
+- La création de secours `uncertain` reste bloquée ; la reprise n'est pas automatique et nécessite confirmation d'absence du VMID et de transferts.
+
+
 ## Correctif urgent du 23 novembre 2026 — agents 0.3.32 → 0.3.33 et PRA #183
 
 - Les échecs de mises à jour des agents étaient tous affichés avec le même message générique. Les mises à jour affichent désormais l'étape SSH atteinte (vérification, sauvegarde, installation, redémarrage, état systemd) ou une catégorie de défaillance SFTP/SSH, sans exposer la sortie distante sensible.
