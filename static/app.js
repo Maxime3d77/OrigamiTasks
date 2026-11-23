@@ -765,7 +765,7 @@ async function openPRALvmLabPanel(vmId){
  const vm=(state.drProtectedVMs||[]).find(x=>x.id===Number(vmId));
  if(!vm)return toast('Protection VM introuvable',false);
  const history=(await api('/dr/vms/'+vmId+'/lvm-lab/runs')).items||[];
- let activations=[],scheduleEvents=[],bootTests=[],publications=[],stepHistory=[];
+ let activations=[],scheduleEvents=[],bootTests=[],publications=[],stepHistory=[],guestEvidence=[];
  try{publications=(await api('/dr/vms/'+vmId+'/lvm-lab/publications')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
  try{activations=(await api('/dr/vms/'+vmId+'/lvm-lab/activations')).items||[]}
@@ -775,6 +775,8 @@ async function openPRALvmLabPanel(vmId){
  try{scheduleEvents=(await api('/dr/vms/'+vmId+'/lvm-lab/schedule-events')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
  try{bootTests=(await api('/dr/vms/'+vmId+'/lvm-lab/boot-tests')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{guestEvidence=(await api('/dr/vms/'+vmId+'/lvm-lab/guest-evidence')).items||[]}
  catch(ex){ /* The history remains accessible for older controllers. */ }
  let pre=null,preError='';
  try{pre=await api('/dr/vms/'+vmId+'/lvm-lab/preflight')}
@@ -866,6 +868,26 @@ async function openPRALvmLabPanel(vmId){
    +'<div class="table-wrap"><table><thead><tr><th>Test</th><th>Clone</th><th>État</th><th>Journal</th></tr></thead><tbody>'
    +(bootTests.map(x=>'<tr><td>#'+e(x.id)+'</td><td>VMID '+e(x.test_vmid)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.details)+'</td></tr>').join('')
      ||'<tr><td colspan="4">Aucun test de démarrage QEMU</td></tr>')+'</tbody></table></div>'
+   +'<h3>Validation de connexion au système restauré (observation humaine)</h3>'
+   +'<p class="hint">Si tu as réellement ouvert une session sur la console d’un clone isolé, enregistre ce contrôle. '
+   +'Il n’atteste pas les services applicatifs, le démarrage réseau, le fencing ou une bascule réelle. '
+   +'La preuve est rattachée au checkpoint exact du clone, et non aux copies ultérieures.</p>'
+   +'<label class="field"><span>Clone restauré</span><select id="praGuestEvidenceRestore">'
+   +option(history.filter(x=>x.mode==='restore'&&x.status==='completed').map(x=>[x.id,
+       'Clone #'+x.test_vmid+' · restauration #'+x.id+' · '+String(x.checkpoint_token||'').slice(0,12)]),
+       restoredClone?.id||'')+'</select></label>'
+   +'<label class="field"><span>Compte et vérification effectuée (sans mot de passe)</span>'
+   +'<input id="praGuestEvidenceNote" maxlength="400" placeholder="Ex. Console Proxmox : connexion root, shell opérationnel"></label>'
+   +'<label class="field"><span>Confirmer exactement OS-LOGIN-VERIFIED</span>'
+   +'<input id="praGuestEvidenceConfirm" autocomplete="off" placeholder="OS-LOGIN-VERIFIED"></label>'
+   +'<div class="tool-row"><button class="btn" data-action="dr-vm-lvm-record-os-login" data-id="'+vmId+'" '
+   +(history.some(x=>x.mode==='restore'&&x.status==='completed')?'':'disabled')
+   +'>Enregistrer le démarrage OS vérifié</button></div>'
+   +'<div class="table-wrap"><table><thead><tr><th>Date</th><th>Clone</th><th>Contrôle</th><th>Opérateur</th></tr></thead><tbody>'
+   +(guestEvidence.map(x=>'<tr><td>'+e(dt(x.created_at))+'</td><td>VMID '+e(x.test_vmid)
+       +'</td><td>'+e(x.note)+'</td><td>'+e(x.actor)+'</td></tr>').join('')
+     ||'<tr><td colspan="4">Aucune connexion OS observée et enregistrée</td></tr>')
+   +'</tbody></table></div>'
    +'<h3>Publication de la réplique REP_</h3>'
    +'<p class="hint">Les volumes vérifiés sont attachés à la configuration Proxmox de REP_ arrêtée. '
    +'Ce contrôle ne certifie pas le démarrage de la VM ni une bascule réelle.</p>'
@@ -2179,6 +2201,23 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
     state.drProtectedVMs=(await api('/dr/vms')).items;
     await openPRALvmLabPanel(id);
    }catch(ex){toast('Réconciliation refusée : '+ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-record-os-login'){
+   const restoreId=Number(document.getElementById('praGuestEvidenceRestore')?.value);
+   const confirmation=document.getElementById('praGuestEvidenceConfirm')?.value?.trim();
+   const note=document.getElementById('praGuestEvidenceNote')?.value?.trim()||'';
+   if(!Number.isInteger(restoreId)||restoreId<=0)return toast('Choisir un clone restauré',false);
+   if(confirmation!=='OS-LOGIN-VERIFIED')return toast('Confirmer exactement OS-LOGIN-VERIFIED',false);
+   if(note.length<8||note.length>400)return toast('Décrire le contrôle OS en 8 à 400 caractères',false);
+   if(!confirm('Confirmer avoir réellement ouvert une session dans le système invité de ce clone ? '
+       +'Cela ne valide pas les applications ni une bascule réelle.'))return;
+   try{
+     await api('/dr/vms/'+id+'/lvm-lab/guest-evidence','POST',
+       {restore_run_id:restoreId,confirmation,note});
+     toast('Observation de connexion OS enregistrée pour ce checkpoint');
+     await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
    return;
   }
   if(a==='dr-vm-lvm-lab-diagnose-generation'){
