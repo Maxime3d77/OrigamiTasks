@@ -836,6 +836,7 @@ async function openPRALvmLabPanel(vmId){
    +(canResumeOwned?'<button class="btn primary" data-action="dr-vm-lvm-lab-resume-owned" data-id="'+vmId+'">Vérifier REP_ existante et reprendre la copie FULL</button>':'')
    +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose-generation" data-id="'+vmId+'">Inspecter la génération LVM (lecture seule)</button>'
    +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose-source" data-id="'+vmId+'">Diagnostiquer QMP source (lecture seule)</button>'
+   +'<button class="btn" data-action="dr-vm-lvm-network-preview" data-id="'+vmId+'">Prévisualiser le réseau de secours</button>'
    +(canResumeSource?'<button class="btn primary" data-action="dr-vm-lvm-lab-resume-source" data-id="'+vmId+'">Vérifier la source et reprendre la copie FULL</button>':'')
    +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose" data-id="'+vmId+'">Diagnostiquer Proxmox (lecture seule)</button>'
    +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
@@ -2201,6 +2202,26 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
     state.drProtectedVMs=(await api('/dr/vms')).items;
     await openPRALvmLabPanel(id);
    }catch(ex){toast('Réconciliation refusée : '+ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-network-preview'){
+   try{
+     const r=await api('/dr/vms/'+id+'/lvm-lab/network-preview');
+     modal('Prévol réseau PRA — lecture seule',
+       '<div class="notice error"><b>Réseau de secours non validé. Aucun changement Proxmox.</b> '
+       +e(r.warning)+'</div>'
+       +'<p>Bridges du nœud secours : '+e((r.destination_bridges||[]).join(', ')||'aucun')+'</p>'
+       +'<div class="table-wrap"><table><thead><tr><th>Carte</th><th>Modèle</th><th>Bridge source</th><th>VLAN source</th><th>Suggestion secours</th><th>État</th></tr></thead><tbody>'
+       +((r.nics||[]).map(n=>'<tr><td>'+e(n.slot)+'</td><td>'+e(n.model)+'</td>'
+          +'<td>'+e(n.source_bridge)+'</td><td>'+e(n.source_vlan??'non tagué')+'</td>'
+          +'<td>'+e(n.suggested_target_bridge||'aucun')+'</td><td>'
+          +(n.bridge_exists?'Bridge existant, VLAN non vérifié':'Bridge absent')+'</td></tr>').join('')
+          ||'<tr><td colspan="6">Aucune interface réseau déclarée sur la source</td></tr>')
+       +'</tbody></table></div><p class="hint">Cette prévisualisation ne prouve pas la connectivité, '
+       +'la compatibilité VLAN, l’absence de doublon IP/MAC ni le fencing. '
+       +'Le clone reste sans interface et aucune bascule n’est possible.</p>',
+       '<button class="btn" data-action="modal-close">Fermer</button>',true);
+   }catch(ex){toast(ex.message,false)}
    return;
   }
   if(a==='dr-vm-lvm-record-os-login'){
