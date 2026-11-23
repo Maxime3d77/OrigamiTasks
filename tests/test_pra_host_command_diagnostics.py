@@ -78,3 +78,13 @@ def test_ui_exposes_readonly_diagnostic():
     ui=(Path(__file__).resolve().parents[1]/"static/app.js").read_text()
     assert "Diagnostiquer Proxmox (lecture seule)" in ui
     assert "lvm-lab/diagnose-standby" in ui
+
+
+def test_proxmox_logical_replica_name_is_dns_compatible():
+    assert host.pve_guest_name("REP_vl-bbiokou") == "REP-vl-bbiokou"
+    assert host.pve_guest_name("REP_vm_foo") == "REP-vm-foo"
+    assert host.pve_guest_name("PRA_TEST_4301") == "PRA-TEST-4301"
+    with pytest.raises(host.HostError):
+        host.pve_guest_name("REP_invalid name")
+    with pytest.raises(host.HostError):
+        host.pve_guest_name("REP_--")
