@@ -792,7 +792,8 @@ async function openPRALvmLabPanel(vmId){
  const canTestBoot=restoreReady&&Boolean(restoredClone)&&!bootTestActive;
  const targetLabel=pre?'Source VM #'+e(pre.source_vmid)+' ON → cible VM #'+e(pre.target_vmid)
    +' OFF · '+e(pre.destination_storage):'Connexion des nœuds non validée';
- const canPrepare=vm.engine==='qmp_live_incremental' && !running;
+ const canPrepare=vm.engine==='qmp_live_incremental' && !running
+   && !activations.some(x=>['queued','running','uncertain'].includes(x.status));
  const canActivate=vm.engine==='qmp_live_incremental'&&vm.state==='planned'
    &&activations.length===0&&!running;
  const canRetryProvision=Boolean(activations[0]?.status==='uncertain'
@@ -823,8 +824,8 @@ async function openPRALvmLabPanel(vmId){
    +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
    +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
    +'<p class="hint">OrigamiTasks vérifie le VMID sur le cluster cible, prépare une VM REP_ arrêtée, sans réseau ni disque, et applique les marqueurs de protection. Aucune commande manuelle.</p>'
-   +(!pre&&canRetryAuthorizationBug?'<p class="hint">Prévol de copie indisponible car la VM REP_ n’a pas encore été créée. '
-     +'Utiliser « Relancer après correction du refus local » : cette action prépare REP_ avant de refaire le prévol.</p>':'')
+   +(!pre&&(canRetryAuthorizationBug||canRetryProvision)?'<p class="hint">Le prévol de copie requiert REP_ créée. '
+     +'Ne pas lancer une copie FULL manuellement : vérifier d’abord l’état de la création de secours via la reprise contrôlée.</p>':'')
    +(pre?'<p class="hint">Disques : '+e((pre.disk_slots||[]).join(', '))
       +' · Espace libre : '+e(Math.round(pre.available_bytes/1073741824))+' Gio'
       +' · Dernier checkpoint : '+e(pre.checkpoint||'aucun')+'</p>'
