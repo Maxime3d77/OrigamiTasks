@@ -167,6 +167,38 @@ def source_probe(data):
                        if k in configured}}
 
 
+def source_diagnose(data):
+    """Read-only source VM and QMP probe, with bounded, safe error categories.
+
+    Unlike executing a backup, this only checks qm configuration, socket,
+    query-block, node names, dirty bitmaps, and QEMU process identity.
+    """
+    try:
+        result=source_probe(data)
+    except (HostError, ReplicationError, ValueError, OSError) as exc:
+        detail=str(exc)
+        known=(
+            ("The request does not cover every source disk","DISK_INVENTORY","Configuration disques incompatible avec la sélection"),
+            ("OVMF/TPM/unused disk/PCI passthrough","HARDWARE","Profil matériel EFI/TPM/PCI non qualifié"),
+            ("Optical drives cannot","DISK_INVENTORY","Lecteur optique sélectionné"),
+            ("Source VM not running","POWER","VM source arrêtée"),
+            ("VM QMP socket unavailable","QMP_SOCKET","Socket QMP indisponible"),
+            ("QMP disk unavailable","QMP_BLOCKS","Disque source non visible via query-block"),
+            ("Invalid disk virtual size","QMP_BLOCKS","Taille de disque invalide"),
+            ("Source VM PID unavailable","QEMU_PROCESS","PID QEMU introuvable"),
+            ("Source QEMU process identity unavailable","QEMU_PROCESS","Identité du processus QEMU indisponible"),
+            ("Host operation rejected: qm","QM_COMMAND","Commande qm refusée sur le nœud source"),
+            ("Required host command unavailable","HOST_TOOL","Commande système Proxmox introuvable"),
+            ("Permission denied","QMP_SOCKET","Permission refusée sur le socket QMP"),
+        )
+        stage,message=next(((stage,msg) for prefix,stage,msg in known
+                            if detail.startswith(prefix)),("QMP_QUERY","Requête QMP refusée ou incompatible"))
+        return {"ready":False,"stage":stage,"message":message,"vmid":data.get("vmid")}
+    return {"ready":True,"stage":"SOURCE_VERIFIED","message":"Source QMP vérifiée en lecture seule",
+            "vmid":data["vmid"],"slots":result.get("slots",[]),
+            "active_jobs":len(result.get("active_jobs",[]))}
+
+
 def _dir_path(storage, target_vmid):
     """Resolve only an enabled Proxmox DIR storage through its supported API.
 
@@ -1129,7 +1161,7 @@ def lvm_lab_abort(data):
     return store.abort(token)
 
 
-ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
+ACTIONS = {"source_diagnose": source_diagnose, "source_probe": source_probe, "source_copy": source_copy,
            "source_dismiss": source_dismiss,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
