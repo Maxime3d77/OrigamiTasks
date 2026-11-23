@@ -734,6 +734,22 @@ def get_vm_storage_readiness(vm_id:int,request:Request):
         raise HTTPException(503,'Découverte du stockage : API Proxmox indisponible ou non autorisée') from None
 
 
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/reconcile-empty-generation')
+def reconcile_lvm_lab_empty_generation(vm_id:int, request:Request, payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if (not isinstance(payload,dict)
+            or set(payload)!={'confirmation','token'}):
+        raise HTTPException(422,'Jeton et confirmation LAB-ONLY requis')
+    try:
+        return pra_lvm_activation.reconcile_empty_allocation(
+            vm_id,user['username'],payload['confirmation'],payload['token'])
+    except (ValueError,dr_protected_vms.ProtectedVMError,
+            pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Réconciliation LVM non confirmée ; aucune relance automatique') from None
+
+
 @app.get('/api/dr/vms/{vm_id}/lvm-lab/diagnose-generation')
 def diagnose_pending_lvm_generation(vm_id:int,request:Request):
     security.require(request,role='admin')
