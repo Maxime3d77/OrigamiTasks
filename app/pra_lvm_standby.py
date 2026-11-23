@@ -164,3 +164,19 @@ def diagnose_generation(vm_id):
             or type(report.get("requires_reconciliation")) is not bool):
         raise ValueError("Journal LVM distant non confirmé")
     return report
+
+
+def archive_empty_allocation(vm_id, token):
+    """Archive an independently verified empty failed allocation; no LV deleted."""
+    vm=dr_protected_vms._one(vm_id)
+    pra_live._scope(vm)
+    ssh=pra_live._connect(
+        pra_live._remote_ssh_binding(vm["target_site_id"],vm["target_node"]))
+    try:
+        return pra_live._run_helper(ssh,"lvm_lab_archive_empty_uncertain",{
+            "vmid":vm["target_vmid"],"protected_vm_id":vm["id"],
+            "storage":vm["target_storage"],"name":vm["replica_name"],
+            "token":token,"lab_ack":LAB_ACK,
+        },timeout=90)
+    finally:
+        ssh.close()
