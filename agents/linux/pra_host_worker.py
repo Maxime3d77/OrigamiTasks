@@ -926,10 +926,52 @@ def lvm_lab_diagnose_generation(data):
                            if isinstance(d,dict) and isinstance(d.get("volid"),str)]}
     pid_files=sorted(p.name for p in store.root.iterdir()
                      if p.name.startswith(".origami-") and p.name.endswith(".pid"))
+    # Inspect the deterministic allocation name, including cases where
+    # pvesm alloc succeeded but the success journal write never happened.
+    # A negative inventory is NOT sufficient proof to delete the journal.
+    expected=[]
+    checked_inventory=False
+    inventory_error=None
+    if isinstance(pending,dict):
+        token=pending.get("token")
+        slots=pending.get("planned")
+        if (isinstance(token,str) and re.fullmatch(r"[0-9a-f]{32}",token)
+                and isinstance(slots,list) and 1<=len(slots)<=32
+                and all(isinstance(s,str) and _NODE.fullmatch(s) for s in slots)
+                and len(set(slots))==len(slots)):
+            first=int(token[:12],16)
+            for index,slot in enumerate(slots):
+                expected.append({"slot":slot,
+                    "name":"vm-"+str(store.target.vmid)+"-disk-"
+                           +str(first+index)+".qcow2","present":None})
+            try:
+                conf=store.target.inspect()
+                raw=cmd("lvs","--reportformat","json","-o","vg_name,lv_name",
+                        timeout=30)
+                info=json.loads(raw)
+                rows=[lv for report in info.get("report",[]) if isinstance(report,dict)
+                      for lv in report.get("lv",[]) if isinstance(lv,dict)]
+                names={lv.get("lv_name") for lv in rows
+                       if lv.get("vg_name")==conf["vgname"]
+                       and isinstance(lv.get("lv_name"),str)}
+                for candidate in expected:
+                    candidate["present"]=candidate["name"] in names
+                checked_inventory=True
+            except (HostError,LvmTargetError,ValueError,KeyError,TypeError):
+                inventory_error="Inventaire LVM non confirmé"
+        else:
+            inventory_error="Identifiants de génération invalides"
+    pending_result=describe(pending)
+    if pending_result and isinstance(pending.get("failure_category"),str):
+        category=pending["failure_category"]
+        if re.fullmatch(r"PVE_LVM_ALLOC_[A-Z_]{1,50}",category):
+            pending_result["failure_category"]=category
     return {"state":"pending" if pending else ("committed" if current else "empty"),
-            "pending":describe(pending),"current":describe(current),
+            "pending":pending_result,"current":describe(current),
             "generation_count":len(owned["generations"]),
-            "pid_files":pid_files[:32],"requires_reconciliation":bool(pending or pid_files)}
+            "pid_files":pid_files[:32],"requires_reconciliation":bool(pending or pid_files),
+            "predicted_allocations":expected,"inventory_checked":checked_inventory,
+            "inventory_error":inventory_error}
 
 
 def lvm_lab_begin(data):
