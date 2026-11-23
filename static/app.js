@@ -2177,6 +2177,15 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
          :'Aucune génération en attente déclarée par le journal local.')
       +'</b> · État : '+e(r.state)+' · Générations historiques : '+e(r.generation_count)+'</div>'
       +record(r.pending,'Génération en attente')
+      +(r.pending?.failure_category?'<p><b>Code dernier échec : </b>'+e(r.pending.failure_category)+'</p>':'')
+      +'<div class="panel"><h3>Contrôle du VG réel (lecture seule)</h3>'
+      +(r.inventory_checked?'<p>Inventaire LV consulté ; absence constatée ≠ preuve de non-création en cas d’opération incertaine.</p>'
+          :'<p>Inventaire LVM non confirmé : '+e(r.inventory_error||'journal sans prévision de volumes')+'</p>')
+      +'<div class="table-wrap"><table><thead><tr><th>Disque</th><th>Nom LV attendu</th><th>Présence dans le VG</th></tr></thead><tbody>'
+      +((r.predicted_allocations||[]).map(x=>'<tr><td>'+e(x.slot)+'</td><td>'+e(x.name)+'</td><td>'
+          +e(x.present===true?'Présent':x.present===false?'Non trouvé':'Non vérifié')+'</td></tr>').join('')
+         ||'<tr><td colspan="3">Aucun volume attendu identifié</td></tr>')
+      +'</tbody></table></div></div>'
       +record(r.current,'Dernière génération publiée')
       +'<p>Fichiers PID NBD : '+e((r.pid_files||[]).join(', ')||'aucun')+'</p>'
       +'<p class="hint">Lecture seule : ces informations ne prouvent pas à elles seules que les LV ou processus NBD sont inactifs.</p>',
