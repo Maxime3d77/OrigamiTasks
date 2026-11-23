@@ -879,6 +879,43 @@ def lvm_lab_probe(data):
     }
 
 
+def lvm_lab_diagnose_generation(data):
+    """Inspect owned local LVM journal without mutating VMs, LVs or files.
+
+    A pending allocation may have created thick volumes even if qm hardware
+    has no disks. This intentionally neither acknowledges nor clears it.
+    """
+    store=_lvm_lab_store(data)
+    if store.root.is_symlink():
+        raise HostError("Unsafe journal path")
+    if not store.root.exists():
+        return {"state":"empty","pending":None,"current":None,
+                "generation_count":0,"pid_files":[],"requires_reconciliation":False}
+    pending=store._read(store.pending)
+    current=store._read(store.current_file)
+    owned=store._read(store.owned) or {"generations":[]}
+    if not isinstance(owned.get("generations"),list):
+        raise HostError("Invalid LVM generation ledger")
+    def describe(record):
+        if not isinstance(record,dict):
+            return None
+        disks=record.get("disks") or record.get("allocated") or {}
+        if not isinstance(disks,dict):
+            raise HostError("Invalid LVM checkpoint disk ledger")
+        return {"status":str(record.get("status","unknown"))[:32],
+                "token":str(record.get("token",""))[:40],
+                "mode":str(record.get("mode",""))[:20],
+                "slots":sorted(str(s) for s in disks if _NODE.fullmatch(str(s))),
+                "volumes":[str(d.get("volid",""))[:150] for d in disks.values()
+                           if isinstance(d,dict) and isinstance(d.get("volid"),str)]}
+    pid_files=sorted(p.name for p in store.root.iterdir()
+                     if p.name.startswith(".origami-") and p.name.endswith(".pid"))
+    return {"state":"pending" if pending else ("committed" if current else "empty"),
+            "pending":describe(pending),"current":describe(current),
+            "generation_count":len(owned["generations"]),
+            "pid_files":pid_files[:32],"requires_reconciliation":bool(pending or pid_files)}
+
+
 def lvm_lab_begin(data):
     store = _lvm_lab_store(data)
     sizes = data.get("sizes")
@@ -1196,6 +1233,7 @@ ACTIONS = {"source_diagnose": source_diagnose, "source_probe": source_probe, "so
            "lvm_lab_validate_standby": lvm_lab_validate_standby,
            "lvm_lab_diagnose_standby": lvm_lab_diagnose_standby,
            "lvm_lab_prepare_standby": lvm_lab_prepare_standby,
+           "lvm_lab_diagnose_generation": lvm_lab_diagnose_generation,
            "lvm_lab_probe": lvm_lab_probe,
            "lvm_lab_begin": lvm_lab_begin,
            "lvm_lab_finish": lvm_lab_finish,
