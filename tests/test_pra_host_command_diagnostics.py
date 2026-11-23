@@ -185,3 +185,25 @@ def test_source_qmp_ui_and_helper_are_explicitly_wired():
     ui=(root/"static/app.js").read_text()
     assert "Diagnostiquer QMP source (lecture seule)" in ui
     assert "/lvm-lab/resume-source" in ui
+
+
+def test_pve9_blockdev_qdev_slot_mapping_with_empty_device():
+    rows=[{"device":"","qdev":"scsi0","inserted":{
+        "node-name":"drive-scsi0","image":{"virtual-size":1048576}}},
+          {"device":"","qdev":"ide2","tray_open":True}]
+    assert host._qmp_block_for_slot(rows,"scsi0")["node-name"]=="drive-scsi0"
+
+
+def test_legacy_pve_drive_device_mapping():
+    rows=[{"device":"drive-virtio0","inserted":{
+        "node-name":"drive-virtio0","image":{"virtual-size":1048576}}}]
+    assert host._qmp_block_for_slot(rows,"virtio0")["node-name"]=="drive-virtio0"
+
+
+def test_qmp_slot_mapping_fails_closed_on_ambiguous_or_missing_rows():
+    row={"device":"drive-scsi0","qdev":"scsi0","inserted":{
+        "node-name":"drive-scsi0","image":{"virtual-size":1048576}}}
+    with pytest.raises(host.HostError,match="ambiguous"):
+        host._qmp_block_for_slot([row,row],"scsi0")
+    with pytest.raises(host.HostError,match="unavailable"):
+        host._qmp_block_for_slot([{"device":"","qdev":"ide2"}],"scsi0")
