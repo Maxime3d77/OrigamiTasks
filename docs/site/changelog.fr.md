@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.39-rc1 — 23 novembre 2026 : journal des générations LVM de recette
+
+- La VM de secours `REP-vl-bbiokou` est bien créée sur `sd-bearnaise` et la source QMP est vérifiée (`scsi0`). Après l'amorçage, `lvm_lab_begin` a échoué et laissé une génération LVM non résolue. **Ne pas lancer une nouvelle FULL ou purger les LV à l'aveugle.**
+- Nouveau bouton **« Inspecter la génération LVM (lecture seule) »** dans le panneau Réplication LVM : affiche l'état du journal de préparation (`pending.json`), le dernier checkpoint (`current.json`), le nombre de générations enregistrées (`owned.json`), les volumes déclarés et les fichiers PID d'exports NBD.
+- Le diagnostic ne démarre/arrête aucune VM, n'appelle pas `qm create`, `pvesm alloc/free`, ni `qemu-img`. Un état `pending` impose toujours une réconciliation humaine avant toute nouvelle écriture. La présence ou l'absence d'un fichier PID n'atteste pas à elle seule l'état réel du processus.
+- Manager `0.3.39-rc1`, agents intégrés `0.3.39` : mise à jour du helper de `sd-bearnaise` depuis l'interface Agents.
+- **Pas de purge ou de reprise automatique** tant que la propriété et l'état réel de chaque volume ne sont pas prouvés ; la bascule réelle et le failback restent désactivés.
+
+
 ## 0.3.38-rc1 — 23 novembre 2026 : résolution QMP des disques Proxmox VE 9
 
 - Le diagnostic source `QMP_BLOCKS` était provoqué par une recherche limitée au champ `device="drive-scsi0"`. Sur les versions récentes de Proxmox utilisant QEMU `-blockdev`, `query-block` peut exposer `device=""` et `qdev="scsi0"`.
