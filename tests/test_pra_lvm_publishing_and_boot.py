@@ -39,7 +39,7 @@ def setup(monkeypatch):
     monkeypatch.setattr(host,"_lvm_lab_store",lambda data:store)
     monkeypatch.setattr(host,"lvm_lab_verify",lambda _:{"verified_offline":True})
     monkeypatch.setattr(host,"_is_target_stopped",lambda ident:True)
-    config={"name":"REP_lab","onboot":"0","description":"ORIGAMITASKS_PRA_17 ORIGAMITASKS_LAB_ONLY"}
+    config={"name":"REP-lab","onboot":"0","description":"ORIGAMITASKS_PRA_17 ORIGAMITASKS_LAB_ONLY"}
     monkeypatch.setattr(host,"_vm_config",lambda _:config)
     calls=[]
     def cmd(*argv,timeout=25):
