@@ -358,3 +358,34 @@ def test_empty_pending_reconciliation_refuses_if_expected_lv_exists(monkeypatch,
             "name":"REP_vl-bbiokou","token":token,
             "lab_ack":"DISPOSABLE-LAB-ONLY"})
     assert pending.exists()
+
+
+def test_source_nic_inventory_does_not_send_qm_set(monkeypatch):
+    monkeypatch.setattr(host,"_vm_config",lambda _:{
+        "net0":"virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,tag=230,firewall=1",
+        "net1":"e1000=AA:BB:CC:DD:EE:00,bridge=vmbr1"})
+    monkeypatch.setattr(host,"cmd",lambda *args,**kwargs:(_ for _ in ()).throw(
+        AssertionError("Source network inspection must not execute commands")))
+    report=host.source_network_inventory({"vmid":183})
+    assert report["applied"] is False
+    assert report["nics"][0]["source_vlan"]==230
+    assert report["nics"][0]["source_bridge"]=="vmbr0"
+    assert report["nics"][1]["source_vlan"] is None
+    assert "AA:BB:CC" not in str(report)
+
+
+def test_destination_network_inventory_readonly(monkeypatch):
+    monkeypatch.setattr(host.socket,"gethostname",lambda:"sd-bearnaise")
+    calls=[]
+    def readonly(*args,**kwargs):
+        calls.append(args)
+        return json.dumps([
+            {"type":"bridge","iface":"vmbr0"},
+            {"type":"eth","iface":"enp1s0"},
+            {"type":"OVSBridge","iface":"vmbr1"}])
+    monkeypatch.setattr(host,"cmd",readonly)
+    report=host.destination_network_inventory({})
+    assert report["bridges"]==["vmbr0","vmbr1"]
+    assert report["applied"] is False
+    assert len(calls)==1
+    assert calls[0][:2]==("pvesh","get")
