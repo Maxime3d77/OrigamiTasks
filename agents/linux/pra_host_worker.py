@@ -108,6 +108,31 @@ def _source_generation(vmid_):
     return "vm-" + str(vmid_) + "-" + str(pid) + "-" + str(ticks)
 
 
+def _qmp_block_for_slot(rows, slot):
+    """Resolve one PVE disk through qdev (blockdev) or legacy device id.
+
+    PVE 9's -blockdev mode may return device='' with qdev='scsi0'.
+    Fail closed on conflicting mappings or multiple matches. Never match by
+    disk position or loosely by backing file name.
+    """
+    if not isinstance(rows, list) or not _NODE.fullmatch(slot):
+        raise HostError("Invalid QMP block query")
+    matched=[]
+    for row in rows:
+        if not isinstance(row,dict):
+            continue
+        qdev=row.get("qdev")
+        device=row.get("device")
+        if qdev == slot or device == "drive-" + slot or device == slot:
+            matched.append(row)
+    if len(matched)!=1:
+        raise HostError("QMP disk unavailable or ambiguous: " + slot)
+    inserted=matched[0].get("inserted")
+    if not isinstance(inserted,dict):
+        raise HostError("QMP disk unavailable: " + slot)
+    return inserted
+
+
 def source_probe(data):
     ident = vmid(data["vmid"])
     configured = _vm_config(ident)
@@ -130,22 +155,22 @@ def source_probe(data):
         raise HostError("Source VM not running")
     with QMP(_qmp_path(ident)) as qmp:
         block = qmp.execute("query-block")
-        entries = {row.get("device"): row for row in block if isinstance(row, dict)}
         sizes = {}
         bitmaps = {}
         nodes = {}
         for slot in slots:
-            node = "drive-" + slot
-            row = entries.get(node)
-            inserted = row.get("inserted") if row else None
-            if not isinstance(inserted, dict):
-                raise HostError("QMP disk unavailable: " + slot)
-            size = inserted.get("image", {}).get("virtual-size")
+            inserted = _qmp_block_for_slot(block, slot)
+            image = inserted.get("image")
+            size = image.get("virtual-size") if isinstance(image,dict) else None
             if type(size) is not int or size < 1024:
                 raise HostError("Invalid disk virtual size")
             sizes[slot] = size
-            # Device aliases may differ from graph node names in PVE builds.
-            nodes[slot] = inserted.get("node-name") or node
+            # A QMP blockdev source needs the real inserted graph node.
+            # Legacy PVE returns the same node; never invent a fallback.
+            resolved = inserted.get("node-name")
+            if not isinstance(resolved,str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,101}",resolved):
+                raise HostError("QMP block node unavailable: " + slot)
+            nodes[slot] = resolved
         named = qmp.execute("query-named-block-nodes")
         active_jobs = [{"id": str(item.get("id") or ""),
                         "status": str(item.get("status") or "")}
@@ -183,6 +208,8 @@ def source_diagnose(data):
             ("Optical drives cannot","DISK_INVENTORY","Lecteur optique sélectionné"),
             ("Source VM not running","POWER","VM source arrêtée"),
             ("VM QMP socket unavailable","QMP_SOCKET","Socket QMP indisponible"),
+            ("QMP disk unavailable or ambiguous","QMP_BLOCKS","Association QMP disque ambiguë ou introuvable"),
+            ("QMP block node unavailable","QMP_BLOCKS","Nœud de disque QMP non identifié"),
             ("QMP disk unavailable","QMP_BLOCKS","Disque source non visible via query-block"),
             ("Invalid disk virtual size","QMP_BLOCKS","Taille de disque invalide"),
             ("Source VM PID unavailable","QEMU_PROCESS","PID QEMU introuvable"),
