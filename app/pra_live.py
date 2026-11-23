@@ -139,9 +139,35 @@ def _run_helper(ssh, action, data, timeout=60):
     output = stdout.read(262144).decode(errors="replace")
     code = channel.recv_exit_status()
     if code:
-        # Error details from a remote host are deliberately sanitized.
-        raise LiveReplicationError("Échec commande agent PRA: " + action +
-                                   " (vérifier root helper, qemu-nbd et logs locaux)")
+        # Parse the structured error *only* to classify known, non-secret
+        # host failures. Arbitrary remote stdout/stderr never enters the UI.
+        known = (
+            "Required host command unavailable",
+            "Host operation rejected: ",
+            "Invalid source identity or descriptive metadata",
+            "Invalid standby VM name",
+            "Experimental LVM replication requires LAB-only approval",
+            "Target VMID already used by another resource or node",
+            "Existing VM is not owned by this lab protection",
+            "LAB standby must have zero network interfaces",
+            "LAB standby VM onboot must be disabled",
+            "Invalid lab protection identifier",
+            "Invalid protection identity",
+            "Standby autoboot is forbidden",
+            "Standby network must be empty",
+        )
+        reason = ""
+        try:
+            document = json.loads(output.strip().splitlines()[-1])
+            reported = document.get("error", "") if isinstance(document, dict) else ""
+            if isinstance(reported, str):
+                reason = next((k for k in known if reported.startswith(k)), "")
+        except (ValueError, IndexError, TypeError):
+            pass
+        raise LiveReplicationError(
+            "Échec commande agent PRA : "+action
+            +(" — "+reason if reason else " — refus ou exception côté Proxmox")
+            +" (vérifier les journaux locaux du nœud)")
     try:
         response = json.loads(output.strip().splitlines()[-1])
     except (ValueError, IndexError):
