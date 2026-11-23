@@ -1,5 +1,15 @@
 # Historique des modifications
 
+## 0.3.36-rc1 — 23 novembre 2026 : reprise du secours REP_ déjà créé
+
+- La création de VM `REP-vl-bbiokou` peut réussir alors que l'inventaire Proxmox remonte encore un statut non confirmé. Le contrôleur ne prend plus ce statut comme preuve d'échec : il fait une nouvelle vérification **directement sur le nœud** des marqueurs `ORIGAMITASKS_PRA_<id>` et `ORIGAMITASKS_LAB_ONLY`, du nom DNS, de la VM arrêtée, sans réseau, et de l'autoboot désactivé.
+- Le diagnostic en lecture seule différencie maintenant **VMID appartenant à cette protection** de **VMID occupé par une autre VM**.
+- Nouvelle action **« Vérifier REP_ existante et reprendre la copie FULL »**, réservée au blocage précis `LabJobError: LAB target VM must exist, be stopped and have exclusive VMID`. Avant reprise : propriété attestée sur l'hôte, source active, aucun run de transfert et aucun checkpoint LVM local en attente ou déjà commité. L'ancien run est conservé en historique ; une nouvelle activation est créée.
+- **Aucune suppression de VM ou de LV, aucun changement automatique de VMID.** Le VMID existant ne doit pas être remplacé si `REP_` est déjà possédée et correctement isolée. Un VMID étranger est strictement refusé.
+- Manager `0.3.36-rc1` et agents embarqués `0.3.36`, afin de déployer le nouveau helper de vérification sans intervention SSH manuelle.
+- Recette uniquement ; publication de disques et tests QEMU n'autorisent toujours pas de bascule réelle.
+
+
 ## 0.3.35-rc1 — 23 novembre 2026 : correction création de REP_ sur Proxmox
 
 - **Cause de `PRA_STEP_VM_CREATE / commande qm refusée` :** le pilote passait `REP_vl-bbiokou` comme nom de machine à `qm create`. Proxmox impose un nom DNS, donc le caractère souligné `_` est rejeté. OrigamiTasks conserve son nom logique `REP_vl-bbiokou` et ses marqueurs de protection, mais utilise désormais `REP-vl-bbiokou` pour le champ `name` Proxmox.
