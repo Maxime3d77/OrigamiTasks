@@ -339,6 +339,8 @@ def initialize():
             ("agent_deploy_batches", "enable_pra", "INTEGER NOT NULL DEFAULT 0"),
             ("pra_live_runs", "point_at", "TEXT"),
             ("pra_live_runs", "verification_level", "TEXT NOT NULL DEFAULT 'unverified'"),
+            ("dr_protected_vms", "protection_note", "TEXT NOT NULL DEFAULT ''"),
+            ("dr_protected_vms", "reference", "TEXT NOT NULL DEFAULT ''"),
         ):
             existing = {row["name"] for row in con.execute("PRAGMA table_info("+table+")")}
             if column not in existing:
