@@ -797,6 +797,10 @@ async function openPRALvmLabPanel(vmId){
    && !activations.some(x=>['queued','running','uncertain'].includes(x.status));
  const canActivate=vm.engine==='qmp_live_incremental'&&vm.state==='planned'
    &&activations.length===0&&!running;
+ const canResumeOwned=Boolean(activations[0]?.status==='uncertain'
+   &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
+   &&String(activations[0]?.details||'').includes('LAB target VM must exist, be stopped and have exclusive VMID')
+   &&history.length===0);
  const canRetryProvision=Boolean(activations[0]?.status==='uncertain'
    &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
    &&/LiveReplicationError\s*:\s*Échec commande agent PRA\s*:\s*lvm_lab_prepare_standby/.test(
@@ -823,6 +827,7 @@ async function openPRALvmLabPanel(vmId){
    +(canActivate?'':'disabled')+'>Activer la protection (REP_ + première copie FULL)</button>'
    +(canRetryAuthorizationBug?'<button class="btn primary" data-action="dr-vm-lvm-lab-retry-allowlist" data-id="'+vmId+'">Relancer après correction du refus local</button>':'')
    +(canRetryProvision?'<button class="btn primary" data-action="dr-vm-lvm-lab-reconcile-provision" data-id="'+vmId+'">Vérifier le VMID cible et reprendre la préparation</button>':'')
+   +(canResumeOwned?'<button class="btn primary" data-action="dr-vm-lvm-lab-resume-owned" data-id="'+vmId+'">Vérifier REP_ existante et reprendre la copie FULL</button>':'')
    +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose" data-id="'+vmId+'">Diagnostiquer Proxmox (lecture seule)</button>'
    +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
    +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
@@ -2160,11 +2165,26 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
     modal('Diagnostic Proxmox en lecture seule — VMID '+e(report.vmid),
       '<div class="notice"><b>Aucune écriture ni création de VM.</b> '
       +(report.ready_for_creation?'Le VMID est libre, mais aucun transfert n’est autorisé par ce diagnostic.'
-        :report.target_exists?'Le VMID existe déjà : vérifier la VM avant toute reprise.'
+        :report.owned_standby?'VM REP_ appartenant à cette protection : arrêtée et isolée. Une reprise contrôlée est possible après vérification des checkpoints.'
+        :report.target_exists?'Le VMID est occupé mais sa propriété n’est pas attestée : aucune suppression ni reprise.'
         :'Un prérequis Proxmox a échoué. Corriger ce contrôle avant la reprise.')+'</div>'
       +'<div class="table-wrap"><table><thead><tr><th>Étape</th><th>État</th><th>Diagnostic</th></tr></thead><tbody>'
       +rows+'</tbody></table></div>',
       '<button class="btn" data-action="modal-close">Fermer</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-resume-owned'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')return toast('Saisir DISPOSABLE-LAB-ONLY',false);
+   if(!confirm('Vérifier directement sur Proxmox que REP_ existe, appartient à cette protection, '
+     +'est arrêtée, sans réseau et sans checkpoint LVM ? Aucun disque ou VM ne sera supprimé. '
+     +'Après validation, la première copie FULL pourra démarrer automatiquement.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/resume-owned','POST',{confirmation});
+    toast('Réplique existante vérifiée, activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
    }catch(ex){toast(ex.message,false)}
    return;
   }
