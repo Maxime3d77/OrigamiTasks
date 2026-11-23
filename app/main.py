@@ -576,6 +576,25 @@ def protected_vm_options(request:Request,plan_id:int,source_dc_id:int,target_dc_
         raise HTTPException(503,'Découverte source ou destination indisponible : vérifier API et TLS') from None
 
 
+@app.get('/api/dr/vms/check-target-vmid')
+def check_target_vmid(plan_id:int,source_dc_id:int,target_dc_id:int,vmid:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        available=dr_protected_vms.options(plan_id,source_dc_id,target_dc_id)
+    except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    occupied=set(available['target_vmids_in_use'])
+    if vmid<100 or vmid>999999999:
+        raise HTTPException(422,'VMID hors plage Proxmox')
+    suggestion=vmid
+    while suggestion in occupied and suggestion<999999999:
+        suggestion+=1
+    if suggestion in occupied:
+        raise HTTPException(409,'Aucun VMID cible libre disponible')
+    return {'requested_vmid':vmid,'free':vmid not in occupied,
+            'suggested_vmid':suggestion,'inventory_checked':True}
+
+
 @app.post('/api/dr/vms')
 def create_protected_vm(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
@@ -1708,11 +1727,31 @@ def list_users(request:Request):
 
 
 @app.get('/api/audit')
-def audit(request:Request):
+def audit(request:Request, category:str='all', search:str=''):
     security.require(request,role='admin')
+    prefixes={
+        'all':(), 'pra':('pra.','dr.'),'agents':('agent.','agents.'),
+        'jobs':('job.','run.','workflow.','execution.'),
+        'security':('auth.','user.','ldap.','vault.'),
+        'system':('update.','git.','system.','config.')
+    }
+    if category not in prefixes or len(search)>120:
+        raise HTTPException(422,'Filtre d’audit invalide')
+    where=[]; args=[]
+    if category!='all':
+        chunks=[]
+        for prefix in prefixes[category]:
+            chunks.append('action LIKE ?')
+            args.append(prefix+'%')
+        where.append('('+(' OR '.join(chunks))+')')
+    if search.strip():
+        where.append('(action LIKE ? OR actor LIKE ? OR target LIKE ? OR detail LIKE ?)')
+        args.extend(['%'+search.strip()+'%']*4)
+    sql='SELECT * FROM audit '+('WHERE '+' AND '.join(where) if where else '')
+    sql+=' ORDER BY id DESC LIMIT 500'
     with db.session() as con:
-        records=con.execute('SELECT * FROM audit ORDER BY id DESC LIMIT 200').fetchall()
-    return {'items':[dict(r) for r in records]}
+        records=con.execute(sql,args).fetchall()
+    return {'items':[dict(r) for r in records],'category':category}
 
 
 @app.get('/api/updates')
