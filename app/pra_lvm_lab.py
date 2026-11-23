@@ -39,9 +39,26 @@ def _runtime(vm):
     candidates = [r for r in target_inventory if r.get("type") in ("qemu", "lxc")
                   and r.get("vmid") == vm["target_vmid"]]
     if (len(candidates) != 1 or candidates[0].get("type") != "qemu"
-            or candidates[0].get("node") != vm["target_node"]
-            or candidates[0].get("status") != "stopped"):
-        raise LabError("LAB target VM must exist, be stopped and have exclusive VMID")
+            or candidates[0].get("node") != vm["target_node"]):
+        raise LabError("LAB target VMID absent, duplicate ou hébergé sur un autre nœud")
+    # /cluster/resources can lag after qm create or report an ambiguous
+    # status. Confirm state and policy ownership on the actual target host,
+    # never rely on inventory status alone.
+    binding=pra_live._remote_ssh_binding(vm["target_site_id"],vm["target_node"])
+    connection=pra_live._connect(binding)
+    try:
+        attestation=pra_live._run_helper(connection,"lvm_lab_validate_standby",{
+            "vmid":vm["target_vmid"],
+            "protected_vm_id":vm["id"],
+            "name":vm["replica_name"]
+        },timeout=90)
+    finally:
+        connection.close()
+    if (attestation.get("vmid")!=vm["target_vmid"]
+            or attestation.get("owned") is not True
+            or attestation.get("target_stopped") is not True
+            or attestation.get("network_isolated") is not True):
+        raise LabError("Secours REP_ non attesté : propriété, arrêt et isolation obligatoires")
     storages = dr_protected_vms._storages(target_dc, target_cred)
     target = next((s for s in storages if s.get("storage")==vm["target_storage"]),None)
     if not target or target["type"] != "lvm" or not target.get("snapshot_as_volume_chain") or not target.get("images"):
