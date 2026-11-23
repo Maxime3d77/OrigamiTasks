@@ -793,6 +793,10 @@ async function openPRALvmLabPanel(vmId){
  const canPrepare=vm.engine==='qmp_live_incremental' && !running;
  const canActivate=vm.engine==='qmp_live_incremental'&&vm.state==='planned'
    &&activations.length===0&&!running;
+ const canRetryAuthorizationBug=Boolean(activations[0]?.status==='uncertain'
+   &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
+   &&String(activations[0]?.details||'').includes('LiveReplicationError: Action PRA non autorisée')
+   &&history.length===0);
  const activation=activations[0]||null;
  const content='<div class="panel"><h3>Diagnostic de la protection #'+e(vm.id)+'</h3>'
    +'<p><b>Source : </b>'+e(vm.source_name)+' (#'+e(vm.source_vmid)+') sur '+e(vm.source_node)
@@ -808,6 +812,7 @@ async function openPRALvmLabPanel(vmId){
    +'<p><b>'+targetLabel+'</b></p>'
    +'<div class="tool-row"><button class="btn primary" data-action="dr-vm-lvm-lab-activate" data-id="'+vmId+'" '
    +(canActivate?'':'disabled')+'>Activer la protection (REP_ + première copie FULL)</button>'
+   +(canRetryAuthorizationBug?'<button class="btn primary" data-action="dr-vm-lvm-lab-retry-allowlist" data-id="'+vmId+'">Relancer après correction du refus local</button>':'')
    +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
    +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
    +'<p class="hint">OrigamiTasks vérifie le VMID sur le cluster cible, prépare une VM REP_ arrêtée, sans réseau ni disque, et applique les marqueurs de protection. Aucune commande manuelle.</p>'
@@ -2129,6 +2134,18 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    state.auditSearch=document.getElementById('auditSearch')?.value||'';
    state.auditCategory=document.getElementById('auditCategory')?.value||'all';
    hydrateAdmins();return;
+  }
+  if(a==='dr-vm-lvm-lab-retry-allowlist'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')return toast('Confirmation de recette LAB-ONLY requise',false);
+   if(!confirm('Reprendre seulement l’échec local avant toute commande Proxmox ? Cette reprise reste interdite pour les copies incertaines.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/retry-local-error','POST',{confirmation});
+    toast('Nouvelle activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
   }
   if(a==='dr-vm-lvm-lab-activate'){
    const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
