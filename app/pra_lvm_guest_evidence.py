@@ -56,13 +56,16 @@ def record(vm_id, restore_run_id, actor, confirmation, note):
                 or not isinstance(result.get("test_volumes"),dict)
                 or not result["test_volumes"]):
             raise ValueError("Propriété et isolation du clone non attestées")
-        latest=con.execute(
-            "SELECT checkpoint_token,status FROM pra_lvm_lab_runs "
-            "WHERE protected_vm_id=? AND mode IN ('full','incremental') "
-            "ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
-        if (not latest or latest["status"]!="completed"
-                or latest["checkpoint_token"]!=restore["checkpoint_token"]):
-            raise ValueError("Le clone ne correspond plus au dernier checkpoint vérifié")
+        # Historical clone observations remain valid evidence of THAT
+        # generation even while scheduled incrementals advance. Readiness
+        # only considers evidence matching the current checkpoint.
+        original=con.execute(
+            "SELECT id FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+            "AND mode IN ('full','incremental') AND status='completed' "
+            "AND checkpoint_token=? LIMIT 1",
+            (vm_id,restore["checkpoint_token"])).fetchone()
+        if not original:
+            raise ValueError("Checkpoint original du clone non vérifié")
         row=con.execute(
             "SELECT id FROM pra_lvm_guest_evidence WHERE protected_vm_id=? "
             "AND restore_run_id=? AND evidence_type='os_console_login'",
