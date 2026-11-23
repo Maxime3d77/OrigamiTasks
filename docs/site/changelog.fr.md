@@ -1,5 +1,14 @@
 # Historique des modifications
 
+## 0.3.38-rc1 — 23 novembre 2026 : résolution QMP des disques Proxmox VE 9
+
+- Le diagnostic source `QMP_BLOCKS` était provoqué par une recherche limitée au champ `device="drive-scsi0"`. Sur les versions récentes de Proxmox utilisant QEMU `-blockdev`, `query-block` peut exposer `device=""` et `qdev="scsi0"`.
+- `source_probe` associe désormais chaque disque configuré au `qdev` correspondant (PVE 9) ou à l'ancien identifiant `device`, en exigeant **exactement une** entrée QMP et un véritable nom de nœud. Les entrées ambiguës et absentes bloquent la réplication pour ne pas copier le mauvais disque.
+- Le diagnostic QMP source permet de vérifier cette résolution sans arrêter la VM. Aucun réglage disque ou redémarrage source ne doit être nécessaire.
+- Manager `0.3.38-rc1`, agents intégrés `0.3.38` : mettre à jour le helper de `au-dodo` depuis l'interface Agents ; conserver `REP-vl-bbiokou` sur `sd-bearnaise`.
+- Une reprise de copie FULL n'est autorisée qu'après succès du diagnostic et réconciliation de l'état `uncertain`. Les bascules réelles restent interdites.
+
+
 ## 0.3.37-rc1 — 23 novembre 2026 : diagnostic QMP de la VM source
 
 - Après création et vérification de la réplique `REP-vl-bbiokou`, la première copie FULL peut bloquer sur `source_probe` (le helper source QMP). Le nouveau bouton **Diagnostiquer QMP source (lecture seule)** vérifie l'inventaire matériel, l'état de la source, l'accès QMP et les nœuds de disques sans copier de bloc ni arrêter la VM.
