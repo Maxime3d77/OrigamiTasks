@@ -2164,6 +2164,23 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    state.auditCategory=document.getElementById('auditCategory')?.value||'all';
    hydrateAdmins();return;
   }
+  if(a==='dr-vm-lvm-reconcile-empty'){
+   const confirmation=document.getElementById('praEmptyReconConfirm')?.value?.trim();
+   const token=b.dataset.token;
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY',false);
+   if(!/^[a-f0-9]{32}$/.test(token||''))return toast('Jeton de génération invalide',false);
+   if(!confirm('Vérifier une seconde fois que le LV n’existe pas et que QMP/NBD est inactif, '
+      +'archiver le journal sans effacer de volume, puis relancer une nouvelle FULL ?'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/reconcile-empty-generation','POST',
+      {confirmation,token});
+    toast('Journal LVM archivé ; nouvelle activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast('Réconciliation refusée : '+ex.message,false)}
+   return;
+  }
   if(a==='dr-vm-lvm-lab-diagnose-generation'){
    try{
     const r=await api('/dr/vms/'+id+'/lvm-lab/diagnose-generation');
@@ -2188,7 +2205,19 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
       +'</tbody></table></div></div>'
       +record(r.current,'Dernière génération publiée')
       +'<p>Fichiers PID NBD : '+e((r.pid_files||[]).join(', ')||'aucun')+'</p>'
-      +'<p class="hint">Lecture seule : ces informations ne prouvent pas à elles seules que les LV ou processus NBD sont inactifs.</p>',
+      +'<p class="hint">Lecture seule : ces informations ne prouvent pas à elles seules que les LV ou processus NBD sont inactifs.</p>'
+      +(r.state==='pending'&&r.pending?.status==='uncertain'&&r.pending?.mode==='full'
+         &&!(r.pending?.volumes||[]).length&&r.current===null&&r.generation_count===0
+         &&!(r.pid_files||[]).length&&r.inventory_checked===true
+         &&(r.predicted_allocations||[]).length>0
+         &&r.predicted_allocations.every(x=>x.present===false)
+         ?'<div class="panel"><h3>Réconcilier la tentative sans LV</h3>'
+          +'<p>OrigamiTasks vérifiera à nouveau la source, la propriété de REP_ et le VG réel avant '
+          +'d’archiver le journal de cette tentative. Aucun LV ni VM ne sera supprimé.</p>'
+          +'<label class="field"><span>Confirmer DISPOSABLE-LAB-ONLY</span><input id="praEmptyReconConfirm" placeholder="DISPOSABLE-LAB-ONLY" autocomplete="off"></label>'
+          +'<button class="btn primary" data-action="dr-vm-lvm-reconcile-empty" data-id="'+id
+          +'" data-token="'+e(r.pending.token)+'">Vérifier, archiver et reprendre la copie FULL</button></div>'
+         :'') ,
       '<button class="btn" data-action="modal-close">Fermer</button>',true);
    }catch(ex){toast(ex.message,false)}
    return;
