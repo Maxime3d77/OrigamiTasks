@@ -71,6 +71,19 @@ def test_known_pre_ssh_rejection_only_can_be_retried(monkeypatch):
         monkeypatch.setattr(pra_lvm_activation.db,'session',lambda p=patch,h=hascopy:C(p,h))
         with pytest.raises(ValueError,match='Reprise automatique interdite|vérification manuelle'):
             pra_lvm_activation.retry_authorization_bug(vm_id,'admin','DISPOSABLE-LAB-ONLY')
+    # Regression from the real audit: the exception formatter adds a space
+    # before the colon. Both spellings are a pre-SSH controller rejection.
+    for diagnostic in (
+        'LiveReplicationError: Action PRA non autorisée',
+        'LiveReplicationError : Action PRA non autorisée',
+    ):
+        variant={**good,'details':'Activation non confirmée : '+diagnostic+
+                 '. Contrôler les hôtes et volumes avant tout nouvel essai'}
+        monkeypatch.setattr(pra_lvm_activation.db,'session',lambda row=variant:C(row))
+        monkeypatch.setattr(pra_lvm_activation,'start',
+                            lambda *args:{'status':'queued','activation_id':9})
+        assert pra_lvm_activation.retry_authorization_bug(
+            vm_id,'admin','DISPOSABLE-LAB-ONLY')['status']=='queued'
     monkeypatch.setattr(pra_lvm_activation.db,'session',lambda:C(good))
     started=[]
     monkeypatch.setattr(pra_lvm_activation,'start',lambda *args:started.append(args) or {'status':'queued'})
