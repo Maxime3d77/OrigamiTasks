@@ -88,6 +88,7 @@ def diagnose(vm_id):
             "vmid":vm["target_vmid"],
             "protected_vm_id":vm["id"],
             "storage":vm["target_storage"],
+            "name":vm["replica_name"],
         },timeout=90)
     finally:
         ssh.close()
@@ -96,3 +97,29 @@ def diagnose(vm_id):
             or type(result.get("ready_for_creation")) is not bool):
         raise ValueError("Réponse du diagnostic distant invalide")
     return result
+
+
+def verify_existing(vm_id):
+    """Read-only verification of an existing owned standby and empty checkpoint state."""
+    vm=dr_protected_vms._one(vm_id)
+    pra_live._scope(vm)
+    binding=pra_live._remote_ssh_binding(vm["target_site_id"],vm["target_node"])
+    connection=pra_live._connect(binding)
+    try:
+        owned=pra_live._run_helper(connection,"lvm_lab_validate_standby",{
+            "vmid":vm["target_vmid"],"protected_vm_id":vm["id"],
+            "name":vm["replica_name"]
+        },timeout=90)
+        if (owned.get("owned") is not True or owned.get("vmid")!=vm["target_vmid"]
+                or owned.get("target_stopped") is not True
+                or owned.get("network_isolated") is not True):
+            raise ValueError("REP_ n'est pas attestée comme appartenant à cette protection")
+        state=pra_live._run_helper(connection,"lvm_lab_probe",{
+            "vmid":vm["target_vmid"],"protected_vm_id":vm["id"],
+            "storage":vm["target_storage"],"lab_ack":LAB_ACK
+        },timeout=90)
+    finally:
+        connection.close()
+    if state.get("pending") or state.get("checkpoint"):
+        raise ValueError("Checkpoint LVM présent ou incertain : réconciliation manuelle obligatoire")
+    return owned
