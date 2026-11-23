@@ -208,6 +208,56 @@ def source_probe(data):
                        if k in configured}}
 
 
+def source_network_inventory(data):
+    """Read network intent only; NEVER attach a NIC to a backup or clone."""
+    ident=vmid(data["vmid"])
+    config=_vm_config(ident)
+    items=[]
+    for slot,value in sorted(config.items()):
+        if not re.fullmatch(r"net[0-9]{1,2}",slot):
+            continue
+        if not isinstance(value,str) or len(value)>512:
+            raise HostError("Invalid source network configuration")
+        pieces=value.split(",")
+        model=pieces[0].split("=",1)[0]
+        if not re.fullmatch(r"(virtio|e1000|e1000e|rtl8139|vmxnet3|ne2k_pci)",model):
+            raise HostError("Unsupported source NIC model")
+        opts={}
+        for piece in pieces[1:]:
+            if "=" in piece:
+                key,val=piece.split("=",1)
+                if key in ("bridge","tag","trunks","firewall","mtu","link_down"):
+                    opts[key]=val
+        bridge=opts.get("bridge")
+        if not isinstance(bridge,str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}",bridge):
+            raise HostError("Unmapped source bridge")
+        if "tag" in opts and (not opts["tag"].isdigit()
+                             or not 1<=int(opts["tag"])<=4094):
+            raise HostError("Invalid source VLAN tag")
+        items.append({"slot":slot,"model":model,"source_bridge":bridge,
+                      "source_vlan":int(opts["tag"]) if "tag" in opts else None,
+                      "source_mtu":opts.get("mtu"),
+                      "source_firewall":opts.get("firewall","0")})
+    return {"vmid":ident,"nics":items,"applied":False}
+
+
+def destination_network_inventory(data):
+    """Read destination bridge names through PVE API, no modifications."""
+    host=socket.gethostname().split(".")[0]
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,63}",host):
+        raise HostError("Invalid Proxmox node name")
+    raw=cmd("pvesh","get","/nodes/"+host+"/network",
+            "--output-format","json",timeout=30)
+    result=json.loads(raw)
+    if not isinstance(result,list):
+        raise HostError("Invalid Proxmox network inventory")
+    bridges=sorted({r["iface"] for r in result if isinstance(r,dict)
+                    and r.get("type") in ("bridge","OVSBridge")
+                    and isinstance(r.get("iface"),str)
+                    and re.fullmatch(r"[A-Za-z0-9_.-]{1,32}",r["iface"])})
+    return {"node":host,"bridges":bridges,"applied":False}
+
+
 def source_diagnose(data):
     """Read-only source VM and QMP probe, with bounded, safe error categories.
 
@@ -1345,7 +1395,9 @@ def lvm_lab_abort(data):
     return store.abort(token)
 
 
-ACTIONS = {"source_diagnose": source_diagnose, "source_probe": source_probe, "source_copy": source_copy,
+ACTIONS = {"source_network_inventory": source_network_inventory,
+           "destination_network_inventory": destination_network_inventory,
+           "source_diagnose": source_diagnose, "source_probe": source_probe, "source_copy": source_copy,
            "source_dismiss": source_dismiss,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
