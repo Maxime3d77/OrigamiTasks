@@ -41,3 +41,40 @@ def test_helper_error_exposes_only_allowlisted_command(monkeypatch):
     assert "PRA_STEP_STORAGE_CONFIG" in str(raised.value)
     assert "pvesh" in str(raised.value)
     assert "secret" not in str(raised.value)
+
+
+def test_readonly_diagnostic_reports_storage_error_without_vm_mutation(monkeypatch):
+    monkeypatch.setattr(host,"PveLvmTarget",FakeStorage)
+    result=host.lvm_lab_diagnose_standby({
+        "vmid":183,"protected_vm_id":1,"storage":"lab-lvm"
+    })
+    assert result["ready_for_creation"] is False
+    assert result["target_exists"] is None
+    assert result["checks"] == [{
+        "stage":"STORAGE_CONFIG","ok":False,
+        "message":"Échec pvesh ; vérifier l’API et les permissions"
+    }]
+
+
+def test_readonly_diagnostic_refuses_existing_cluster_vmid(monkeypatch):
+    class GoodStorage:
+        def __init__(self,*args,**kwargs): pass
+        def inspect(self): return {"type":"lvm"}
+        def _node_capacity(self): return ("sd-bearnaise",12345)
+    monkeypatch.setattr(host,"PveLvmTarget",GoodStorage)
+    def readonly_command(*args,**kwargs):
+        assert args[:2]==("pvesh","get")
+        return json.dumps([{"type":"qemu","vmid":183,"status":"stopped"}])
+    monkeypatch.setattr(host,"cmd",readonly_command)
+    result=host.lvm_lab_diagnose_standby({
+        "vmid":183,"protected_vm_id":1,"storage":"lab-lvm"
+    })
+    assert result["target_exists"] is True
+    assert result["ready_for_creation"] is False
+    assert result["checks"][-1]["stage"]=="VMID_AVAILABILITY"
+
+
+def test_ui_exposes_readonly_diagnostic():
+    ui=(Path(__file__).resolve().parents[1]/"static/app.js").read_text()
+    assert "Diagnostiquer Proxmox (lecture seule)" in ui
+    assert "lvm-lab/diagnose-standby" in ui
