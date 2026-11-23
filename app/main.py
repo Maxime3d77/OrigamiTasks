@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_lvm_jobs, pra_lvm_activation, pra_lvm_schedule, pra_lvm_boot, pra_lvm_publish, agent_updates
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_lvm_jobs, pra_lvm_activation, pra_lvm_schedule, pra_lvm_boot, pra_lvm_publish, pra_lvm_guest_evidence, agent_updates
 
 
 @asynccontextmanager
@@ -27,6 +27,7 @@ async def lifespan(app):
     pra_lvm_activation.initialize()
     pra_lvm_schedule.initialize()
     pra_lvm_boot.initialize()
+    pra_lvm_guest_evidence.initialize()
     pra_lvm_publish.initialize()
     engine.start()
     scheduler.start()
@@ -812,6 +813,28 @@ def list_lvm_publications(vm_id:int,request:Request):
         return {'items':pra_lvm_publish.history(vm_id)}
     except dr_protected_vms.ProtectedVMError as exc:
         raise HTTPException(404,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/guest-evidence')
+def list_lvm_guest_evidence(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_guest_evidence.history(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/guest-evidence')
+def record_lvm_guest_evidence(vm_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'restore_run_id','confirmation','note'}:
+        raise HTTPException(422,'Clone, confirmation et observation requis')
+    try:
+        return pra_lvm_guest_evidence.record(
+            vm_id,payload['restore_run_id'],user['username'],
+            payload['confirmation'],payload['note'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
 
 
 @app.get('/api/dr/vms/{vm_id}/lvm-lab/boot-tests')
