@@ -295,6 +295,87 @@ def resume_source_probe(vm_id,actor,confirmation):
     return start(vm_id,actor,confirmation)
 
 
+def reconcile_empty_allocation(vm_id, actor, confirmation, token):
+    """Conservatively archive a failed pre-volume FULL and launch a fresh seed.
+
+    Only the exact unresolved allocation failure shown to the operator is
+    eligible. The host rechecks VG absence under the allocation locks and
+    archives the pending journal without freeing volumes. Other uncertain
+    transfers remain blocked.
+    """
+    if confirmation != ACK:
+        raise ValueError("Confirmation LAB-ONLY requise")
+    if not isinstance(token,str) or not re.fullmatch(r"[0-9a-f]{32}",token):
+        raise ValueError("Jeton de génération LVM invalide")
+    vm=dr_protected_vms._one(vm_id)
+    if vm["engine"]!="qmp_live_incremental" or vm["state"]!="planned":
+        raise ValueError("Protection QMP inactive")
+    with db.session() as con:
+        last=con.execute(
+            "SELECT id,status,phase,details,replication_run_id "
+            "FROM pra_lvm_activations WHERE protected_vm_id=? "
+            "ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
+        run=con.execute(
+            "SELECT id,status,mode,checkpoint_token FROM pra_lvm_lab_runs "
+            "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
+        if (not last or last["status"]!="uncertain" or last["phase"]!="blocked"
+                or "lvm_lab_begin" not in str(last["details"])
+                or not run or run["status"]!="uncertain" or run["mode"]!="full"
+                or run["checkpoint_token"] is not None
+                or last["replication_run_id"] not in (None,run["id"])):
+            raise ValueError("Dernier échec LVM non réconciliable automatiquement")
+        if con.execute("SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+                       "AND status IN ('queued','running') LIMIT 1",(vm_id,)).fetchone():
+            raise ValueError("Transfert LVM encore actif")
+        if con.execute("SELECT 1 FROM pra_live_runs WHERE protected_vm_id=? "
+                       "AND status IN ('queued','running','uncertain') LIMIT 1",
+                       (vm_id,)).fetchone():
+            raise ValueError("Transfert QMP non confirmé")
+    # Both hosts must be independently safe before changing any ledger.
+    src=pra_lvm_standby.diagnose_source(vm_id)
+    if src.get("ready") is not True or src.get("active_jobs")!=0:
+        raise ValueError("Source QMP non vérifiée ou job actif")
+    dest=pra_lvm_standby.diagnose(vm_id)
+    if dest.get("owned_standby") is not True:
+        raise ValueError("REP_ non reconnue comme appartenant à cette protection")
+    ledger=pra_lvm_standby.diagnose_generation(vm_id)
+    pending=ledger.get("pending") or {}
+    if (ledger.get("state")!="pending" or pending.get("token")!=token
+            or pending.get("status")!="uncertain" or pending.get("mode")!="full"
+            or pending.get("volumes") or ledger.get("current") is not None
+            or ledger.get("generation_count")!=0 or ledger.get("pid_files")
+            or ledger.get("inventory_checked") is not True
+            or not ledger.get("predicted_allocations")
+            or any(row.get("present") is not False
+                   for row in ledger.get("predicted_allocations",[]))):
+        raise ValueError("Volume ou état LVM non confirmé : ne pas réconcilier")
+    # Remote worker holds checkpoint + allocation locks, verifies the same
+    # token/volume inventory again, and preserves the journal by atomic rename.
+    response=pra_lvm_standby.archive_empty_allocation(vm_id,token)
+    if (response.get("archived") is not True or response.get("token")!=token
+            or response.get("volumes_freed")!=0):
+        raise ValueError("Archivage de journal non confirmé")
+    with db.session() as con:
+        con.execute("BEGIN IMMEDIATE")
+        newest=con.execute("SELECT id,status FROM pra_lvm_activations "
+                           "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
+        current=con.execute("SELECT id,status FROM pra_lvm_lab_runs "
+                            "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(vm_id,)).fetchone()
+        if (not newest or newest["id"]!=last["id"] or newest["status"]!="uncertain"
+                or not current or current["id"]!=run["id"] or current["status"]!="uncertain"):
+            raise ValueError("Journal archivé mais historique modifié : intervention requise")
+        con.execute("UPDATE pra_lvm_lab_runs SET status='failed',details=? WHERE id=?",
+                    ("Échec pré-allocation confirmé ; journal conservé en archive, aucun LV libéré",
+                     run["id"]))
+        con.execute("UPDATE pra_lvm_activations SET status='failed',details=?,updated_at=? "
+                    "WHERE id=?",("Réconciliation approuvée : aucun LV associé au jeton ; "
+                                   "copie FULL autorisée à reprendre",db.now(),last["id"]))
+    db.audit(actor,"pra.lvm.lab.activation.empty_generation_reconciled",vm_id,
+             "activation="+str(last["id"])+" run="+str(run["id"])+" token="+token+
+             " ; volume libéré=0, journal archivé")
+    return start(vm_id,actor,confirmation)
+
+
 def steps(vm_id):
     """Chronological, per-protection activation trace; no remote side effects."""
     dr_protected_vms._one(vm_id)
