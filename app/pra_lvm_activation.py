@@ -35,7 +35,13 @@ def _step(activation_id, status, phase, detail, run_id=None):
         con.execute("UPDATE pra_lvm_activations SET status=?,phase=?,details=?,"
                     "updated_at=?,replication_run_id=COALESCE(?,replication_run_id) "
                     "WHERE id=?", (status,phase,str(detail)[:1000],db.now(),run_id,activation_id))
-    db.audit("system","pra.lvm.lab.activation."+phase,activation_id,str(detail)[:450])
+    with db.session() as con:
+        protection=con.execute(
+            "SELECT protected_vm_id FROM pra_lvm_activations WHERE id=?",(activation_id,)
+        ).fetchone()
+    if protection:
+        db.audit("system","pra.lvm.lab.activation."+phase,
+                 protection["protected_vm_id"],"activation="+str(activation_id)+" | "+str(detail)[:420])
 
 
 def _work(activation_id, vm_id):
@@ -115,6 +121,17 @@ def retry_authorization_bug(vm_id, actor, confirmation):
     db.audit(actor,"pra.lvm.lab.activation.local_error_reconciled",vm_id,
              "Ancien run #"+str(last["id"])+" : refus local avant toute commande distante")
     return start(vm_id,actor,confirmation)
+
+
+def steps(vm_id):
+    """Chronological, per-protection activation trace; no remote side effects."""
+    dr_protected_vms._one(vm_id)
+    with db.session() as con:
+        rows=con.execute(
+            "SELECT id,actor,action,detail,created_at FROM audit "
+            "WHERE target=? AND action LIKE 'pra.lvm.lab.activation.%' "
+            "ORDER BY id DESC LIMIT 100",(str(vm_id),)).fetchall()
+    return [dict(row) for row in rows]
 
 
 def status(vm_id):
