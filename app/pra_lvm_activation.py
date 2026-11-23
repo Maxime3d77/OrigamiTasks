@@ -146,7 +146,7 @@ def reconcile_failed_provision(vm_id, actor, confirmation):
                 or last["phase"] != "blocked"
                 or last["replication_run_id"] is not None
                 or not re.search(
-                    r"LiveReplicationError\\s*:\\s*Échec commande agent PRA\\s*:\\s*lvm_lab_prepare_standby",
+                    r"LiveReplicationError\s*:\s*Échec commande agent PRA\s*:\s*lvm_lab_prepare_standby",
                     str(last["details"]))):
             raise ValueError("Cet échec n'est pas une préparation de VM identifiable")
         if con.execute(
