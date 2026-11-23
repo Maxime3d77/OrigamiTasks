@@ -815,6 +815,19 @@ def list_lvm_publications(vm_id:int,request:Request):
         raise HTTPException(404,str(exc)) from None
 
 
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/network-preview')
+def preview_lvm_recovery_network(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    from . import pra_lvm_network_plan
+    try:
+        return pra_lvm_network_plan.inspect(vm_id)
+    except (ValueError,dr_protected_vms.ProtectedVMError,
+            pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Inventaire réseau PRA incomplet : aucune action') from None
+
+
 @app.get('/api/dr/vms/{vm_id}/lvm-lab/guest-evidence')
 def list_lvm_guest_evidence(vm_id:int,request:Request):
     security.require(request,role='admin')
