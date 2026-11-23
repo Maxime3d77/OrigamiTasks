@@ -974,6 +974,68 @@ def lvm_lab_diagnose_generation(data):
             "inventory_error":inventory_error}
 
 
+def lvm_lab_archive_empty_uncertain(data):
+    """Archive an EMPTY failed allocation intent, never free an LV.
+
+    This is an administrator-authorized reconciliation action, not cleanup.
+    The exact allocation token is checked under the same checkpoint and
+    allocation locks as the writer. Any unverified LV/inventory/NBD state
+    refuses the operation. The journal is retained as an immutable archive.
+    """
+    if data.get("lab_ack") != "DISPOSABLE-LAB-ONLY":
+        raise HostError("Explicit LAB-only reconciliation approval required")
+    token=data.get("token")
+    if not isinstance(token,str) or not re.fullmatch(r"[a-f0-9]{32}",token):
+        raise HostError("Invalid LVM generation token")
+    store=_lvm_lab_store(data)
+    # Verify a pre-existing owned standby, never adopt a random VMID.
+    lvm_lab_validate_standby({
+        "vmid":store.target.vmid,"protected_vm_id":store.target.protected_vm_id,
+        "name":data.get("name")
+    })
+    if not store.root.is_dir() or store.root.is_symlink():
+        raise HostError("Journal LVM non vérifié")
+    # The writer takes checkpoint.lock then allocation .lock, in this order.
+    import fcntl
+    checkpoint_fd=os.open(str(store.lock_file),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
+    allocation_fd=None
+    try:
+        fcntl.flock(checkpoint_fd,fcntl.LOCK_EX)
+        allocation_fd=os.open(str(store.root/".lock"),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
+        fcntl.flock(allocation_fd,fcntl.LOCK_EX)
+        pending=store._read(store.pending)
+        if (not pending or pending.get("token")!=token
+                or pending.get("status")!="uncertain"
+                or pending.get("mode")!="full"
+                or pending.get("allocated")!={}
+                or store._read(store.current_file) is not None
+                or (store._read(store.owned) or {"generations":[]}).get("generations")!=[]):
+            raise HostError("Journal LVM non réconciliable : génération modifiée ou non vide")
+        if any(p.name.startswith(".origami-") and p.name.endswith(".pid")
+               for p in store.root.iterdir()):
+            raise HostError("Un export NBD peut encore être présent")
+        report=lvm_lab_diagnose_generation(data)
+        expected=report.get("predicted_allocations")
+        if (report.get("state")!="pending"
+                or report.get("inventory_checked") is not True
+                or not isinstance(expected,list) or not expected
+                or any(e.get("present") is not False for e in expected)):
+            raise HostError("Absence de LV non confirmée : conserver le pending")
+        archived=store.root/("reconciled-no-lv-"+token+".json")
+        if archived.exists() or archived.is_symlink():
+            raise HostError("Archive de réconciliation déjà présente")
+        # Preserve evidence; no LV or source VM is modified.
+        os.replace(store.pending,archived)
+        return {"archived":True,"token":token,"volumes_freed":0,
+                "archive_name":archived.name,"reconciled_empty":True}
+    finally:
+        if allocation_fd is not None:
+            fcntl.flock(allocation_fd,fcntl.LOCK_UN)
+            os.close(allocation_fd)
+        fcntl.flock(checkpoint_fd,fcntl.LOCK_UN)
+        os.close(checkpoint_fd)
+
+
 def lvm_lab_begin(data):
     store = _lvm_lab_store(data)
     sizes = data.get("sizes")
@@ -1292,6 +1354,7 @@ ACTIONS = {"source_diagnose": source_diagnose, "source_probe": source_probe, "so
            "lvm_lab_diagnose_standby": lvm_lab_diagnose_standby,
            "lvm_lab_prepare_standby": lvm_lab_prepare_standby,
            "lvm_lab_diagnose_generation": lvm_lab_diagnose_generation,
+           "lvm_lab_archive_empty_uncertain": lvm_lab_archive_empty_uncertain,
            "lvm_lab_probe": lvm_lab_probe,
            "lvm_lab_begin": lvm_lab_begin,
            "lvm_lab_finish": lvm_lab_finish,
