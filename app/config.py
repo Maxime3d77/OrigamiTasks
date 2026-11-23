@@ -23,7 +23,7 @@ ALLOW_INSECURE_LDAP_TLS = os.getenv('ALLOW_INSECURE_LDAP_TLS', 'false').lower() 
 LDAP_GROUP_BASE_DN = os.getenv('LDAP_GROUP_BASE_DN', LDAP_BASE_DN)
 LDAP_NESTED_GROUPS = os.getenv('LDAP_NESTED_GROUPS', 'false').lower() == 'true'
 GIT_BRANCH = os.getenv('GIT_BRANCH', 'main')
-APP_VERSION = '0.3.38-rc1'
+APP_VERSION = '0.3.39-rc1'
 SESSION_HOURS = int(os.getenv('SESSION_HOURS', '12'))
 WORKERS = int(os.getenv('ORIGAMI_EXECUTOR_WORKERS', '2'))
 ALLOW_LOCAL_EXECUTION = os.getenv('ALLOW_LOCAL_EXECUTION', 'false').lower() == 'true'
