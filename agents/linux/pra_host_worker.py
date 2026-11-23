@@ -610,8 +610,15 @@ def lvm_lab_prepare_standby(data):
         raise HostError("Invalid standby VM name")
     storage = data.get("storage")
     store = PveLvmTarget(storage, ident, cmd, protected_vm_id=protected)
-    store.inspect()
-    store._node_capacity()
+    def checked(stage, operation):
+        try:
+            return operation()
+        except (HostError, LvmTargetError, ValueError) as exc:
+            # Fixed, non-sensitive stage names. Never print raw PVE stderr or
+            # the complete command, which could contain user-controlled data.
+            raise HostError("PRA_STEP_" + stage + " : " + str(exc)[:160]) from None
+    checked("STORAGE_CONFIG", store.inspect)
+    checked("STORAGE_CAPACITY", store._node_capacity)
     marker = "ORIGAMITASKS_PRA_" + str(protected)
     source_name = data.get("source_name")
     source_node = data.get("source_node")
@@ -640,7 +647,7 @@ def lvm_lab_prepare_standby(data):
             raise HostError("Ambiguous target VMID in cluster")
         return matches[0] if matches else None
 
-    existing = inspect_existing()
+    existing = checked("CLUSTER_INVENTORY", inspect_existing)
     if existing:
         if existing.get("type") != "qemu" or existing.get("node") != socket.gethostname().split(".")[0]:
             raise HostError("Target VMID already used by another resource or node")
@@ -657,10 +664,11 @@ def lvm_lab_prepare_standby(data):
         return {"created": False, "vmid": ident, "target_stopped": True,
                 "network_isolated": True, "lab_only": True}
 
-    cmd("qm", "create", str(ident), "--name", name, "--onboot", "0",
+    checked("VM_CREATE", lambda: cmd(
+        "qm", "create", str(ident), "--name", name, "--onboot", "0",
         "--memory", "2048", "--cores", "2",
-        "--description", description, timeout=90)
-    existing = inspect_existing()
+        "--description", description, timeout=90))
+    existing = checked("POST_CREATE_INVENTORY", inspect_existing)
     if not existing or existing.get("type") != "qemu":
         raise HostError("Created standby not visible in cluster inventory")
     if not _is_target_stopped(ident):
