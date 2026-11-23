@@ -107,3 +107,60 @@ def test_update_errors_report_safe_stage_not_remote_secrets():
         assert phase in source
     assert "str(exc)[:400]" in source
     assert 'Remplacement distant non confirmé' not in source
+
+
+def test_uncertain_remote_provision_retries_only_if_target_vmid_absent(monkeypatch):
+    from app import pra_lvm_activation
+    vm={'id':17,'engine':'qmp_live_incremental','state':'planned',
+        'target_dc_id':2,'target_node':'sd-bearnaise','target_vmid':183}
+    last={'id':2,'status':'uncertain','phase':'blocked','replication_run_id':None,
+          'details':('Activation non confirmée : LiveReplicationError : '
+                     'Échec commande agent PRA: lvm_lab_prepare_standby '
+                     '(vérifier root helper)')}
+    class C:
+        def __enter__(self): return self
+        def __exit__(self,*a): return False
+        def execute(self,sql,args=()):
+            class Res:
+                def __init__(self,one):self.one=one
+                def fetchone(self):return self.one
+            if 'FROM pra_lvm_activations' in sql:
+                return Res(last)
+            return Res(None)
+    monkeypatch.setattr(pra_lvm_activation.db,'session',lambda:C())
+    monkeypatch.setattr(pra_lvm_activation.db,'now',lambda:'2026-11-23')
+    monkeypatch.setattr(pra_lvm_activation.db,'audit',lambda *args:None)
+    monkeypatch.setattr(pra_lvm_activation.dr_protected_vms,'_one',lambda _:vm)
+    resources=[{'type':'node','node':'sd-bearnaise','status':'online'}]
+    monkeypatch.setattr(pra_lvm_activation.dr_protected_vms,'_inventory',
+                        lambda _:({}, {}, resources))
+    calls=[]
+    monkeypatch.setattr(pra_lvm_activation,'start',
+                        lambda *args:(calls.append(args) or {'status':'queued'}))
+    assert pra_lvm_activation.reconcile_failed_provision(
+        17,'admin','DISPOSABLE-LAB-ONLY')['status']=='queued'
+    assert len(calls)==1
+    resources.append({'type':'qemu','node':'sd-bearnaise','vmid':183,
+                      'status':'stopped'})
+    with pytest.raises(ValueError,match='VMID cible existe'):
+        pra_lvm_activation.reconcile_failed_provision(17,'admin','DISPOSABLE-LAB-ONLY')
+    assert len(calls)==1
+
+
+def test_uncertain_provision_will_not_retry_after_transfer(monkeypatch):
+    from app import pra_lvm_activation
+    monkeypatch.setattr(pra_lvm_activation.dr_protected_vms,'_one',
+                        lambda _: {'engine':'qmp_live_incremental',
+                                   'state':'planned'})
+    class C:
+        def __enter__(self):return self
+        def __exit__(self,*a):return False
+        def execute(self,sql,args=()):
+            class R:
+                def fetchone(self):
+                    return {'id':2,'status':'uncertain','phase':'blocked',
+                            'replication_run_id':3,'details':'Échec commande agent PRA'}
+            return R()
+    monkeypatch.setattr(pra_lvm_activation.db,'session',lambda:C())
+    with pytest.raises(ValueError,match='préparation de VM identifiable'):
+        pra_lvm_activation.reconcile_failed_provision(17,'admin','DISPOSABLE-LAB-ONLY')
