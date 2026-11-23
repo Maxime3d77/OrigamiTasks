@@ -110,18 +110,18 @@ def _remote(job):
                 "systemctl try-restart origamitasks-agent-pra.service >/dev/null 2>&1 || true"
             )
             script=(
-                "set -eu; python3 -c "+shlex.quote(check)+"; "
+                "set -eu; echo ORIGAMI_STAGE_VALIDATE; python3 -c "+shlex.quote(check)+"; echo ORIGAMI_STAGE_BACKUP; "
                 "cp -p /opt/origamitasks-agent/agent.py /opt/origamitasks-agent/agent.py.origami-backup; "
                 "if test -f /opt/origamitasks-agent/pra_worker.py; then cp -p /opt/origamitasks-agent/pra_worker.py /opt/origamitasks-agent/pra_worker.py.origami-backup; fi; "
-                "trap "+shlex.quote(rollback)+" EXIT; "
+                "trap "+shlex.quote(rollback)+" EXIT; echo ORIGAMI_STAGE_INSTALL; "
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_agent.py")+" /opt/origamitasks-agent/agent.py; "
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_pra_worker.py")+" /opt/origamitasks-agent/pra_worker.py; "
                 "install -d -m 700 -o root -g root /usr/local/lib/origamitasks-pra; "
                 +''.join("install -m 500 -o root -g root "+shlex.quote(stage+"_"+h)+" /usr/local/lib/origamitasks-pra/"+h+"; "
                          for h in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"))+
-                "systemctl restart origamitasks-agent.service; "
+                "echo ORIGAMI_STAGE_RESTART; systemctl restart origamitasks-agent.service; "
                 "if systemctl is-enabled --quiet origamitasks-agent-pra.service 2>/dev/null; then systemctl restart origamitasks-agent-pra.service; fi; "
-                "systemctl is-active --quiet origamitasks-agent.service; "
+                "echo ORIGAMI_STAGE_HEALTH; systemctl is-active --quiet origamitasks-agent.service; "
                 "trap - EXIT; "
                 "rm -f "+shlex.quote(stage+"_agent.py")+" "+shlex.quote(stage+"_pra_worker.py")+" "
                 + " ".join(shlex.quote(stage+"_"+h) for h in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"))+"; "
@@ -152,8 +152,22 @@ def _remote(job):
             cmd="powershell.exe -NoProfile -NonInteractive -EncodedCommand "+base64.b64encode(ps.encode("utf-16le")).decode("ascii")
         _,stdout,_=client.exec_command(cmd,timeout=120)
         output=stdout.read(4096).decode("utf-8",errors="replace")
-        if stdout.channel.recv_exit_status()!=0 or "ORIGAMI_AGENT_UPDATED" not in output:
-            raise UpdateError("Remplacement distant non confirmé")
+        exit_code=stdout.channel.recv_exit_status()
+        if exit_code!=0 or "ORIGAMI_AGENT_UPDATED" not in output:
+            # Only emit our own fixed stage labels. Never return remote
+            # stderr/stdout, shell commands, credentials or token contents.
+            markers={
+                "ORIGAMI_STAGE_VALIDATE":"vérification identité locale",
+                "ORIGAMI_STAGE_BACKUP":"sauvegarde de l’agent existant",
+                "ORIGAMI_STAGE_INSTALL":"installation fichiers agent/PRA",
+                "ORIGAMI_STAGE_RESTART":"redémarrage du service agent",
+                "ORIGAMI_STAGE_HEALTH":"contrôle systemd du service",
+            }
+            reached=next((label for marker,label in reversed(list(markers.items()))
+                          if marker in output),"exécution distante")
+            raise UpdateError("Mise à jour SSH non confirmée : étape "+reached+
+                              " (code retour "+str(exit_code)+"). "
+                              "Vérifier l’état du service, sudo et la sauvegarde locale")
     finally:
         client.close()
 
@@ -171,8 +185,21 @@ def process_one():
         if host["fqdn"]!=job["host"] or host["port"]!=job["port"] or agent["platform"]!=job["platform"]:
             raise UpdateError("Association agent / serveur modifiée")
         _remote(job)
-    except Exception:
-        status,error="failed","Échec ou état incertain : vérifier les services et la sauvegarde locale"
+    except UpdateError as exc:
+        status,error="failed",str(exc)[:400]
+    except Exception as exc:
+        # Stable error category; never surface arbitrary SSH exception text.
+        categories={
+            "AuthenticationException":"Authentification SSH refusée",
+            "BadHostKeyException":"Clé hôte SSH incorrecte",
+            "SSHException":"Transport SSH interrompu",
+            "PermissionError":"Permission SFTP refusée",
+            "FileNotFoundError":"Fichier de mise à jour introuvable",
+            "OSError":"Échec transport ou écriture distante",
+        }
+        status,error="failed",categories.get(type(exc).__name__,
+                        "Échec mise à jour distant ("+type(exc).__name__[:40]+")")
+        error+=" : aucun redémarrage ni remplacement garanti, contrôler le serveur"
     with db.session() as con:
         con.execute("UPDATE agent_update_jobs SET status=?,error=?,finished_at=? WHERE id=?",
                     (status,error,db.now() if status=="failed" else None,job["id"]))
