@@ -129,3 +129,32 @@ def test_standby_qm_create_uses_dns_name_and_preserves_policy_markers(monkeypatc
     assert "ORIGAMITASKS_LAB_ONLY" in description
     assert "vl-bbiokou" in description
     assert all(x[:2] not in [("qm","start"),("qm","stop")] for x in calls)
+
+
+def test_existing_owned_guest_validated_without_mutation(monkeypatch):
+    monkeypatch.setattr(host.socket,"gethostname",lambda:"sd-bearnaise")
+    monkeypatch.setattr(host,"_is_target_stopped",lambda _:True)
+    config={"name":"REP-vl-bbiokou","onboot":"0",
+            "description":"ORIGAMITASKS_PRA_1 ORIGAMITASKS_LAB_ONLY"}
+    monkeypatch.setattr(host,"_vm_config",lambda _:config)
+    def readonly(*args,**kwargs):
+        assert args[:2]==("pvesh","get")
+        return json.dumps([{"type":"qemu","vmid":183,"node":"sd-bearnaise","status":"unknown"}])
+    monkeypatch.setattr(host,"cmd",readonly)
+    verified=host.lvm_lab_validate_standby({
+        "vmid":183,"protected_vm_id":1,"name":"REP_vl-bbiokou"})
+    assert verified["owned"] is True
+    assert verified["target_stopped"] is True
+    assert verified["network_isolated"] is True
+
+
+def test_foreign_occupied_vmid_is_not_adopted(monkeypatch):
+    monkeypatch.setattr(host.socket,"gethostname",lambda:"sd-bearnaise")
+    monkeypatch.setattr(host,"_is_target_stopped",lambda _:True)
+    monkeypatch.setattr(host,"_vm_config",lambda _:{
+        "name":"REP-vl-bbiokou","description":"ORIGAMITASKS_PRA_9 ORIGAMITASKS_LAB_ONLY"})
+    monkeypatch.setattr(host,"cmd",lambda *a,**kw:json.dumps([
+        {"type":"qemu","vmid":183,"node":"sd-bearnaise"}]))
+    with pytest.raises(host.HostError,match="another protection"):
+        host.lvm_lab_validate_standby({
+            "vmid":183,"protected_vm_id":1,"name":"REP_vl-bbiokou"})
