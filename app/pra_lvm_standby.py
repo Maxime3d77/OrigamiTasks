@@ -75,3 +75,24 @@ def prepare(vm_id, confirmation):
             or type(result.get("created")) is not bool):
         raise ValueError("L'agent n'a pas confirmé la création sûre du secours")
     return result
+
+
+def diagnose(vm_id):
+    """No infrastructure mutations: collect host-side storage and VMID checks."""
+    vm = dr_protected_vms._one(vm_id)
+    pra_live._scope(vm)
+    binding = pra_live._remote_ssh_binding(vm["target_site_id"],vm["target_node"])
+    ssh = pra_live._connect(binding)
+    try:
+        result = pra_live._run_helper(ssh,"lvm_lab_diagnose_standby",{
+            "vmid":vm["target_vmid"],
+            "protected_vm_id":vm["id"],
+            "storage":vm["target_storage"],
+        },timeout=90)
+    finally:
+        ssh.close()
+    if (result.get("vmid")!=vm["target_vmid"]
+            or not isinstance(result.get("checks"),list)
+            or type(result.get("ready_for_creation")) is not bool):
+        raise ValueError("Réponse du diagnostic distant invalide")
+    return result
