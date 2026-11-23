@@ -6,7 +6,7 @@ from app.main import app
 
 
 def test_version_comparison():
-    assert agent_updates.available_versions()=={"linux":"0.3.38","windows":"0.3.38"}
+    assert agent_updates.available_versions()=={"linux":"0.3.39","windows":"0.3.39"}
     assert agent_updates.outdated("0.3.2","0.3.23")
     assert not agent_updates.outdated("0.3.23","0.3.23")
     assert not agent_updates.outdated("0.4.0","0.3.23")
