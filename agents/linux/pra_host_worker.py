@@ -46,6 +46,22 @@ def cmd(*args, timeout=25):
     return r.stdout
 
 
+def pve_guest_name(logical_name):
+    """Map OrigamiTasks REP_/PRA_TEST_ labels to valid PVE dns-name labels.
+
+    Preserve the logical REP_ prefix in the controller and the ownership
+    marker in VM descriptions. Proxmox qm --name rejects underscores.
+    """
+    if (not isinstance(logical_name, str) or not
+            re.fullmatch(r"(?:REP_|PRA_TEST_)[A-Za-z0-9_-]{1,50}", logical_name)):
+        raise HostError("Invalid logical replica name")
+    hostname = logical_name.replace("_", "-")
+    if (len(hostname) > 63 or not
+            re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", hostname)):
+        raise HostError("Invalid Proxmox DNS-format guest name")
+    return hostname
+
+
 def vmid(value):
     if type(value) is not int or not _VM.fullmatch(str(value)):
         raise HostError("Invalid VMID")
@@ -400,7 +416,7 @@ def target_publish(data):
         memory = integer("memory", "1024", 2097152)
         cores = integer("cores", "1", 512)
         sockets = integer("sockets", "1", 16)
-        args = ["qm", "create", str(ident), "--name", name, "--onboot", "0",
+        args = ["qm", "create", str(ident), "--name", pve_guest_name(name), "--onboot", "0",
                 "--memory", memory, "--cores", cores, "--sockets", sockets,
                 "--description", marker]
         scsihw = config.get("scsihw")
@@ -710,6 +726,8 @@ def lvm_lab_prepare_standby(data):
         if not _is_target_stopped(ident):
             raise HostError("Existing VM is not a stopped standby")
         config = _vm_config(ident)
+        if config.get("name") != pve_guest_name(name):
+            raise HostError("Existing standby does not match expected Proxmox DNS name")
         markers = set(re.findall(r"[A-Za-z0-9_]+", config.get("description", "")))
         if marker not in markers or "ORIGAMITASKS_LAB_ONLY" not in markers:
             raise HostError("Existing VM is not owned by this lab protection")
@@ -721,7 +739,7 @@ def lvm_lab_prepare_standby(data):
                 "network_isolated": True, "lab_only": True}
 
     checked("VM_CREATE", lambda: cmd(
-        "qm", "create", str(ident), "--name", name, "--onboot", "0",
+        "qm", "create", str(ident), "--name", pve_guest_name(name), "--onboot", "0",
         "--memory", "2048", "--cores", "2",
         "--description", description, timeout=90))
     existing = checked("POST_CREATE_INVENTORY", inspect_existing)
@@ -730,6 +748,8 @@ def lvm_lab_prepare_standby(data):
     if not _is_target_stopped(ident):
         raise HostError("New standby is not stopped")
     config = _vm_config(ident)
+    if config.get("name") != pve_guest_name(name):
+        raise HostError("New standby has an unexpected Proxmox name")
     if any(re.fullmatch(r"net[0-9]{1,2}", k) for k in config):
         raise HostError("Unexpected standby network interface")
     if marker not in set(re.findall(r"[A-Za-z0-9_]+", config.get("description", ""))):
@@ -903,8 +923,8 @@ def lvm_lab_publish_standby(data):
     if not isinstance(name, str) or not re.fullmatch(r"REP_[A-Za-z0-9_-]{1,50}", name):
         raise HostError("Invalid standby name")
     config = _vm_config(store.target.vmid)
-    if not config.get("name", "").startswith("REP_"):
-        raise HostError("Destination VM must be a reserved REP_")
+    if config.get("name") != pve_guest_name(name):
+        raise HostError("Destination VM does not match the owned REP_ policy name")
     if any(k in config for k in ("efidisk0", "tpmstate0")):
         raise HostError("Destination EFI/TPM profile unsupported")
     ledger = store._read(store.owned)
