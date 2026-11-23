@@ -596,6 +596,7 @@ function protectedVMsPage(){
    +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
    +'<td><button class="text-btn" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'" title="Journal de réplication et diagnostic">'+e(vm.replica_name)+'</button>'
    +'<div class="muted tinytext">'+(vm.lvm_standby_configured?'Disques publiés sur REP_ · boot non validé':'Réplique non encore publiée')+'</div>'
+   +'<div class="muted tinytext">Nom Proxmox : '+e(vm.replica_name.replaceAll('_','-'))+'</div>'
    +'<div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
    +'<td>'+labelStatus(vm.lvm_effective_status==='uncertain'?'failed':vm.state)
@@ -807,7 +808,8 @@ async function openPRALvmLabPanel(vmId){
  const activation=activations[0]||null;
  const content='<div class="panel"><h3>Diagnostic de la protection #'+e(vm.id)+'</h3>'
    +'<p><b>Source : </b>'+e(vm.source_name)+' (#'+e(vm.source_vmid)+') sur '+e(vm.source_node)
-   +' → <b>Secours :</b> '+e(vm.replica_name)+' (#'+e(vm.target_vmid)+') sur '+e(vm.target_node)+'</p>'
+   +' → <b>Secours :</b> '+e(vm.replica_name)+' (#'+e(vm.target_vmid)+') sur '+e(vm.target_node)
+   +' · nom Proxmox : '+e(vm.replica_name.replaceAll('_','-'))+'</p>'
    +'<p><b>Phase :</b> '+e(activation?.phase||'non démarrée')+' · <b>État :</b> '
    +labelStatus(activation?.status||'not_configured')+'</p>'
    +(activation?.details?'<div class="notice '+(activation.status==='uncertain'?'error':'')+'">'+e(activation.details)+'</div>':'')
