@@ -237,3 +237,22 @@ def test_initial_seed_can_stage_when_vmid_absent_clusterwide(adapter):
     assert result["status"] == "staged_only"
     assert len([x for x in calls if x[:2] == ("pvesm","alloc")]) == 1
     assert result["vm_started"] is False
+
+
+def test_pvesm_allocation_converts_qmp_bytes_into_kib(adapter):
+    obj, _, calls, _ = adapter
+    size_bytes = 5 * 1024**3
+    plan=obj.plan({"scsi0":size_bytes},"full")
+    obj.stage_allocations(plan,approved=True)
+    allocation=next(x for x in calls if x[:2]==("pvesm","alloc"))
+    assert allocation[5]==str(5*1024**2)
+    assert allocation[-2:]==("--format","qcow2")
+    assert plan["disks"]["scsi0"] == size_bytes
+
+
+def test_pvesm_allocation_rounds_up_non_aligned_byte_size(adapter):
+    obj, _, calls, _=adapter
+    plan=obj.plan({"scsi0":5*1024**2+17},"full")
+    obj.stage_allocations(plan,approved=True)
+    allocation=next(x for x in calls if x[:2]==("pvesm","alloc"))
+    assert allocation[5]==str(5*1024+1)
