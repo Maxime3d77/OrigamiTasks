@@ -207,3 +207,31 @@ def test_qmp_slot_mapping_fails_closed_on_ambiguous_or_missing_rows():
         host._qmp_block_for_slot([row,row],"scsi0")
     with pytest.raises(host.HostError,match="unavailable"):
         host._qmp_block_for_slot([{"device":"","qdev":"ide2"}],"scsi0")
+
+
+def test_lvm_generation_diagnostic_reports_pending_without_mutation(monkeypatch,tmp_path):
+    # Explicitly verify that the new helper only reads its journals and never
+    # calls qm create, pvesm alloc, qemu-img or qemu-nbd.
+    from types import SimpleNamespace
+    journal=tmp_path/"lab"/"183"
+    journal.mkdir(parents=True)
+    pending=journal/"pending.json"
+    pending.write_text(json.dumps({
+        "token":"a"*32,"status":"staged_only","mode":"full",
+        "allocated":{"scsi0":{"volid":"lab:vm-183-disk-12.qcow2"}}
+    }))
+    target=SimpleNamespace(storage="lab",vmid=183,protected_vm_id=1)
+    store=SimpleNamespace(
+        root=journal,pending=pending,current_file=journal/"current.json",
+        owned=journal/"owned.json",
+        _read=lambda p:json.loads(p.read_text()) if p.exists() else None,
+    )
+    monkeypatch.setattr(host,"_lvm_lab_store",lambda data:store)
+    monkeypatch.setattr(host,"cmd",lambda *a,**kw:(_ for _ in ()).throw(
+        AssertionError("No host command allowed")))
+    result=host.lvm_lab_diagnose_generation({"vmid":183})
+    assert result["state"]=="pending"
+    assert result["requires_reconciliation"] is True
+    assert result["pending"]["status"]=="staged_only"
+    assert result["pending"]["volumes"]==["lab:vm-183-disk-12.qcow2"]
+    assert pending.exists()
