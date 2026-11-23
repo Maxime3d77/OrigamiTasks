@@ -821,6 +821,7 @@ async function openPRALvmLabPanel(vmId){
    +(canActivate?'':'disabled')+'>Activer la protection (REP_ + première copie FULL)</button>'
    +(canRetryAuthorizationBug?'<button class="btn primary" data-action="dr-vm-lvm-lab-retry-allowlist" data-id="'+vmId+'">Relancer après correction du refus local</button>':'')
    +(canRetryProvision?'<button class="btn primary" data-action="dr-vm-lvm-lab-reconcile-provision" data-id="'+vmId+'">Vérifier le VMID cible et reprendre la préparation</button>':'')
+   +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose" data-id="'+vmId+'">Diagnostiquer Proxmox (lecture seule)</button>'
    +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
    +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
    +'<p class="hint">OrigamiTasks vérifie le VMID sur le cluster cible, prépare une VM REP_ arrêtée, sans réseau ni disque, et applique les marqueurs de protection. Aucune commande manuelle.</p>'
@@ -2148,6 +2149,22 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
    state.auditSearch=document.getElementById('auditSearch')?.value||'';
    state.auditCategory=document.getElementById('auditCategory')?.value||'all';
    hydrateAdmins();return;
+  }
+  if(a==='dr-vm-lvm-lab-diagnose'){
+   try{
+    const report=await api('/dr/vms/'+id+'/lvm-lab/diagnose-standby');
+    const rows=(report.checks||[]).map(x=>'<tr><td>'+e(x.stage)+'</td><td>'+labelStatus(x.ok?'completed':'failed')
+      +'</td><td>'+e(x.message)+'</td></tr>').join('');
+    modal('Diagnostic Proxmox en lecture seule — VMID '+e(report.vmid),
+      '<div class="notice"><b>Aucune écriture ni création de VM.</b> '
+      +(report.ready_for_creation?'Le VMID est libre, mais aucun transfert n’est autorisé par ce diagnostic.'
+        :report.target_exists?'Le VMID existe déjà : vérifier la VM avant toute reprise.'
+        :'Un prérequis Proxmox a échoué. Corriger ce contrôle avant la reprise.')+'</div>'
+      +'<div class="table-wrap"><table><thead><tr><th>Étape</th><th>État</th><th>Diagnostic</th></tr></thead><tbody>'
+      +rows+'</tbody></table></div>',
+      '<button class="btn" data-action="modal-close">Fermer</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
   }
   if(a==='dr-vm-lvm-lab-reconcile-provision'){
    const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
