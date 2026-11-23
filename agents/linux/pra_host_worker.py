@@ -694,11 +694,24 @@ def lvm_lab_diagnose_standby(data):
                        "message": "Inventaire Proxmox invalide"})
         return {"checks": checks, "ready_for_creation": False,
                 "target_exists": None, "vmid": ident}
-    checks.append({"stage": "VMID_AVAILABILITY", "ok": not matching,
-                   "message": "VMID libre" if not matching
-                   else "VMID présent sur le cluster : ne pas recréer la VM"})
-    return {"checks": checks, "ready_for_creation": not matching,
-            "target_exists": bool(matching), "vmid": ident}
+    if matching:
+        try:
+            owned=lvm_lab_validate_standby({
+                "vmid":ident,"protected_vm_id":data.get("protected_vm_id"),
+                "name":data.get("name")
+            })
+        except (HostError,LvmTargetError,ValueError,KeyError):
+            checks.append({"stage":"OWNERSHIP","ok":False,
+                           "message":"VMID occupé : propriétaire, état OFF ou isolation non vérifiés"})
+            return {"checks":checks,"ready_for_creation":False,
+                    "target_exists":True,"owned_standby":False,"vmid":ident}
+        checks.append({"stage":"OWNERSHIP","ok":True,
+                       "message":"VM REP_ identifiée, arrêtée, isolée, marqueurs conformes"})
+        return {"checks":checks,"ready_for_creation":False,
+                "target_exists":True,"owned_standby":True,"vmid":ident}
+    checks.append({"stage":"VMID_AVAILABILITY","ok":True,"message":"VMID libre"})
+    return {"checks":checks,"ready_for_creation":True,
+            "target_exists":False,"owned_standby":False,"vmid":ident}
 
 
 def lvm_lab_prepare_standby(data):
