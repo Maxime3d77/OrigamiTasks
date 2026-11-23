@@ -817,6 +817,21 @@ def get_lvm_lab_schedule_events(vm_id:int,request:Request):
         raise HTTPException(404,str(exc)) from None
 
 
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/resume-source')
+def resume_lvm_after_source_probe(vm_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation de recette requise')
+    try:
+        return pra_lvm_activation.resume_source_probe(
+            vm_id,user['username'],payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError,
+            pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Réconciliation QMP source non confirmée : aucune reprise') from None
+
+
 @app.post('/api/dr/vms/{vm_id}/lvm-lab/resume-owned')
 def resume_created_lvm_standby(vm_id:int,request:Request,payload:dict[str,Any]):
     user=security.require(request,role='admin',mutate=True)
