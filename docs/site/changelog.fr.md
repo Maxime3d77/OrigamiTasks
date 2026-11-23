@@ -1,5 +1,13 @@
 # Historique des modifications
 
+## Correctif urgent du 23 novembre 2026 — agents 0.3.32 → 0.3.33 et PRA #183
+
+- Les échecs de mises à jour des agents étaient tous affichés avec le même message générique. Les mises à jour affichent désormais l'étape SSH atteinte (vérification, sauvegarde, installation, redémarrage, état systemd) ou une catégorie de défaillance SFTP/SSH, sans exposer la sortie distante sensible.
+- La version du helper PRA sur le nœud doit être celle livrée avec l'agent mis à jour. Une console v0.3.33-rc1 ne met pas à niveau les fichiers déjà installés sur Proxmox : la mise à jour des agents sur les nœuds doit réussir.
+- Une erreur de préparation distante `lvm_lab_prepare_standby` peut être réconciliée depuis l'interface si, et seulement si, aucune copie LVM n'a été enregistrée et que l'API Proxmox confirme le VMID cible absent. Le bouton « Vérifier le VMID cible et reprendre la préparation » ne supprime ni n'adopte une VM existante.
+- Après une erreur distante, commencer par réessayer la mise à jour **d'un seul agent** (nœud PRA cible) et consulter le nouveau message détaillé. Ne pas relancer neuf installations ni un transfert LVM incertain sans diagnostic.
+
+
 ## 0.3.33-rc1 — 23 novembre 2026 (diagnostics PRA et ergonomie)
 
 - **Correction du PRA bloqué :** les actions internes autorisées intègrent désormais explicitement `lvm_lab_prepare_standby`, `lvm_lab_publish_standby` et `lvm_lab_test_boot`. Le refus local `Action PRA non autorisée` survenait avant toute commande Proxmox.
