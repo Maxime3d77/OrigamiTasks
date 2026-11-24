@@ -129,7 +129,17 @@ def run(vm_id, *, execute=False, incremental=False, lab_confirm=None):
                 if (bitmap.get("recording") is not True or bitmap.get("busy") is True
                         or bitmap.get("inconsistent") is True):
                     raise LabError("QMP dirty bitmap missing or unsafe; FULL LAB reseed required")
+        generation_count=destination.get("generation_count")
+        retention_limit=destination.get("retention_limit")
+        if (type(generation_count) is not int or generation_count<0
+                or type(retention_limit) is not int or retention_limit<1):
+            raise LabError("Inventaire de rétention LVM non vérifié : mise à jour des agents requise")
+        retention_full=generation_count>=retention_limit
         result = {
+            "generation_count":generation_count,
+            "retention_limit":retention_limit,
+            "retention_blocked":retention_full,
+            "retention_action":"inspect_only_no_deletion" if retention_full else "capacity_available",
             "vm_id":vm_id, "source_vmid":vm["source_vmid"],
             "target_vmid":vm["target_vmid"],"mode":mode,
             "disk_slots":info["slots"],"source_running":True,
@@ -143,6 +153,10 @@ def run(vm_id, *, execute=False, incremental=False, lab_confirm=None):
         if not execute:
             result["note"]="READ ONLY: supply --execute and --lab-confirm to allocate a disposable test LV"
             return result
+        if retention_full:
+            raise LabError(
+                "Limite de "+str(retention_limit)+" générations LVM atteinte : "
+                "copie refusée avant allocation ; diagnostic et consolidation sûrs requis")
         if lab_confirm != LAB_ACK:
             raise LabError("LAB execute requires explicit acknowledgement")
         prepared = pra_live._run_helper(dst,"lvm_lab_begin",{
