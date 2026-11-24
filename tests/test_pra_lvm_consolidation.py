@@ -126,6 +126,7 @@ def test_prune_two_old_volumes_via_proxmox_only(context, monkeypatch):
                             v: next(k for k, value in cfg.items() if value == v) for v in vols})
     monkeypatch.setattr(mod, "active_path", lambda *_args, **_kw: "/dev/dm-0")
     monkeypatch.setattr(mod, "image_chain", lambda path: ["/dev/dm-0"])
+    monkeypatch.setattr(mod, "lv_exists", lambda volid, vg: False)
     commands = []
 
     def fake_run(*args, **kwargs):
