@@ -356,7 +356,7 @@ storage capabilities. Source VM stays **ON** and target standby remains
 
 ### Use on disposable non-production Proxmox clusters only
 
-1. Register both clusters/sites and deploy PRA-capable **Linux agent 0.3.30**
+1. Register both clusters/sites and deploy PRA-capable **Linux agent 0.3.31 or newer**
    to the authorized **lab** source and target nodes, with approved SSH.
 2. Create a protected VM policy using `qmp_live_incremental`; source must
    be running, target storage must be PVE `lvm` with

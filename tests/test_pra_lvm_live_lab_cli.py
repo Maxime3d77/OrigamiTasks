@@ -144,3 +144,16 @@ def test_lvm_lab_helper_requires_label_and_protection_marker(monkeypatch):
     cfg["net0"]="virtio,bridge=vmbr0"
     with pytest.raises(worker.HostError,match="zero network"):
         worker._lvm_lab_store(payload)
+
+
+def test_lvm_buffer_prepare_timeout_allows_large_local_flatten(pipeline,monkeypatch):
+    original=lab.pra_live._run_helper
+    limits={}
+    def timed(conn,action,data,timeout=60):
+        limits[action]=timeout
+        return original(conn,action,data,timeout=timeout)
+    monkeypatch.setattr(lab.pra_live,"_run_helper",timed)
+    result=lab.run(17,execute=True,lab_confirm=lab.LAB_ACK)
+    assert result["real_pve_replication_performed"] is True
+    assert limits["lvm_lab_begin"] >= 21660
+    assert limits["source_copy"] >= 21660
