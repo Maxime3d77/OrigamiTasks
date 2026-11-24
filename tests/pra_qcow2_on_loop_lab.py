@@ -31,7 +31,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="origami-qcow2-block-lab-") as work:
         root=Path(work)
         try:
-            for i in range(2):
+            for i in range(4):
                 image=root/f"test-lv-{i}.img"
                 with image.open("wb") as stream:
                     stream.truncate(128*1024*1024)
@@ -42,7 +42,7 @@ def main():
                 if not stat.S_ISBLK(resolved.stat().st_mode):
                     raise RuntimeError("Allocated loop is not a block device")
                 devices.append(loop)
-            base, overlay=devices
+            base, overlay, buffer_a, buffer_b=devices
             run("qemu-img","create","-f","qcow2",base,"64M")
             run("qemu-io","-f","qcow2","-c","write -P 0x52 0 64k",base)
             run("qemu-img","create","-f","qcow2","-F","qcow2",
@@ -57,7 +57,37 @@ def main():
                                  "--backing-chain","--output=json",overlay))
             assert len(chain)==2,chain
             assert chain[0]["filename"]==overlay and chain[1]["filename"]==base
-            print("PASS: real block-device qcow2 volume-chain + immutable base")
+            # New receiver protocol: two persistent and independent target
+            # volumes, reused alternately. Flatten a legacy backing chain
+            # into A, then copy A->B, then safely reset/reuse inactive A.
+            run("qemu-img","create","-f","qcow2",buffer_a,"64M")
+            run("qemu-img","convert","-f","qcow2","-O","qcow2",
+                "-n",overlay,buffer_a)
+            run("qemu-io","-f","qcow2","-c","read -P 0x52 0 64k",buffer_a)
+            run("qemu-io","-f","qcow2","-c","read -P 0x31 128k 64k",buffer_a)
+            a_chain=json.loads(run("qemu-img","info","-f","qcow2",
+                                   "--backing-chain","--output=json",buffer_a))
+            assert len(a_chain)==1,a_chain
+            run("qemu-io","-f","qcow2","-c","write -P 0xFA 256k 64k",buffer_a)
+            run("qemu-img","create","-f","qcow2",buffer_b,"64M")
+            run("qemu-img","convert","-f","qcow2","-O","qcow2",
+                "-n",buffer_a,buffer_b)
+            run("qemu-io","-f","qcow2","-c","write -P 0xB2 384k 64k",buffer_b)
+            # Reusing A wipes its previous QCOW2 allocations BEFORE convert;
+            # a zero region must not expose stale clusters.
+            run("qemu-img","create","-f","qcow2",buffer_a,"64M")
+            run("qemu-img","convert","-f","qcow2","-O","qcow2",
+                "-n",buffer_b,buffer_a)
+            run("qemu-io","-f","qcow2","-c","read -P 0x52 0 64k",buffer_a)
+            run("qemu-io","-f","qcow2","-c","read -P 0x31 128k 64k",buffer_a)
+            run("qemu-io","-f","qcow2","-c","read -P 0xFA 256k 64k",buffer_a)
+            run("qemu-io","-f","qcow2","-c","read -P 0xB2 384k 64k",buffer_a)
+            for volume in (buffer_a,buffer_b):
+                run("qemu-img","check","-f","qcow2",volume)
+                verified=json.loads(run("qemu-img","info","-f","qcow2",
+                                        "--backing-chain","--output=json",volume))
+                assert len(verified)==1,verified
+            print("PASS: real block-device QCOW2 chain migration and two-buffer reuse")
         finally:
             # Disconnect only the loop devices allocated in this process.
             for dev in reversed(devices):
