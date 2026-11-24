@@ -210,7 +210,7 @@ def test_foreign_previous_lvm_checkpoint_never_becomes_incremental_base(setup):
     # Capture prior PVE operations: the FULL seed legitimately allocated one LV.
     calls_before = list(target.calls)
     volumes_before = dict(target.files)
-    with pytest.raises(mod.LvmCheckpointError,match="FULL reseed"):
+    with pytest.raises(mod.LvmCheckpointError,match="ownership"):
         store.begin(mode="incremental",sizes=sizes,
                     source_vm_uuid="lab-vm-one",operator_approved=True)
     assert target.calls == calls_before
