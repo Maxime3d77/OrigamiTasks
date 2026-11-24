@@ -226,7 +226,9 @@ def test_lvm_generation_diagnostic_reports_pending_without_mutation(monkeypatch,
         owned=journal/"owned.json",
         _read=lambda p:json.loads(p.read_text()) if p.exists() else None,
     )
+    store.target=target
     monkeypatch.setattr(host,"_lvm_lab_store",lambda data:store)
+    monkeypatch.setattr(host,"_vm_config",lambda _: {})
     monkeypatch.setattr(host,"cmd",lambda *a,**kw:(_ for _ in ()).throw(
         AssertionError("No host command allowed")))
     result=host.lvm_lab_diagnose_generation({"vmid":183})
@@ -254,6 +256,7 @@ def test_lvm_generation_diagnostic_detects_unjournaled_lv_without_mutating(monke
         current_file=journal/"current.json",owned=journal/"owned.json",
         _read=lambda p:json.loads(p.read_text()) if p.exists() else None)
     monkeypatch.setattr(host,"_lvm_lab_store",lambda _:store)
+    monkeypatch.setattr(host,"_vm_config",lambda _: {})
     calls=[]
     def command(*args,**kwargs):
         calls.append(args)
@@ -282,6 +285,7 @@ def test_lvm_generation_diagnostic_does_not_claim_absence_if_lvs_fails(monkeypat
         target=SimpleNamespace(vmid=183,inspect=lambda:{"vgname":"VG"}),
         _read=lambda p:json.loads(p.read_text()) if p.exists() else None)
     monkeypatch.setattr(host,"_lvm_lab_store",lambda _:store)
+    monkeypatch.setattr(host,"_vm_config",lambda _: {})
     monkeypatch.setattr(host,"cmd",lambda *a,**kw:(_ for _ in ()).throw(
         host.HostError("Host operation rejected: lvs")))
     report=host.lvm_lab_diagnose_generation({"vmid":183})
@@ -310,6 +314,7 @@ def test_empty_pending_reconciliation_preserves_archive_and_never_frees_lv(monke
         _read=lambda p:json.loads(p.read_text()) if p.exists() else None,
     )
     monkeypatch.setattr(host,"_lvm_lab_store",lambda _:store)
+    monkeypatch.setattr(host,"_vm_config",lambda _: {})
     monkeypatch.setattr(host,"lvm_lab_validate_standby",lambda _:{"owned":True})
     def readonly(*a,**kw):
         assert a==("lvs","--reportformat","json","-o","vg_name,lv_name")
@@ -349,6 +354,7 @@ def test_empty_pending_reconciliation_refuses_if_expected_lv_exists(monkeypatch,
                                inspect=lambda:{"vgname":"LAB-VG"}),
         _read=lambda p:json.loads(p.read_text()) if p.exists() else None)
     monkeypatch.setattr(host,"_lvm_lab_store",lambda _:store)
+    monkeypatch.setattr(host,"_vm_config",lambda _: {})
     monkeypatch.setattr(host,"lvm_lab_validate_standby",lambda _:{"owned":True})
     monkeypatch.setattr(host,"cmd",lambda *a,**kw:json.dumps({
         "report":[{"lv":[{"vg_name":"LAB-VG","lv_name":expected}]}]}))
