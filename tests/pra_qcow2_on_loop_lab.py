@@ -73,6 +73,8 @@ def main():
             run("qemu-img","convert","-f","qcow2","-O","qcow2",
                 "-n",buffer_a,buffer_b)
             run("qemu-io","-f","qcow2","-c","write -P 0xB2 384k 64k",buffer_b)
+            # A has data absent from B; the new image must not leak it.
+            run("qemu-io","-f","qcow2","-c","write -P 0xD1 768k 64k",buffer_a)
             # Reusing A wipes its previous QCOW2 allocations BEFORE convert;
             # a zero region must not expose stale clusters.
             run("qemu-img","create","-f","qcow2",buffer_a,"64M")
@@ -82,6 +84,7 @@ def main():
             run("qemu-io","-f","qcow2","-c","read -P 0x31 128k 64k",buffer_a)
             run("qemu-io","-f","qcow2","-c","read -P 0xFA 256k 64k",buffer_a)
             run("qemu-io","-f","qcow2","-c","read -P 0xB2 384k 64k",buffer_a)
+            run("qemu-io","-f","qcow2","-c","read -P 0x00 768k 64k",buffer_a)
             for volume in (buffer_a,buffer_b):
                 run("qemu-img","check","-f","qcow2",volume)
                 verified=json.loads(run("qemu-img","info","-f","qcow2",
