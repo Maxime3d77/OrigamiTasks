@@ -56,6 +56,7 @@ class LvmCheckpointStore:
         self.command = command
         self.root = target.journal
         self.pending = self.root / "pending.json"
+        self.consolidation = self.root / "consolidation.json"
         self.current_file = self.root / "current.json"
         self.owned = self.root / "owned.json"
         # Separate from PveLvmTarget allocation lock: nested flock on two
@@ -118,6 +119,8 @@ class LvmCheckpointStore:
         with self._exclusive():
             if self.pending.exists() or self.pending.is_symlink():
                 raise LvmCheckpointError("Staged or uncertain checkpoint requires reconciliation")
+            if self.consolidation.exists() or self.consolidation.is_symlink():
+                raise LvmCheckpointError("Legacy LVM consolidation requires explicit maintenance reconciliation")
             previous = self._read(self.current_file)
             # Every incremental LVM checkpoint allocates a full-size thick LV
             # per disk. Automatic garbage collection is not proven safe for
@@ -131,7 +134,8 @@ class LvmCheckpointStore:
                     "Limite de 8 générations LVM épaisses atteinte ; "
                     "réconciliation et politique de rétention nécessaires")
             if mode == "incremental" and (
-                    not self._matches(previous, sizes, source_vm_uuid)
+                    (previous or {}).get("requires_full_reseed") is True
+                    or not self._matches(previous, sizes, source_vm_uuid)
                     or previous.get("protected_vm_id") != self.target.protected_vm_id
                     or previous.get("target_vmid") != self.target.vmid
                     or previous.get("storage") != self.target.storage):
