@@ -108,10 +108,85 @@ class LvmCheckpointStore:
                 and all(isinstance(disks.get(s), dict)
                         and disks[s].get("size") == v for s, v in sizes.items()))
 
+    def _active_chain_paths(self, previous):
+        """Resolve every ancestor of the *published* checkpoint.
+
+        A reusable buffer may never be the top image, or any backing image,
+        of the last committed checkpoint, including legacy LVM chains.
+        """
+        if not previous:
+            return set()
+        if previous.get("status") != "committed":
+            raise LvmCheckpointError("Uncommitted base cannot be reused")
+        paths = set()
+        for item in previous.get("disks", {}).values():
+            root = self._safe_path(item["volid"])
+            output = self.command("qemu-img", "info", "-f", "qcow2",
+                                  "--backing-chain", "--output=json", root)
+            try:
+                chain = json.loads(output)
+            except (ValueError, TypeError) as exc:
+                raise LvmCheckpointError("Previous QCOW2 chain cannot be audited") from exc
+            if not isinstance(chain, list) or not 1 <= len(chain) <= 128:
+                raise LvmCheckpointError("Unverifiable previous backing chain")
+            if Path(chain[0].get("filename", "")).resolve(strict=True) != Path(root).resolve(strict=True):
+                raise LvmCheckpointError("Published checkpoint does not match its QCOW2 chain")
+            for link in chain:
+                if not isinstance(link, dict) or link.get("format") not in (None, "qcow2"):
+                    raise LvmCheckpointError("Unsupported previous disk backing format")
+                name = link.get("filename")
+                if not isinstance(name, str) or not name.startswith("/dev/"):
+                    # The actual production adapter resolves to block devices.
+                    # Fake test targets may use a temporary absolute path.
+                    if not isinstance(name, str) or not Path(name).is_absolute():
+                        raise LvmCheckpointError("Invalid previous backing path")
+                paths.add(str(Path(name).resolve(strict=True)))
+        return paths
+
+    def _buffer_catalog(self, ledger, sizes):
+        """Only volumes explicitly enrolled as recyclable buffers may be reused."""
+        if not isinstance(ledger, dict):
+            raise LvmCheckpointError("Invalid volume ownership ledger")
+        raw = ledger.get("buffers", {})
+        if not isinstance(raw, dict):
+            raise LvmCheckpointError("Invalid reusable LVM volume catalog")
+        if raw and (ledger.get("protected_vm_id") != self.target.protected_vm_id
+                    or ledger.get("target_vmid") != self.target.vmid
+                    or ledger.get("storage") != self.target.storage):
+            raise LvmCheckpointError("Foreign or unowned LVM buffer catalog")
+        result = {}
+        seen = set()
+        for slot, entries in raw.items():
+            if slot not in sizes or not isinstance(entries, list) or len(entries) > 2:
+                raise LvmCheckpointError("Unrecognized reusable LVM disk slot")
+            result[slot] = []
+            for entry in entries:
+                if not isinstance(entry, dict) or entry.get("size") != sizes[slot]:
+                    raise LvmCheckpointError("LVM disk geometry changed; manually reseed")
+                volid = entry.get("volid")
+                if not isinstance(volid, str) or volid in seen:
+                    raise LvmCheckpointError("Duplicate or invalid reusable LVM volume")
+                if not _VOL.fullmatch(volid.split(":", 1)[-1]):
+                    raise LvmCheckpointError("Untrusted reusable LVM volume name")
+                # Do not rely on a name alone: Proxmox must resolve ownership.
+                self._safe_path(volid)
+                seen.add(volid)
+                result[slot].append({"volid": volid, "size": sizes[slot]})
+        return result
+
     def begin(self, *, mode, sizes, source_vm_uuid, operator_approved=False):
-        """Allocate PVE volumes; do not expose them to a VM or NBD yet."""
+        """Stage into at most TWO durable LVs per source disk.
+
+        First FULL seed allocates A; first incremental allocates B. Later
+        cycles alternate A/B. An inactive buffer is reset and filled with a
+        FLATTENED copy of the committed image, then QMP writes its delta.
+        Publication only happens after the source jobs and QEMU checks pass.
+        No published image or its backing chain is ever modified.
+        """
         if operator_approved is not True:
             raise LvmCheckpointError("Explicit lab staging approval required")
+        if mode not in ("full", "incremental"):
+            raise LvmCheckpointError("Unsupported replication mode")
         if not isinstance(source_vm_uuid, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", source_vm_uuid):
             raise LvmCheckpointError("Invalid source generation")
         sizes = self.target.validate_sizes(sizes)
@@ -119,60 +194,94 @@ class LvmCheckpointStore:
             if self.pending.exists() or self.pending.is_symlink():
                 raise LvmCheckpointError("Staged or uncertain checkpoint requires reconciliation")
             previous = self._read(self.current_file)
-            if mode == "incremental" and (
-                    not self._matches(previous, sizes, source_vm_uuid)
-                    or previous.get("protected_vm_id") != self.target.protected_vm_id
-                    or previous.get("target_vmid") != self.target.vmid
-                    or previous.get("storage") != self.target.storage):
+            ledger = self._read(self.owned) or {"generations": []}
+            if previous and (previous.get("status") != "committed"
+                             or previous.get("protected_vm_id") != self.target.protected_vm_id
+                             or previous.get("target_vmid") != self.target.vmid
+                             or previous.get("storage") != self.target.storage):
+                raise LvmCheckpointError("Previous checkpoint ownership is not verified")
+            if mode == "incremental" and not self._matches(previous, sizes, source_vm_uuid):
                 raise LvmCheckpointError("No verified compatible LVM base: FULL reseed required")
-            plan_previous = previous if mode == "incremental" else None
-            plan = self.target.plan(sizes, mode, previous=plan_previous)
-            # PveLvmTarget.stage_allocations() itself journals allocation
-            # intent prior to invoking PVE. It requires an admin-approved,
-            # stopped and owned standby VM or an unused VMID.
-            allocation = self.target.stage_allocations(
-                plan, approved=True, previous=plan_previous)
-            token = allocation["token"]
-            disks = {}
-            try:
-                for slot, detail in sorted(allocation["allocated"].items()):
-                    volid = detail["volid"]
-                    if not _VOL.fullmatch(volid.split(":", 1)[-1]):
-                        raise LvmCheckpointError("Unexpected newly allocated QCOW2 volume")
+
+            catalog = self._buffer_catalog(ledger, sizes)
+            active = self._active_chain_paths(previous)
+            reuse, allocate = {}, {}
+            for slot, size in sizes.items():
+                candidates = catalog.get(slot, [])
+                for entry in candidates:
+                    volid = entry["volid"]
                     path = self._safe_path(volid)
-                    # Only the fresh PVE-allocated staging LV is initialized.
-                    # Never write to a previous checkpoint or a source LV.
-                    if mode == "full":
-                        self.command("qemu-img", "create", "-f", "qcow2",
-                                     path, str(sizes[slot]))
-                    else:
-                        backing = self._safe_path(previous["disks"][slot]["volid"])
-                        self.command("qemu-img", "create", "-f", "qcow2", "-F",
-                                     "qcow2", "-b", backing, path)
-                    disks[slot] = {"volid": volid, "size": sizes[slot]}
-                prepared = {
-                    "token": token, "status": "staging", "storage": self.target.storage,
-                    "target_vmid": self.target.vmid,
-                    "protected_vm_id": self.target.protected_vm_id,
-                    "mode": mode, "source_vm_uuid": source_vm_uuid,
-                    "previous_token": previous.get("token") if previous else None,
-                    "depth": int(previous.get("depth", 1)) + 1 if mode == "incremental" else 1,
-                    "disks": disks, "created_at": int(time.time()),
-                    "cluster_visible": False, "vm_started": False,
-                    "replication_enabled": False, "failover_enabled": False
-                }
-                _atomic(self.pending, prepared)
-                return prepared
+                    if path in active:
+                        continue
+                    # Also protects references from ANY VM and snapshot that
+                    # appear in cluster-wide PVE configuration (even 'unused').
+                    self.target.assert_volume_unattached(volid)
+                    reuse[slot] = volid
+                    break
+                if slot not in reuse:
+                    if len(candidates) >= 2:
+                        raise LvmCheckpointError("Both LVM buffers are in use; manual audit required")
+                    allocate[slot] = size
+
+            # The normal PveLvmTarget staging allocator is used ONLY when
+            # another buffer really is needed, never for every generation.
+            # For a two-buffer steady state no 'pvesm alloc' occurs.
+            if allocate:
+                plan = self.target.plan(allocate, "full")
+                allocation = self.target.stage_allocations(plan, approved=True)
+                token = allocation["token"]
+                fresh = allocation["allocated"]
+            else:
+                self.target.inspect()
+                self.target._target_stopped()
+                token = os.urandom(16).hex()
+                fresh = {}
+            disks = {}
+            for slot, size in sorted(sizes.items()):
+                volid = reuse.get(slot) or fresh[slot]["volid"]
+                if not _VOL.fullmatch(volid.split(":", 1)[-1]):
+                    raise LvmCheckpointError("Unexpected allocated QCOW2 volume")
+                disks[slot] = {"volid": volid, "size": size, "reused": slot in reuse}
+            preparing = {
+                "token": token, "status": "preparing", "storage": self.target.storage,
+                "target_vmid": self.target.vmid,
+                "protected_vm_id": self.target.protected_vm_id,
+                "mode": mode, "source_vm_uuid": source_vm_uuid,
+                "previous_token": previous.get("token") if previous else None,
+                "depth": 1,  # Every new checkpoint is independently flattened.
+                "sequence": int(previous.get("sequence", 1)) + 1 if previous else 1,
+                "disks": disks, "created_at": int(time.time()),
+                "checkpoint_committed": False,
+                "cluster_visible": False, "vm_started": False,
+                "replication_enabled": False, "failover_enabled": False,
+            }
+            # Persist intent BEFORE resetting an inactive LV. A crash cannot
+            # silently make an interrupted buffer look available for retry.
+            _atomic(self.pending, preparing)
+            try:
+                for slot, details in sorted(disks.items()):
+                    path = self._safe_path(details["volid"])
+                    if details["reused"]:
+                        self.target.assert_volume_unattached(details["volid"])
+                    if path in active:
+                        raise LvmCheckpointError("Refusing to overwrite published checkpoint")
+                    # Reset the QCOW2 allocation table: convert -n may skip
+                    # zero extents, so an old dirty image cannot be reused as-is.
+                    self.command("qemu-img", "create", "-f", "qcow2",
+                                 path, str(details["size"]))
+                    if mode == "incremental":
+                        base = self._safe_path(previous["disks"][slot]["volid"])
+                        if path == base:
+                            raise LvmCheckpointError("Source and target buffer are identical")
+                        self.command("qemu-img", "convert", "-f", "qcow2",
+                                     "-O", "qcow2", "-n", base, path)
+                preparing["status"] = "staging"
+                _atomic(self.pending, preparing)
+                return preparing
             except BaseException:
-                # An allocation may have succeeded even if QEMU refused to
-                # initialize its QCOW2 header. Preserve every LV and record
-                # the uncertain state for explicit operator reconciliation.
-                record = self._read(self.pending)
-                if record and record.get("token") == token:
-                    record["status"] = "uncertain"
-                    record["checkpoint_committed"] = False
-                    record["note"] = "QCOW2 initialization incomplete; no LV freed"
-                    _atomic(self.pending, record)
+                preparing["status"] = "uncertain"
+                preparing["note"] = "Buffer preparation failed; do not retry incrementally without reconciliation"
+                _atomic(self.pending, preparing)
                 raise
 
     def image_path(self, slot, token):
@@ -188,7 +297,7 @@ class LvmCheckpointStore:
             return self._safe_path(disk["volid"])
 
     def commit(self, token, *, writers_closed=False, source_jobs_verified=False):
-        """Structural QCOW2 checks only; not a boot or application test."""
+        """Atomically publish a flattened, verified buffer; never grow a chain."""
         if writers_closed is not True or source_jobs_verified is not True:
             raise LvmCheckpointError("Cannot publish while NBD or source proof is uncertain")
         if not isinstance(token, str) or not _TOKEN.fullmatch(token):
@@ -200,6 +309,10 @@ class LvmCheckpointStore:
                     or staged.get("target_vmid") != self.target.vmid
                     or staged.get("storage") != self.target.storage):
                 raise LvmCheckpointError("Unknown or foreign staged checkpoint")
+            previous = self._read(self.current_file)
+            if (previous.get("token") if previous else None) != staged.get("previous_token"):
+                raise LvmCheckpointError("Published checkpoint changed during transfer")
+            self.target._target_stopped()
             for slot, item in sorted(staged["disks"].items()):
                 path = self._safe_path(item["volid"])
                 report = self.command("qemu-img", "info", "-f", "qcow2",
@@ -207,35 +320,49 @@ class LvmCheckpointStore:
                 try:
                     chain = json.loads(report)
                 except (ValueError, TypeError) as exc:
-                    raise LvmCheckpointError("QCOW2 block chain is malformed") from exc
-                if not isinstance(chain, list) or not chain:
-                    raise LvmCheckpointError("Missing target QCOW2 chain")
-                if Path(chain[0].get("filename", "")).resolve(strict=True) != Path(path).resolve(strict=True):
-                    raise LvmCheckpointError("Checkpoint top image mismatch")
-                if staged["mode"] == "incremental":
-                    base = self._read(self.current_file)
-                    if not self._matches(base, {k: d["size"] for k,d in staged["disks"].items()},
-                                         staged["source_vm_uuid"]):
-                        raise LvmCheckpointError("Backing checkpoint changed while copying")
-                    expected_base = self._safe_path(base["disks"][slot]["volid"])
-                    if len(chain) < 2 or Path(chain[1].get("filename", "")).resolve(strict=True) != Path(expected_base).resolve(strict=True):
-                        raise LvmCheckpointError("Wrong LVM backing volume")
-                elif len(chain) != 1:
-                    raise LvmCheckpointError("FULL seed unexpectedly depends on prior volumes")
+                    raise LvmCheckpointError("QCOW2 block image is malformed") from exc
+                # Independent images: any backing reference is a regression.
+                if (not isinstance(chain, list) or len(chain) != 1
+                        or not isinstance(chain[0], dict)
+                        or Path(chain[0].get("filename", "")).resolve(strict=True)
+                           != Path(path).resolve(strict=True)):
+                    raise LvmCheckpointError("Checkpoint buffer is not standalone QCOW2")
                 self.command("qemu-img", "check", "-f", "qcow2", path)
             committed = dict(staged, status="committed", committed_at=int(time.time()))
-            previous_ledger = self._read(self.owned) or {"generations": []}
-            existing = previous_ledger.get("generations")
+            old_ledger = self._read(self.owned) or {"generations": []}
+            existing = old_ledger.get("generations")
             if not isinstance(existing, list) or len(existing) > 100000:
                 raise LvmCheckpointError("Malformed owned-volume ledger")
-            # Record all owned volumes before making the new checkpoint
-            # current. On crash an orphan can be reconciled, not deleted.
-            ledger = {"generations": existing + [{
-                "token": token,
-                "volids": [item["volid"] for item in committed["disks"].values()],
-                "created_at": committed["created_at"]
-            }]}
-            _atomic(self.owned, ledger)
+            sizes = {s: d["size"] for s, d in committed["disks"].items()}
+            catalog = self._buffer_catalog(old_ledger, sizes)
+            known_volids = {v for generation in existing
+                            if isinstance(generation, dict)
+                            for v in generation.get("volids", []) if isinstance(v, str)}
+            newly_owned = []
+            for slot, detail in committed["disks"].items():
+                volid = detail["volid"]
+                entries = catalog.setdefault(slot, [])
+                if volid not in {entry["volid"] for entry in entries}:
+                    if detail.get("reused") or len(entries) >= 2:
+                        raise LvmCheckpointError("Unrecognized or excessive LVM buffer")
+                    entries.append({"volid": volid, "size": detail["size"]})
+                if volid not in known_volids:
+                    if detail.get("reused"):
+                        raise LvmCheckpointError("Reused LV missing from ownership ledger")
+                    newly_owned.append(volid)
+            # Generations are an ownership history, NOT a new allocation.
+            # Append only when a genuinely new LV was allocated (max 2/disk).
+            if newly_owned:
+                existing = existing + [{
+                    "token": token, "volids": sorted(newly_owned),
+                    "created_at": committed["created_at"]
+                }]
+            new_ledger = {
+                "generations": existing, "buffers": catalog,
+                "protected_vm_id": self.target.protected_vm_id,
+                "target_vmid": self.target.vmid, "storage": self.target.storage,
+            }
+            _atomic(self.owned, new_ledger)
             _atomic(self.current_file, committed)
             self.pending.unlink()
             return committed
