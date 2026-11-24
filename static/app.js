@@ -785,7 +785,8 @@ async function openPRALvmLabPanel(vmId){
    +'</td><td>'+e(x.mode)+'</td><td>'+e(x.point_at?dt(x.point_at):'—')
    +'</td><td>'+e(x.details||'')+(x.test_vmid?' · clone VMID '+e(x.test_vmid):'')+'</td></tr>').join('');
  const running=history.some(x=>['queued','running','uncertain'].includes(x.status));
- const writable=Boolean(pre && pre.source_running && pre.target_stopped) && !running;
+ const writable=Boolean(pre && pre.source_running && pre.target_stopped
+   && !pre.retention_blocked) && !running;
  const latestCopy=history.find(x=>['full','incremental'].includes(x.mode));
  const restoreReady=writable&&Boolean(pre?.checkpoint)
    &&latestCopy?.status==='completed'&&latestCopy?.checkpoint_token===pre.checkpoint;
@@ -847,6 +848,11 @@ async function openPRALvmLabPanel(vmId){
    +(pre?'<p class="hint">Disques : '+e((pre.disk_slots||[]).join(', '))
       +' · Espace libre : '+e(Math.round(pre.available_bytes/1073741824))+' Gio'
       +' · Dernier checkpoint : '+e(pre.checkpoint||'aucun')+'</p>'
+      +'<div class="notice '+(pre.retention_blocked?'error':'')+'"><b>Rétention LVM : '
+      +e(pre.generation_count??'?')+' / '+e(pre.retention_limit??'?')+' générations</b>'
+      +(pre.retention_blocked?' — plafond atteint : nouvelle copie bloquée avant allocation. '
+         +'Aucune suppression ou consolidation automatique de volume n’est autorisée.'
+         :' · Contrôle de rétention actif.')+'</div>'
       :'<div class="notice error"><b>Prévol bloqué :</b> '+e(preError)+'</div>')
    +'<label class="field"><span>Confirmer exactement DISPOSABLE-LAB-ONLY</span>'
    +'<input id="praLvmLabConfirmation" autocomplete="off" placeholder="DISPOSABLE-LAB-ONLY"></label>'
@@ -2253,6 +2259,20 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
       +(r.requires_reconciliation?'Réconciliation requise : ne pas relancer FULL, ni supprimer les LV.'
          :'Aucune génération en attente déclarée par le journal local.')
       +'</b> · État : '+e(r.state)+' · Générations historiques : '+e(r.generation_count)+'</div>'
+      +'<div class="notice '+(r.retention_full?'error':'')+'"><b>Rétention : '
+      +e(r.generation_count)+' / '+e(r.retention_limit??8)+' générations</b>'
+      +(r.retention_full?' — capacité logique atteinte : nouvel incrémental interdit. '
+         +'Les générations QCOW2 peuvent avoir une chaîne de backing ; aucune purge automatique.'
+         :' — aucun nettoyage automatique autorisé.')+'</div>'
+      +'<div class="panel"><h3>Références de stockage Proxmox</h3>'
+      +'<div class="table-wrap"><table><thead><tr><th>Emplacement VM</th><th>Volume</th><th>Répertorié dans le journal</th></tr></thead><tbody>'
+      +((r.pve_disk_references||[]).map(x=>'<tr><td>'+e(x.slot)+'</td><td>'+e(x.volid)
+          +'</td><td>'+e(x.ledger_owned?'Oui':'Non confirmé')+'</td></tr>').join('')
+        ||'<tr><td colspan="3">Aucune référence Proxmox contrôlée</td></tr>')
+      +'</tbody></table></div>'
+      +(r.pve_reference_error?'<p class="notice error">'+e(r.pve_reference_error)+'</p>':'')
+      +'<p class="hint">Les entrées unused sont toujours des références Proxmox. '
+      +'Ne pas les supprimer avant vérification complète de la chaîne QCOW2, des snapshots et des clones.</p></div>'
       +record(r.pending,'Génération en attente')
       +(r.pending?.failure_category?'<p><b>Code dernier échec : </b>'+e(r.pending.failure_category)+'</p>':'')
       +'<div class="panel"><h3>Contrôle du VG réel (lecture seule)</h3>'
