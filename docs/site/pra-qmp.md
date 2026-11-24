@@ -385,10 +385,26 @@ storage capabilities. Source VM stays **ON** and target standby remains
 6. An `uncertain` result blocks all replay pending manual QMP/NBD/LV
    reconciliation. Existing LVs are **never automatically freed**.
 
-This performs **real disk writes**, one thick PVE-managed LVM generation
-per run, including increments, and may consume the *entire virtual size*
-of each disk per generation. Use disposable, adequately sized lab storage.
-Do not target production arrays, production VGs or important VMs.
+This performs **real writes to LAB LVM volumes**. The receiver now
+maintains **at most two standalone, persistent LVs per source disk**
+(A/B buffers) for unchanged disk geometry: the initial FULL seed
+allocates A, the first incremental run allocates B, then every later
+cycle alternates existing buffers **without allocating a new LV**.
+The inactive buffer is reset and rebuilt locally from the last verified
+checkpoint before QMP applies changed blocks over NBD. The inter-site
+transfer stays incremental, but **local full-image copying** can be slow.
+
+Older generations from the previous QCOW2 backing-chain implementation
+are **preserved** after upgrading; no automatic LV deletion is allowed
+because Proxmox snapshots, unused slots and other VMs may still reference
+them. The first two post-upgrade runs build the independent A/B buffers;
+later runs reuse those buffers. A referenced buffer is never overwritten.
+An `uncertain` run needs manual reconciliation and usually a FULL reseed
+if the source bitmap was already consumed.
+
+Allow capacity for **two full-sized thick volumes per source disk** plus
+unreconciled historical volumes. Use only disposable lab storage, never
+production arrays, production VGs or important VMs.
 
 No auto-attach, guest start, production fencing, promotion, witness or
 failback is provided. The separate `pra_lvm_restore_lab.py` component

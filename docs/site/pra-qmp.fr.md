@@ -454,11 +454,30 @@ QCOW2. Les résultats et les échecs sont conservés dans
    vérification manuelle des jobs QMP, des exports NBD et des LV attribués
    au checkpoint ; aucune suppression automatique n'est effectuée.
 
-**Important :** ces opérations **allouent et remplissent de vrais volumes
-LVM**. Chaque incrément occupe potentiellement l'espace virtuel complet
-de chaque disque (LV épaisses). Utiliser un VG de recette jetable,
-avec une réserve suffisante. N'utiliser ni la baie/les pools de production
-ni une VM contenant des données importantes.
+**Important :** ces opérations **écrivent réellement sur des volumes
+LVM de recette**. Le moteur utilise désormais **au plus deux LV
+autonomes et persistants par disque** (tampons A/B) pour une géométrie
+inchangée : une première LV lors de l'amorçage complet, une seconde lors
+du premier incrément, puis **réutilisation alternée sans nouvelle allocation**.
+Le volume inactif est réinitialisé et reconstruit localement à partir du
+dernier point validé ; le bitmap QMP ne transfère que les changements
+sur le réseau. Cette **copie complète locale** peut être longue et exige
+des IOPS, même si le trafic intersites est incrémental.
+
+Les anciennes générations créées avec la logique de chaînes QCOW2 restent
+**conservées** après mise à jour : le moteur n'efface rien automatiquement,
+en raison d'éventuelles références Proxmox (snapshots, disques unused,
+autres VM). La première synchronisation avec l'ancien journal ajoute un
+premier tampon autonome, la suivante le second ; les cycles ultérieurs
+réutilisent les deux. L'outil bloque la réutilisation lorsqu'il détecte
+des références de disques. Une synchronisation `uncertain` exige une
+réconciliation et généralement un nouvel amorçage FULL si le bitmap
+incrémental a été consommé.
+
+Utiliser un VG de recette jetable avec assez de capacité pour
+**deux images complètes par disque** (plus les volumes historiques tant
+qu'ils n'ont pas été audités). Ne pas viser les baies/pools de production
+ou une VM contenant des données importantes.
 
 Le récepteur LVM de cette étape **n'attache pas automatiquement les disques**
 à `REP_`, ne démarre aucune copie et n'autorise **ni bascule ni failback**.

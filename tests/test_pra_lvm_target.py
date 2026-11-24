@@ -237,3 +237,22 @@ def test_initial_seed_can_stage_when_vmid_absent_clusterwide(adapter):
     assert result["status"] == "staged_only"
     assert len([x for x in calls if x[:2] == ("pvesm","alloc")]) == 1
     assert result["vm_started"] is False
+
+
+def test_reusable_buffer_refuses_cluster_vm_and_snapshot_references(adapter, monkeypatch):
+    obj, _, calls, root = adapter
+    monkeypatch.setattr(obj, "resolve_existing", lambda volid: "/dev/mapper/fake-lv")
+    conf = root / "nodes" / "node-a" / "qemu-server" / "301.conf"
+    conf.parent.mkdir(parents=True)
+    volume = "any-lvm:vm-301-disk-12.qcow2"
+    conf.write_text("scsi0: " + volume + ",size=4G\n", encoding="utf-8")
+    with pytest.raises(mod.LvmTargetError, match="referenced"):
+        obj.assert_volume_unattached(volume, config_root=root / "nodes")
+    conf.write_text("[snapshot1]\nunused0: " + volume + "\n", encoding="utf-8")
+    with pytest.raises(mod.LvmTargetError, match="referenced"):
+        obj.assert_volume_unattached(volume, config_root=root / "nodes")
+    conf.write_text("description: unrelated VM\n", encoding="utf-8")
+    assert obj.assert_volume_unattached(volume, config_root=root / "nodes") is True
+    conf.unlink()
+    with pytest.raises(mod.LvmTargetError, match="Cannot audit"):
+        obj.assert_volume_unattached(volume, config_root=root / "nodes")
