@@ -555,3 +555,46 @@ jamais arrêtée, et la VM `REP_` n'est jamais promue.
 **Échec ou perte de liaison** : le job passe en `uncertain`, aucun
 nouvel essai ni nettoyage n'est lancé sans réconciliation manuelle.
 
+
+
+### Recette 0.3.44-rc1 — consolidation unique de chaînes LVM historiques
+
+Sur le **nœud destination** Proxmox hébergeant la VM REP_ **arrêtée**, l'agent Linux
+0.3.44 distribue l'outil root-only :
+`/usr/local/lib/origamitasks-pra/pra_lvm_consolidation.py`.
+
+Exemple **uniquement pour le laboratoire VM 183 / protection #1**, après
+sauvegarde indépendante des métadonnées Proxmox et du journal local :
+
+```bash
+PRA=/usr/local/lib/origamitasks-pra/pra_lvm_consolidation.py
+python3 "$PRA" plan --vmid 183 --storage sd-PP-Proxmox --protected-id 1
+# Vérifier le rapport AVANT de préparer la migration.
+python3 "$PRA" prepare --vmid 183 --storage sd-PP-Proxmox --protected-id 1
+python3 "$PRA" state --vmid 183 --storage sd-PP-Proxmox --protected-id 1
+qm config 183
+# Vérifier la copie autonome et, si possible, tester le démarrage isolé
+# de la copie de secours avec la procédure LAB, avant toute suppression.
+python3 "$PRA" prune --vmid 183 --storage sd-PP-Proxmox \
+  --protected-id 1 --confirm DELETE-OLD-PRA-CHAIN
+```
+
+**Précautions :** le mode `plan` n'active aucun LV et ne modifie pas le VG.
+Le mode `prepare` active localement les LV du labo, crée **une seule fois**
+un nouveau LV épais, consolide par `qemu-img convert`, contrôle une chaîne
+autonome et compare la totalité des données logiques avant de changer
+`scsi0`. Les anciens volumes demeurent attachés sous `unusedN` tant que
+`prune` n'est pas confirmé. `prune` vérifie à nouveau l'arrêt de la
+VM, l'absence de snapshot, l'absence de référence croisée et l'autonomie de
+la nouvelle image, puis invoque **Proxmox** pour supprimer les `unusedN`
+anciens. La suppression est physique et irréversible. Les journaux
+d'avant-consolidation sont conservés pour audit.
+
+L'opération est **ponctuelle** et réalise volontairement une copie complète
+locale une seule fois. Elle ne déploie **pas encore** le moteur incrémental
+permanent à écritures delta transactionnelles. Après migration,
+`requires_full_reseed` interdit de prétendre qu'un bitmap QMP ancien ou
+une réplication `uncertain` serait une base sûre. En cas d'interruption ou
+de chaîne QCOW2 avec backing introuvable (ex. chemin `/dev/dm-N` périmé),
+l'outil refuse toute suppression; conserver les LV et réconcilier
+explicitement. Ne pas appliquer sur une destination de production.
