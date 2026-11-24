@@ -941,6 +941,8 @@ def lvm_lab_probe(data):
         "source_vm_stopped": False, "vm_started": False,
         "checkpoint": store.current() if exists else None,
         "pending": store._read(store.pending) if exists else None,
+        "generation_count":len((store._read(store.owned) or {"generations":[]}).get("generations",[])) if exists else 0,
+        "retention_limit":8,
         "auto_failover": False, "cluster_manifest_ready": False
     }
 
