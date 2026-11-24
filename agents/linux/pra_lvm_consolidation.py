@@ -128,6 +128,7 @@ class Maintenance:
         self.owned_file = self.root / "owned.json"
         self.pending_file = self.root / "pending.json"
         self.lock_file = self.root / ".checkpoint.lock"
+        self.config_root = Path("/etc/pve/nodes")
         self.lock_fd = None
 
     def __enter__(self):
@@ -202,7 +203,7 @@ class Maintenance:
 
     def references(self, volumes, slot, conf, *, prepared=False):
         refs = {}
-        root = Path("/etc/pve/nodes")
+        root = self.config_root
         if not root.is_dir():
             raise ConsolidationError("Inventaire cluster Proxmox indisponible")
         for directory in ("qemu-server", "lxc"):
