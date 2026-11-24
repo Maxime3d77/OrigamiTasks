@@ -976,6 +976,31 @@ def lvm_lab_diagnose_generation(data):
                            if isinstance(d,dict) and isinstance(d.get("volid"),str)]}
     pid_files=sorted(p.name for p in store.root.iterdir()
                      if p.name.startswith(".origami-") and p.name.endswith(".pid"))
+    generation_count=len(owned["generations"])
+    # Expose the hard ceiling even when no pending staging exists. The
+    # receiver checks it BEFORE allocation; no LV is leaked by this refusal.
+    retention_limit=8
+    retention_full=generation_count>=retention_limit
+    # A Proxmox "unused" entry is still an attached configuration reference.
+    # Never infer reclaimability from its name.
+    references={}
+    reference_error=None
+    try:
+        conf=_vm_config(store.target.vmid)
+        for slot,val in conf.items():
+            if (_NODE.fullmatch(slot) or re.fullmatch(r"unused[0-9]+",slot)):
+                volid=val.split(",",1)[0]
+                if volid.startswith(store.target.storage+":"):
+                    references[slot]=volid
+    except (HostError,ValueError,OSError,KeyError,TypeError):
+        reference_error="Références Proxmox non confirmées"
+    protected_volumes=sorted({
+        volume for gen in owned["generations"] if isinstance(gen,dict)
+        for volume in gen.get("volids",[]) if isinstance(volume,str)})
+    reference_rows=[{"slot":slot,"volid":volid,
+                     "ledger_owned":volid in protected_volumes}
+                    for slot,volid in sorted(references.items())]
+
     # Inspect the deterministic allocation name, including cases where
     # pvesm alloc succeeded but the success journal write never happened.
     # A negative inventory is NOT sufficient proof to delete the journal.
@@ -1021,7 +1046,13 @@ def lvm_lab_diagnose_generation(data):
             "generation_count":len(owned["generations"]),
             "pid_files":pid_files[:32],"requires_reconciliation":bool(pending or pid_files),
             "predicted_allocations":expected,"inventory_checked":checked_inventory,
-            "inventory_error":inventory_error}
+            "inventory_error":inventory_error,
+            "retention_limit":retention_limit,"retention_full":retention_full,
+            "retention_policy":"blocked_without_chain_safe_consolidation",
+            "pve_disk_references":reference_rows,
+            "pve_reference_error":reference_error,
+            "ledger_volume_count":len(protected_volumes),
+            "automated_volume_deletion_allowed":False}
 
 
 def lvm_lab_archive_empty_uncertain(data):
