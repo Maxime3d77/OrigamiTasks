@@ -94,6 +94,23 @@ def active_path(volid, vg, *, activate=False):
     return str(resolved)
 
 
+def lv_exists(volid, vg):
+    """Verify physical LV presence independently of a qm config reference."""
+    try:
+        result = subprocess.run(
+            ("lvs", "--noheadings", "-o", "lv_name", vg + "/" + volume(volid)),
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ConsolidationError("Inventaire LVM inaccessible après suppression") from exc
+    if result.returncode == 0:
+        if result.stdout.strip() != volume(volid):
+            raise ConsolidationError("Inventaire LVM contradictoire")
+        return True
+    if result.returncode == 5 and not result.stdout.strip():
+        return False
+    raise ConsolidationError("Inventaire LVM non concluant après suppression")
+
+
 def image_chain(path):
     try:
         rows = json.loads(run("qemu-img", "info", "-f", "qcow2", "--backing-chain",
@@ -262,8 +279,9 @@ class Maintenance:
         paths = {v: active_path(v, vg, activate=True) for v in old}
         chain = image_chain(paths[top])
         allowed = {str(Path(p).resolve(strict=True)) for p in paths.values()}
-        if not set(chain).issubset(allowed) or chain[0] != paths[top]:
-            raise ConsolidationError("Chaîne QCOW2 hors du journal de propriété")
+        if (not set(chain).issubset(allowed) or chain[0] != paths[top]
+                or chain != [paths[v] for v in reversed(old[-len(chain):])]):
+            raise ConsolidationError("Chaîne QCOW2 incohérente avec l’ordre historique des LV")
         virtual = current["disks"][slot].get("size")
         if type(virtual) is not int or virtual < 1024:
             raise ConsolidationError("Taille virtuelle absente")
@@ -373,18 +391,29 @@ class Maintenance:
             conf = qm_config(self.vmid)
             if conf.get(slot, "").split(",", 1)[0] != fresh:
                 raise ConsolidationError("Le disque actif a changé durant la suppression")
-            refs = self.references([volid], slot, conf, prepared=True)
-            key = refs[volid]
-            if not re.fullmatch(r"unused[0-9]+", key):
-                raise ConsolidationError("Ancien disque non unused")
-            # Proxmox owns physical deletion, not raw lvremove. 'unusedN'
-            # unlink ALWAYS removes underlying storage: explicit marker above.
-            record["status"] = "pruning"
-            _atomic(self.state_file, record)
-            run("qm", "disk", "unlink", str(self.vmid), "--idlist", key, timeout=900)
-            post = qm_config(self.vmid)
-            if any(volid in val for val in post.values()):
-                raise ConsolidationError("Proxmox conserve une référence à l'ancien volume")
+            # If the previous attempt crashed after the physical unlink but
+            # before its journal update, resume only after proving no config
+            # reference AND no LV physically exists.
+            attached = [key for key, val in conf.items()
+                        if val.split(",", 1)[0] == volid]
+            if not attached:
+                if lv_exists(volid, vg):
+                    raise ConsolidationError("Volume sans référence encore présent: nettoyage manuel requis")
+            else:
+                refs = self.references([volid], slot, conf, prepared=True)
+                key = refs[volid]
+                if not re.fullmatch(r"unused[0-9]+", key):
+                    raise ConsolidationError("Ancien disque non unused")
+                # Proxmox owns physical deletion, not raw lvremove. 'unusedN'
+                # unlink ALWAYS removes underlying storage: explicit marker above.
+                record["status"] = "pruning"
+                _atomic(self.state_file, record)
+                run("qm", "disk", "unlink", str(self.vmid), "--idlist", key, timeout=900)
+                post = qm_config(self.vmid)
+                if any(volid in val for val in post.values()):
+                    raise ConsolidationError("Proxmox conserve une référence à l'ancien volume")
+                if lv_exists(volid, vg):
+                    raise ConsolidationError("Volume toujours présent dans LVM après unlink Proxmox")
             pruned.append(volid)
             record["pruned"] = pruned
             _atomic(self.state_file, record)
