@@ -50,6 +50,7 @@ def pipeline(monkeypatch):
             return source
         if action=="lvm_lab_probe":
             return {"pra_protocol":3,"checkpoint":current,"pending":None,
+                    "generation_count":0,"retention_limit":8,
                     "lab_only":True}
         if action=="lvm_lab_begin":
             return {"token":"b"*32,"ports":{"scsi0":10809,"scsi1":10810}}
