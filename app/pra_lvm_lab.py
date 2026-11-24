@@ -132,7 +132,7 @@ def run(vm_id, *, execute=False, incremental=False, lab_confirm=None):
             **_request(vm),
             "mode": mode, "sizes": sizes,
             "source_vm_uuid":source["source_vm_uuid"]
-        },timeout=180)
+        },timeout=86460)  # Local flattening of a multi-TB LV can take hours.
         token=prepared["token"]
         mapped,forwards,threads,errors=pra_live._forward(src,dst,prepared["ports"])
         transfer_started=True
