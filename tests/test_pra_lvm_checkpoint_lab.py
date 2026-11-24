@@ -47,6 +47,13 @@ class FakePveTarget(PveLvmTarget):
         return {"token":token,"allocated":assigned}
     def resolve_existing(self, volid, *, verified_block=True):
         return str(self.files[volid])
+    def inspect(self):
+        return {"type": "lvm"}
+    def _target_stopped(self):
+        return True
+    def assert_volume_unattached(self, volid):
+        assert volid in self.files
+        return True
 
 
 @pytest.fixture
@@ -59,6 +66,14 @@ def setup(tmp_path):
             backing=args[args.index("-b")+1] if "-b" in args else None
             chains[path]=[path]+(chains[backing] if backing else [])
             return "created"
+        if args[:2]==("qemu-img","convert"):
+            source,destination=args[-2:]
+            assert source != destination
+            assert source in chains and destination in chains
+            # -n copies the flattened full image into an initialized buffer.
+            assert "-n" in args
+            chains[destination]=[destination]
+            return "converted"
         if args[:2]==("qemu-img","info"):
             path=args[-1]
             return json.dumps([{"filename":p,"format":"qcow2"} for p in chains[path]])
@@ -69,7 +84,7 @@ def setup(tmp_path):
     return mod.LvmCheckpointStore(target,command=fake_qemu),target,chains
 
 
-def test_full_to_incremental_volumes_never_reuse_old_lv(setup):
+def test_incremental_reuses_two_persistent_buffers_without_new_allocations(setup):
     store,target,chains=setup
     sizes={"scsi0":4096,"scsi1":8192}
     seed=store.begin(mode="full",sizes=sizes,source_vm_uuid="lab-vm-one",
@@ -90,17 +105,30 @@ def test_full_to_incremental_volumes_never_reuse_old_lv(setup):
     for slot in sizes:
         assert delta["disks"][slot]["volid"]!=seed["disks"][slot]["volid"]
     committed=store.commit(delta["token"],writers_closed=True,source_jobs_verified=True)
-    assert committed["depth"]==2
+    assert committed["depth"]==1 and committed["sequence"]==2
     assert store.current()["token"]==delta["token"]
     for slot in sizes:
         path=str(target.files[delta["disks"][slot]["volid"]])
-        previous=str(target.files[seed["disks"][slot]["volid"]])
-        assert chains[path]==[path,previous]
+        assert chains[path]==[path]  # No growing backing chain.
+    assert len(target.files)==4  # Exactly two LVs per disk.
+    third=store.begin(mode="incremental",sizes=sizes,source_vm_uuid="lab-vm-one",
+                      operator_approved=True)
+    assert all(third["disks"][s]["volid"] == seed["disks"][s]["volid"] for s in sizes)
+    store.commit(third["token"],writers_closed=True,source_jobs_verified=True)
+    fourth=store.begin(mode="incremental",sizes=sizes,source_vm_uuid="lab-vm-one",
+                       operator_approved=True)
+    assert all(fourth["disks"][s]["volid"] == delta["disks"][s]["volid"] for s in sizes)
+    store.commit(fourth["token"],writers_closed=True,source_jobs_verified=True)
+    assert len(target.files)==4
+    assert sum(call[2] for call in target.calls if call[:2]==("pvesm","alloc")) == 4
+    assert store.current()["depth"]==1
+    assert store.current()["sequence"]==4
     assert not any(call[0]=="pvesm" and call[1]=="free" for call in target.calls)
     assert all(p.exists() for p in target.files.values())
     ledger=json.loads(store.owned.read_text())
     assert len(ledger["generations"])==2
     assert {x["token"] for x in ledger["generations"]}=={seed["token"],delta["token"]}
+    assert all(len(entries)==2 for entries in ledger["buffers"].values())
 
 
 def test_no_allocation_without_explicit_approval(setup):
@@ -188,3 +216,62 @@ def test_foreign_previous_lvm_checkpoint_never_becomes_incremental_base(setup):
     assert target.calls == calls_before
     assert target.files == volumes_before
     assert len(target.files)==1
+
+
+def test_failed_reuse_preserves_previous_committed_checkpoint(setup):
+    store,target,chains=setup
+    sizes={"scsi0":4096}
+    first=store.begin(mode="full",sizes=sizes,source_vm_uuid="vm-safe",operator_approved=True)
+    store.commit(first["token"],writers_closed=True,source_jobs_verified=True)
+    second=store.begin(mode="incremental",sizes=sizes,source_vm_uuid="vm-safe",
+                       operator_approved=True)
+    store.commit(second["token"],writers_closed=True,source_jobs_verified=True)
+    original=store.current()
+    good_path=str(target.files[original["disks"]["scsi0"]["volid"]])
+    old_command=store.command
+    def fail_convert(*args):
+        if args[:2]==("qemu-img","convert"):
+            raise mod.LvmCheckpointError("simulated interrupted local copy")
+        return old_command(*args)
+    store.command=fail_convert
+    with pytest.raises(mod.LvmCheckpointError,match="interrupted"):
+        store.begin(mode="incremental",sizes=sizes,source_vm_uuid="vm-safe",
+                    operator_approved=True)
+    assert store.current()==original
+    assert chains[good_path]==[good_path]
+    assert len(target.files)==2
+    assert store._read(store.pending)["status"]=="uncertain"
+    with pytest.raises(mod.LvmCheckpointError,match="reconciliation"):
+        store.begin(mode="incremental",sizes=sizes,source_vm_uuid="vm-safe",
+                    operator_approved=True)
+
+
+def test_legacy_backing_chain_is_not_overwritten_during_transition(setup):
+    store,target,chains=setup
+    sizes={"scsi0":4096}
+    first=store.begin(mode="full",sizes=sizes,source_vm_uuid="vm-old",operator_approved=True)
+    store.commit(first["token"],writers_closed=True,source_jobs_verified=True)
+    # Simulate an older already-published chained generation without a
+    # reusable-buffer ledger. It must not be modified during migration.
+    previous=store.current()
+    historical=target.files[previous["disks"]["scsi0"]["volid"]]
+    legacy_id="lab-lvm:vm-321-disk-999999.qcow2"
+    legacy=target.root/"legacy.qcow2"
+    legacy.touch()
+    target.files[legacy_id]=legacy
+    chains[str(legacy)]=[str(legacy),str(historical)]
+    previous["disks"]["scsi0"]["volid"]=legacy_id
+    mod._atomic(store.current_file,previous)
+    recorded=store._read(store.owned)
+    recorded.pop("buffers")
+    mod._atomic(store.owned,recorded)
+    before=dict(chains)
+    next_point=store.begin(mode="incremental",sizes=sizes,source_vm_uuid="vm-old",
+                           operator_approved=True)
+    assert next_point["disks"]["scsi0"]["volid"] not in (
+        legacy_id,first["disks"]["scsi0"]["volid"])
+    assert chains[str(legacy)]==before[str(legacy)]
+    store.commit(next_point["token"],writers_closed=True,source_jobs_verified=True)
+    assert store.current()["depth"]==1
+    assert chains[str(target.files[next_point["disks"]["scsi0"]["volid"]])]==[
+        str(target.files[next_point["disks"]["scsi0"]["volid"]])]
