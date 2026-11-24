@@ -30,6 +30,9 @@ class LvmCheckpointError(RuntimeError):
 
 
 def _qemu(*args, timeout=120):
+    # Flattening a multi-terabyte checkpoint is local but can take hours.
+    if len(args) > 1 and args[1] == "convert" and timeout == 120:
+        timeout = 86400
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
