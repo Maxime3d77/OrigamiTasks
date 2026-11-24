@@ -284,3 +284,33 @@ class PveLvmTarget:
         if verified_block and not stat.S_ISBLK(canonical.stat().st_mode):
             raise LvmTargetError("Destination volume is not a block device")
         return str(canonical)
+
+    def assert_volume_unattached(self, volid):
+        """Fail closed before reusing a managed staging LV.
+
+        Inspect the cluster-visible VM/LXC configuration files, including
+        snapshot sections and 'unused' disk references. This is a guard, not
+        proof that an arbitrary external QCOW2 backing chain is absent.
+        """
+        self.resolve_existing(volid)
+        root = Path("/etc/pve/nodes")
+        if root.is_symlink() or not root.is_dir():
+            raise LvmTargetError("Cluster PVE configuration unavailable; LV reuse refused")
+        candidates = sorted(root.glob("*/qemu-server/*.conf"))
+        candidates += sorted(root.glob("*/lxc/*.conf"))
+        if not candidates:
+            raise LvmTargetError("Cannot audit cluster disk references; LV reuse refused")
+        name = volid.split(":", 1)[1]
+        for config in candidates:
+            if config.is_symlink() or not config.is_file():
+                raise LvmTargetError("Unsafe Proxmox configuration during LV audit")
+            try:
+                body = config.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise LvmTargetError("Incomplete Proxmox configuration audit") from exc
+            # A bare LV name is also disallowed: another storage alias can
+            # point at the same physical volume, and snapshot sections count.
+            if volid in body or name in body:
+                raise LvmTargetError(
+                    "Staging LV is referenced by Proxmox configuration: " + config.name)
+        return True
