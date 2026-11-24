@@ -415,8 +415,9 @@ La page **VM protégées PRA** propose maintenant l'action **Copie LVM recette**
 Ce n'est plus seulement un diagnostic : la copie **FULL** ou
 **INCREMENTAL** déclenche véritablement le moteur QMP/NBD par les agents
 Proxmox déjà associés au groupe PRA. La VM source reste **allumée** et la
-VM de destination **arrêtée** ; chaque génération LVM utilise de nouveaux LV
-QCOW2. Les résultats et les échecs sont conservés dans
+VM de destination **arrêtée** ; le moteur conserve deux LV QCOW2
+persistants et les réutilise alternativement (plus les anciens volumes
+historiques conservés en attente d'audit). Les résultats et les échecs sont conservés dans
 `pra_lvm_lab_runs`, séparément des réplications DIR.
 
 ### Première utilisation sur deux clusters de recette uniquement
