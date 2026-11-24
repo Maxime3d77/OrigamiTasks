@@ -298,6 +298,17 @@ def list_vms(plan_id=None):
                 "ORDER BY id DESC LIMIT 1", (item["id"],)
             ).fetchone()
         item["lvm_lab_latest_run"]=dict(lab) if lab else None
+        # A failed/blocked newest run must not erase the evidence of the last
+        # completed checkpoint in the PRA overview. It still does NOT make
+        # the current generation failover-ready.
+        with db.session() as con:
+            completed_lvm=con.execute(
+                "SELECT id,point_at,checkpoint_token,mode FROM pra_lvm_lab_runs "
+                "WHERE protected_vm_id=? AND status='completed' "
+                "AND mode IN ('full','incremental') ORDER BY id DESC LIMIT 1",
+                (item["id"],)
+            ).fetchone()
+        item["lvm_last_completed"]=dict(completed_lvm) if completed_lvm else None
         with db.session() as con:
             published=con.execute(
                 "SELECT id,status,checkpoint_token,details,updated_at "
