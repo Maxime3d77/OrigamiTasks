@@ -61,7 +61,8 @@ def test_plan_never_activates_inactive_disks(context, monkeypatch):
     assert all(not x["active_on_node"] for x in report["old_volumes"])
 
 
-def test_reference_audit_rejects_another_vm_configuration(context):
+def test_reference_audit_rejects_another_vm_configuration(context, monkeypatch):
+    monkeypatch.setattr(mod.socket, "gethostname", lambda: "sd-bearnaise.infra.test")
     own = context.config_root / "sd-bearnaise/qemu-server/183.conf"
     other = context.config_root / "sd-bearnaise/qemu-server/191.conf"
     own.parent.mkdir(parents=True)
