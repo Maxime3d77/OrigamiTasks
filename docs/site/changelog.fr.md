@@ -1,5 +1,16 @@
 # Historique des modifications
 
+## 0.3.43-rc1 — 24 novembre 2026 : limite de rétention des huit générations LVM détectée avant écriture
+
+- Sur `sd-bearnaise`, le pilote QMP→LVM a réussi le FULL (run #2) et sept incrémentaux (#3 à #9). Le suivant (#10) a été classé `uncertain` parce que le récepteur refuse toute génération au-delà de huit. Aucun `pending`, huit LV de 5 Gio dans `SD-PP-vg`, `scsi0` sur le dernier checkpoint `5547f64f032b47378a5c9e0f40424712`, et sept anciennes images visibles en `unused0..unused6`. Réplique arrêtée, sans réseau et `onboot=0`.
+- **Contrôle anticipé** : le helper retourne maintenant `generation_count` et `retention_limit` au prévol de chaque copie. Quand le quota est atteint, OrigamiTasks refuse le job **avant** sa mise en file et l'allocation LVM : pas de nouvelle génération `uncertain` due uniquement à ce plafond. Le scheduler reste bloqué et audite le refus.
+- **Diagnostic de génération enrichi** : affiche `8/8`, les volumes actifs et `unused` référencés dans la configuration Proxmox et leur appartenance au journal de propriété. Les entrées `unused` sont **des références**, pas une permission de supprimer des données.
+- **Tableau de bord corrigé** : distingue le dernier run échoué du dernier checkpoint LVM réussi ; le compteur « dernières synchros réussies » reconnaît maintenant le moteur LVM de recette.
+- **Pas de purge/rétention automatique à ce stade.** Les incrémentaux créent de véritables QCOW2 avec backing sur LV ; il faut développer une consolidation (flatten / rebase / publication transactionnelle), vérifier clones, snapshots, journal et références Proxmox, puis éprouver les coupures à chaque étape avant d'autoriser une libération de LV. Ne jamais faire `pvesm free`, `lvremove` ou `qm set --delete unusedN` sur les volumes historiques sans procédure validée.
+- L'ancien run #10 reste `uncertain` : le correctif ne le réécrit pas et ne relance rien. Après mise à jour, relever les nouveaux diagnostics et continuer les tests non destructifs.
+- Manager `0.3.43-rc1`, agents Linux/Windows `0.3.43`, recette uniquement.
+
+
 ## 0.3.42-rc1 — 23 novembre 2026 : attestation du boot OS et prévol réseau PRA
 
 - **Validation humaine du clone** : après restauration, l'administrateur peut sélectionner le run de clone isolé, confirmer `OS-LOGIN-VERIFIED` et préciser l'observation (ex. connexion root réussie dans la console). OrigamiTasks conserve opérateur, date, VMID du clone, checkpoint exact et commentaire dans un historique dédié. Aucun mot de passe n'est requis ni conservé.
