@@ -423,7 +423,7 @@ historiques conservés en attente d'audit). Les résultats et les échecs sont c
 ### Première utilisation sur deux clusters de recette uniquement
 
 1. Déclarer les clusters et les sites PRA et installer les agents Linux PRA
-   **0.3.30** sur les deux nœuds de **recette** avec des accès SSH approuvés.
+   **0.3.31 ou ultérieure** sur les deux nœuds de **recette** avec des accès SSH approuvés.
 2. Depuis **VM protégées PRA**, créer la protection avec le moteur
    `qmp_live_incremental`, sélectionner la VM source **allumée**, le nœud
    cible et un stockage `lvm` compatible `snapshot-as-volume-chain=1`.
