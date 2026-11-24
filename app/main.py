@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_lvm_jobs, agent_updates
+from . import config, db, engine, scheduler, security, integrations, agents, connections, ldap_settings, connection_tests, ssh_inventory, agent_deployments, host_keys, proxmox_cas, dr_sites, agent_uninstall, agent_modules, proxmox_fleet, agent_settings, dr_plans, dr_protected_vms, pra_pbs, pra_live, pra_lvm_jobs, pra_lvm_activation, pra_lvm_schedule, pra_lvm_boot, pra_lvm_publish, pra_lvm_guest_evidence, agent_updates
 
 
 @asynccontextmanager
@@ -22,12 +22,17 @@ async def lifespan(app):
     security.cipher()  # validation before accepting requests
     db.initialize()
     security.initialize_admin()
+    pra_live.initialize()
+    pra_lvm_jobs.initialize()
+    pra_lvm_activation.initialize()
+    pra_lvm_schedule.initialize()
+    pra_lvm_boot.initialize()
+    pra_lvm_guest_evidence.initialize()
+    pra_lvm_publish.initialize()
     engine.start()
     scheduler.start()
     agent_deployments.start()
     agent_updates.start()
-    pra_live.initialize()
-    pra_lvm_jobs.initialize()
     yield
     scheduler.STOP.set()
     engine.STOP.set()
@@ -572,17 +577,68 @@ def protected_vm_options(request:Request,plan_id:int,source_dc_id:int,target_dc_
         raise HTTPException(503,'Découverte source ou destination indisponible : vérifier API et TLS') from None
 
 
+@app.get('/api/dr/vms/check-target-vmid')
+def check_target_vmid(plan_id:int,source_dc_id:int,target_dc_id:int,vmid:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        available=dr_protected_vms.options(plan_id,source_dc_id,target_dc_id)
+    except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    occupied=set(available['target_vmids_in_use'])
+    if vmid<100 or vmid>999999999:
+        raise HTTPException(422,'VMID hors plage Proxmox')
+    suggestion=vmid
+    while suggestion in occupied and suggestion<999999999:
+        suggestion+=1
+    if suggestion in occupied:
+        raise HTTPException(409,'Aucun VMID cible libre disponible')
+    return {'requested_vmid':vmid,'free':vmid not in occupied,
+            'suggested_vmid':suggestion,'inventory_checked':True}
+
+
 @app.post('/api/dr/vms')
 def create_protected_vm(payload:dict[str,Any],request:Request):
     user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict):
+        raise HTTPException(422,'Paramètres invalides')
+    activate=payload.get('activate_lab') is True
+    if activate and payload.get('lab_confirmation')!='DISPOSABLE-LAB-ONLY':
+        raise HTTPException(422,'Confirmer explicitement la recette LVM')
+    if activate and payload.get('engine')!='qmp_live_incremental':
+        raise HTTPException(422,'Activation de recette réservée au moteur QMP')
+    clean={k:v for k,v in payload.items() if k not in ('activate_lab','lab_confirmation')}
+    if activate:
+        try:
+            discovered=dr_protected_vms.options(
+                clean.get('plan_id'),clean.get('source_dc_id'),clean.get('target_dc_id'))
+            source=next((x for x in discovered['vms']
+                         if x['vmid']==clean.get('source_vmid')),None)
+            storage=next((x for x in discovered['target_storages']
+                          if x['storage']==clean.get('target_storage')),None)
+            if not source or source['status']!='running':
+                raise ValueError('Amorçage automatique : VM source non allumée')
+            if not storage or storage['type']!='lvm' or not storage.get('snapshot_as_volume_chain') or not storage.get('images'):
+                raise ValueError('Amorçage automatique : choisir un stockage LVM QCOW2 de recette compatible')
+        except (ValueError,dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
+            raise HTTPException(422,str(exc)) from None
     try:
-        result=dr_protected_vms.save(payload,user['username'])
+        result=dr_protected_vms.save(clean,user['username'])
     except (dr_protected_vms.ProtectedVMError,integrations.IntegrationError) as exc:
         raise HTTPException(422,str(exc)) from None
     except Exception:
         raise HTTPException(503,'Préparation VM impossible : vérifier les deux API Proxmox') from None
+    if payload.get("activate_lab") is True:
+        try:
+            activation=pra_lvm_activation.start(
+                result['id'],user['username'],payload.get('lab_confirmation'))
+        except ValueError as exc:
+            db.audit(user['username'],'pra.lvm.lab.activation.blocked',result['id'],str(exc)[:450])
+            # Keep the protection so an admin can inspect and retry safely.
+            raise HTTPException(409,'Protection enregistrée, mais activation refusée : '+str(exc)) from None
+        result['activation']=activation
     db.audit(user['username'],'dr.vm.plan.create',result['id'],
-             'Configuration seulement ; aucune copie ou VM créée')
+             'Protection enregistrée ; activation de recette demandée' if payload.get("activate_lab") else
+             'Configuration uniquement ; aucune copie ni VM créée')
     return result
 
 
@@ -677,6 +733,238 @@ def get_vm_storage_readiness(vm_id:int,request:Request):
         raise HTTPException(409,str(exc)) from None
     except Exception:
         raise HTTPException(503,'Découverte du stockage : API Proxmox indisponible ou non autorisée') from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/reconcile-empty-generation')
+def reconcile_lvm_lab_empty_generation(vm_id:int, request:Request, payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if (not isinstance(payload,dict)
+            or set(payload)!={'confirmation','token'}):
+        raise HTTPException(422,'Jeton et confirmation LAB-ONLY requis')
+    try:
+        return pra_lvm_activation.reconcile_empty_allocation(
+            vm_id,user['username'],payload['confirmation'],payload['token'])
+    except (ValueError,dr_protected_vms.ProtectedVMError,
+            pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Réconciliation LVM non confirmée ; aucune relance automatique') from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/diagnose-generation')
+def diagnose_pending_lvm_generation(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    from . import pra_lvm_standby
+    try:
+        return pra_lvm_standby.diagnose_generation(vm_id)
+    except (ValueError,dr_protected_vms.ProtectedVMError,
+            pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Journal LVM non confirmé : aucune modification') from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/diagnose-source')
+def diagnose_lvm_lab_source(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    from . import pra_lvm_standby
+    try:
+        return pra_lvm_standby.diagnose_source(vm_id)
+    except (ValueError,dr_protected_vms.ProtectedVMError,
+            pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Diagnostic QMP source indisponible') from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/diagnose-standby')
+def diagnose_lvm_lab_standby(vm_id:int, request:Request):
+    security.require(request,role='admin')
+    from . import pra_lvm_standby
+    try:
+        return pra_lvm_standby.diagnose(vm_id)
+    except (ValueError,dr_protected_vms.ProtectedVMError,pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Diagnostic Proxmox non disponible') from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/prepare-standby')
+def prepare_lvm_lab_standby(vm_id:int, request:Request, payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation de recette requise')
+    from . import pra_lvm_standby
+    try:
+        result=pra_lvm_standby.prepare(vm_id,payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Préparation PRA non confirmée : vérifier agent, SSH et Proxmox') from None
+    db.audit(user['username'],'pra.lvm.lab.standby.prepare',vm_id,
+             'VMID='+str(result['vmid'])+' created='+str(result['created']))
+    return result
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/publications')
+def list_lvm_publications(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_publish.history(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/network-preview')
+def preview_lvm_recovery_network(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    from . import pra_lvm_network_plan
+    try:
+        return pra_lvm_network_plan.inspect(vm_id)
+    except (ValueError,dr_protected_vms.ProtectedVMError,
+            pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Inventaire réseau PRA incomplet : aucune action') from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/guest-evidence')
+def list_lvm_guest_evidence(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_guest_evidence.history(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/guest-evidence')
+def record_lvm_guest_evidence(vm_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'restore_run_id','confirmation','note'}:
+        raise HTTPException(422,'Clone, confirmation et observation requis')
+    try:
+        return pra_lvm_guest_evidence.record(
+            vm_id,payload['restore_run_id'],user['username'],
+            payload['confirmation'],payload['note'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/boot-tests')
+def list_lvm_boot_tests(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_boot.history(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/test-boot')
+def start_lvm_boot_test(vm_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'restore_run_id','confirmation'}:
+        raise HTTPException(422,'Run de restauration et confirmation requis')
+    try:
+        return pra_lvm_boot.start(vm_id,payload['restore_run_id'],
+                                  user['username'],payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Test de clone isolé non démarré : contrôler les agents et Proxmox') from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/schedule-events')
+def get_lvm_lab_schedule_events(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_schedule.history(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/resume-source')
+def resume_lvm_after_source_probe(vm_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation de recette requise')
+    try:
+        return pra_lvm_activation.resume_source_probe(
+            vm_id,user['username'],payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError,
+            pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Réconciliation QMP source non confirmée : aucune reprise') from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/resume-owned')
+def resume_created_lvm_standby(vm_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation de recette requise')
+    try:
+        return pra_lvm_activation.resume_owned_standby(
+            vm_id,user['username'],payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError,
+            pra_live.LiveReplicationError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Propriété et isolation de REP_ non vérifiées : aucune reprise') from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/reconcile-provision')
+def reconcile_uncertain_lvm_provision(vm_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation de recette requise')
+    try:
+        return pra_lvm_activation.reconcile_failed_provision(
+            vm_id,user['username'],payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+    except Exception:
+        raise HTTPException(503,'Inventaire Proxmox non confirmé : aucune reprise lancée') from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/retry-local-error')
+def retry_lvm_activation_after_allowlist_fix(vm_id:int,request:Request,payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation requise')
+    try:
+        return pra_lvm_activation.retry_authorization_bug(
+            vm_id,user['username'],payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.post('/api/dr/vms/{vm_id}/lvm-lab/activate')
+def activate_existing_lvm_protection(vm_id:int, request:Request, payload:dict[str,Any]):
+    user=security.require(request,role='admin',mutate=True)
+    if not isinstance(payload,dict) or set(payload)!={'confirmation'}:
+        raise HTTPException(422,'Confirmation de recette requise')
+    try:
+        return pra_lvm_activation.start(vm_id,user['username'],payload['confirmation'])
+    except (ValueError,dr_protected_vms.ProtectedVMError) as exc:
+        raise HTTPException(409,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/steps')
+def get_lvm_activation_steps(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_activation.steps(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
+
+
+@app.get('/api/dr/vms/{vm_id}/lvm-lab/activations')
+def list_lvm_lab_activations(vm_id:int,request:Request):
+    security.require(request,role='admin')
+    try:
+        return {'items':pra_lvm_activation.status(vm_id)}
+    except dr_protected_vms.ProtectedVMError as exc:
+        raise HTTPException(404,str(exc)) from None
 
 
 @app.get('/api/dr/vms/{vm_id}/lvm-lab/preflight')
@@ -1594,11 +1882,31 @@ def list_users(request:Request):
 
 
 @app.get('/api/audit')
-def audit(request:Request):
+def audit(request:Request, category:str='all', search:str=''):
     security.require(request,role='admin')
+    prefixes={
+        'all':(), 'pra':('pra.','dr.'),'agents':('agent.','agents.'),
+        'jobs':('job.','run.','workflow.','execution.'),
+        'security':('auth.','user.','ldap.','vault.'),
+        'system':('update.','git.','system.','config.')
+    }
+    if category not in prefixes or len(search)>120:
+        raise HTTPException(422,'Filtre d’audit invalide')
+    where=[]; args=[]
+    if category!='all':
+        chunks=[]
+        for prefix in prefixes[category]:
+            chunks.append('action LIKE ?')
+            args.append(prefix+'%')
+        where.append('('+(' OR '.join(chunks))+')')
+    if search.strip():
+        where.append('(action LIKE ? OR actor LIKE ? OR target LIKE ? OR detail LIKE ?)')
+        args.extend(['%'+search.strip()+'%']*4)
+    sql='SELECT * FROM audit '+('WHERE '+' AND '.join(where) if where else '')
+    sql+=' ORDER BY id DESC LIMIT 500'
     with db.session() as con:
-        records=con.execute('SELECT * FROM audit ORDER BY id DESC LIMIT 200').fetchall()
-    return {'items':[dict(r) for r in records]}
+        records=con.execute(sql,args).fetchall()
+    return {'items':[dict(r) for r in records],'category':category}
 
 
 @app.get('/api/updates')

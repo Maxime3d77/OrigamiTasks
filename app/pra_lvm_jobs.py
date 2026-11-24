@@ -201,6 +201,11 @@ def start(vm_id, actor, *, mode, confirmation):
         raise LabJobError("VM source ON et cible OFF non confirmées")
     if checked.get("destination_storage") != vm["target_storage"]:
         raise LabJobError("Destination PRA modifiée durant le prévol")
+    if checked.get("retention_blocked") is True:
+        raise LabJobError("Limite de "+str(checked.get("retention_limit",8))+
+                          " générations LVM atteinte : aucune nouvelle copie lancée. "
+                          "Consolidation sûre nécessaire ; ne supprimer aucun LV.")
+
     if mode == "incremental" and not checked.get("checkpoint"):
         raise LabJobError("Aucun checkpoint LVM de recette compatible : amorçage FULL nécessaire")
 

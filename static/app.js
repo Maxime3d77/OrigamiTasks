@@ -1,6 +1,6 @@
 /* OrigamiTasks SPA — no CDN, no bundler, no unsafe eval. */
 'use strict';
-const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drProtectedVMs:[],drVMOptions:null,drVMPlanFilter:'all',drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],agentUpdates:{items:[],available_versions:{}},folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
+const state = {user:null,page:'dashboard',jobs:[],runs:[],summary:{},credentials:[],datacenters:[],proxmoxCAs:[],proxmoxDiscovery:null,proxmoxFleet:null,drSites:[],drPlans:[],drProtectedVMs:[],drVMOptions:null,drVMPlanFilter:'all',auditCategory:'all',auditSearch:'',drSimulations:[],agents:[],agentSettings:null,sshInventory:{servers:[],groups:[]},agentDeployBatches:[],agentUpdates:{items:[],available_versions:{}},folders:[],folderFilter:'',directoryGroups:[],pickerField:null,pickerCredentialId:null,folderSelected:'Général',groupRole:'view',catalog:{available:[]},selectedRun:null,dashboardTab:'tasks',editor:null,selectedStep:0,filter:'all',query:''};
 const $=(selector,base=document)=>base.querySelector(selector);
 const $$=(selector,base=document)=>Array.from(base.querySelectorAll(selector));
 const e=(value)=>String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +10,7 @@ const labelStatus=s=>`<span class="status ${e(s)}">${e(statusName[s]||s)}</span>
 const toast=(msg,ok=true)=>{const n=document.createElement('div');n.className=ok?'ok':'fail';n.textContent=msg;$('#toast').appendChild(n);setTimeout(()=>n.remove(),4000)};
 const cookie=n=>document.cookie.split('; ').find(x=>x.startsWith(n+'='))?.split('=').slice(1).join('=')||'';
 async function api(url,method='GET',data){const options={method,credentials:'same-origin',headers:{},cache:'no-store'};if(method!=='GET'){options.headers['X-CSRF-Token']=decodeURIComponent(cookie('origami_csrf'));if(data!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(data)}}const r=await fetch('/api'+url,options);let body;try{body=await r.json()}catch{body={detail:'Réponse serveur invalide'}}if(!r.ok){if(r.status===401){state.user=null;$('#application').hidden=true;$('#auth').hidden=false}throw Error(typeof body.detail==='string'?body.detail:`Erreur HTTP ${r.status}`)}return body}
-async function load(){const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drProtectedVMs=(await api('/dr/vms')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items;state.agentUpdates=await api('/agents/updates')}catch{}}
+async function load(){try{state.managerVersion=(await api('/health')).version}catch{}const [jobs,runs,summary]=await Promise.all([api('/jobs'),api('/runs'),api('/summary')]);state.jobs=jobs.items;state.runs=runs.items;state.summary=summary;state.catalog=await api('/catalog');try{state.folders=(await api('/folders')).items}catch{state.folders=[]}$('#navCount').textContent=jobs.items.length;if(state.user.role==='admin')try{state.credentials=(await api('/credentials')).items;state.datacenters=(await api('/datacenters')).items;state.proxmoxCAs=(await api('/proxmox/cas')).items;state.drSites=(await api('/dr/sites')).items;state.drPlans=(await api('/dr/plans')).items;state.drProtectedVMs=(await api('/dr/vms')).items;state.drSimulations=(await api('/dr/simulations')).items;state.agents=(await api('/agents')).items;state.agentSettings=await api('/admin/agent-settings');state.sshInventory=await api('/ssh/inventory');state.agentDeployBatches=(await api('/agents/deploy/batches')).items;state.agentUpdates=await api('/agents/updates')}catch{}}
 const roleAdmin=()=>state.user?.role==='admin';
 const title=(name,subtitle,action='')=>`<div class="page-heading"><div><div class="eyebrow">ORIGAMITASKS / AUTOMATION</div><h1>${name}</h1><p>${subtitle}</p></div>${action}</div>`;
 const initials=()=>state.user?.display_name?.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'OT';
@@ -358,7 +358,7 @@ function agentsPage(){
   +'<div class="table-wrap"><table><thead><tr><th>Nom / hôte</th><th>OS / version</th><th>Groupe</th>'
   +'<th>État</th><th>Modules & synchronisation</th><th>CPU agent</th><th>RAM agent</th><th>Dernier contact</th><th>Actions</th></tr></thead>'
   +'<tbody>'+(cards||'<tr><td colspan="9">Aucun agent installé.</td></tr>')+'</tbody></table></div></div>'
-  +'<div class="panel"><div class="panel-title"><h2>Mises à jour des agents</h2><span class="hint">Versions fournies par la console : Linux '+e(targetVersions.linux||'—')+' / Windows '+e(targetVersions.windows||'—')+'</span></div>'
+  +'<div class="panel"><div class="panel-title"><h2>Mises à jour des agents</h2><span class="hint">Manager '+e(state.managerVersion||'—')+' · Agents intégrés Linux '+e(targetVersions.linux||'—')+' / Windows '+e(targetVersions.windows||'—')+' (versions réellement installées détaillées ci-dessus)</span></div>'
   +'<div class="table-wrap"><table><thead><tr><th>Agent</th><th>Version</th><th>État</th><th>Demande</th></tr></thead><tbody>'
   +((state.agentUpdates?.items||[]).slice(0,15).map(j=>'<tr><td>'+e(j.host)+'</td><td>'+e(j.from_version)+' → '+e(j.target_version)+'</td><td>'+labelStatus(j.status)+'</td><td>'+dt(j.created_at)+(j.error?'<div class="hint">'+e(j.error)+'</div>':'')+'</td></tr>').join('')||'<tr><td colspan="4">Aucune mise à jour demandée.</td></tr>')
   +'</tbody></table></div></div>'
@@ -580,8 +580,8 @@ function datacenters(){
 }
 
 
-/* A protected VM is a manually selected plan, never an actual running replica.
-   All tests perform read-only GET requests to Proxmox and return BLOCKED. */
+/* A protected VM can run a disposable LAB copy; actual promotion remains
+   blocked until independent fencing and witness controls are proven. */
 function protectedVMsPage(){
  if(!roleAdmin())return title('VM protégées PRA','Administration uniquement.');
  const plans=state.drPlans||[],all=state.drProtectedVMs||[];
@@ -589,29 +589,45 @@ function protectedVMsPage(){
  const current=selected==='all'?all:all.filter(x=>String(x.plan_id)===String(selected));
  const tableRows=current.map(vm=>{
   const last=vm.last_check||{};
-  return '<tr><td><b>'+e(vm.source_name||'VM #'+vm.source_vmid)+'</b>'
+  return '<tr><td><button class="text-btn" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'" title="Ouvrir le diagnostic PRA">'+e(vm.source_name||'VM #'+vm.source_vmid)+'</button>'
    +'<div class="muted tinytext">Protection OrigamiTasks #'+e(vm.id)+'</div>'
    +'<div class="muted tinytext">VMID '+e(vm.source_vmid)+' · '+e(vm.source_node)+'</div></td>'
    +'<td><b>'+e(vm.plan_name)+'</b><div class="muted tinytext">'+e(vm.source_dc_name)+' / '+e(vm.source_site_name)
    +' → '+e(vm.target_dc_name)+' / '+e(vm.target_site_name)+'</div></td>'
-   +'<td><b>'+e(vm.replica_name)+'</b><div class="muted tinytext">VMID '+e(vm.target_vmid)
+   +'<td><button class="text-btn" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'" title="Journal de réplication et diagnostic">'+e(vm.replica_name)+'</button>'
+   +'<div class="muted tinytext">'+(vm.lvm_standby_configured?'Disques publiés sur REP_ · boot non validé':'Réplique non encore publiée')+'</div>'
+   +'<div class="muted tinytext">Nom Proxmox : '+e(vm.replica_name.replaceAll('_','-'))+'</div>'
+   +'<div class="muted tinytext">VMID '+e(vm.target_vmid)
    +' · '+e(vm.target_node)+' · '+e(vm.target_storage)+'</div></td>'
-   +'<td>'+labelStatus(vm.state)+'<div class="muted tinytext">'+e(vm.interval_minutes)+' min (objectif indicatif)</div></td>'
-   +'<td>'+labelStatus(vm.replication_status)+'<div class="muted tinytext">Dernier point QCOW2 vérifié hors ligne : '+(vm.last_successful_sync?dt(vm.last_successful_sync):'aucun')+'</div>'
-   +'<div class="muted tinytext">Validation du dernier transfert : '+(vm.offline_image_verified?'structurelle, hors ligne':'non vérifiée ou sans transfert')+' · Démarrage non testé</div>'
+   +'<td>'+labelStatus(vm.lvm_effective_status==='uncertain'?'failed':vm.state)
+     +(vm.lvm_activation?.status==='uncertain'?'<div class="muted tinytext">Activation bloquée : '+e(vm.lvm_activation.details||'')+'</div>':'')
+     +'<div class="muted tinytext">'+e(vm.interval_minutes)
+     +' min '+(vm.lvm_lab_activated?'(incrémental programmé après amorçage)':'(objectif indicatif)')+'</div>'
+     +(vm.lvm_activation?'<div class="muted tinytext">'+e(vm.lvm_activation.phase)+' · '+e(vm.lvm_activation.details)+'</div>':'')+'</td>'
+   +'<td>'+labelStatus(vm.lvm_lab_latest_run?.status||vm.replication_status)
+     +'<div class="muted tinytext">Dernière copie LVM : '
+     +(vm.lvm_lab_latest_run?.point_at?dt(vm.lvm_lab_latest_run.point_at):(vm.last_successful_sync?dt(vm.last_successful_sync):'aucune'))+'</div>'
+     +'<div class="muted tinytext">Moteur : '+(vm.lvm_lab_latest_run?'QMP → LVM de recette':'QMP → DIR / non configuré')+'</div>'
+   +'<div class="muted tinytext">Validation : '+(vm.lvm_standby_configured?'checkpoint LVM vérifié et attaché, boot non certifié':vm.offline_image_verified?'structurelle DIR, hors ligne':'pas encore certifiée')+'</div>'
    +'<div class="muted tinytext">'+e(vm.last_replication_run?.details||'')+'</div>'
+   +(vm.lvm_last_completed?'<div class="muted tinytext"><b>Dernière copie LVM réussie :</b> '
+     +e(vm.lvm_last_completed.mode)+' #'+e(vm.lvm_last_completed.id)
+     +' · '+e(vm.lvm_last_completed.point_at?dt(vm.lvm_last_completed.point_at):'date inconnue')+'</div>':'')
    +(vm.lvm_lab_latest_run?'<div class="muted tinytext"><b>LVM RECETTE :</b> '
      +labelStatus(vm.lvm_lab_latest_run.status)+' · '+e(vm.lvm_lab_latest_run.mode)
-     +' · '+e(vm.lvm_lab_latest_run.details||'')+'</div>':'')+'</td>'
+     +' · '+e(vm.lvm_lab_latest_run.details||'')+'</div>':'')
+   +(vm.lvm_last_publication?'<div class="muted tinytext"><b>REP_ LVM :</b> '
+     +labelStatus(vm.lvm_last_publication.status)+' · '+e(vm.lvm_last_publication.details||'')
+     +'</div>':'')+'</td>'
    +'<td>'+(last.scenario?labelStatus(last.decision||'BLOCKED')+'<div class="muted tinytext">'
      +dt(vm.last_check_at)+'</div>':'<span class="muted">Jamais testé</span>')+'</td>'
    +'<td class="dr-vm-actions">'
    +'<button class="btn tiny" data-action="dr-vm-preflight" data-id="'+vm.id+'">Tester la réplication</button>'
    +'<button class="btn tiny" data-action="dr-vm-storage-readiness" data-id="'+vm.id+'">Compatibilité stockage</button>'
    +'<button class="btn tiny" data-action="dr-vm-recovery-readiness" data-id="'+vm.id+'">Préparation bascule</button>'
-   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'">Copie LVM recette</button>':'')
+   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-lvm-lab-open" data-id="'+vm.id+'">Réplication LVM</button>':'')
    +(vm.engine==='pbs_backup_restore'?'<button class="btn tiny primary" data-action="dr-vm-pbs-backup" data-id="'+vm.id+'">Sauvegarder sur PBS</button>':'')
-   +(vm.engine==='qmp_live_incremental'?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
+   +(vm.engine==='qmp_live_incremental'&&!vm.lvm_lab_activated?'<button class="btn tiny" data-action="dr-vm-qmp-preflight" data-id="'+vm.id+'">Prévol QMP</button><button class="btn tiny primary" data-action="dr-vm-qmp-sync" data-id="'+vm.id+'" '+(['queued','running','uncertain'].includes(vm.replication_status)?'disabled':'')+'>Synchroniser à chaud</button>'+(vm.replication_status==='uncertain'?'<button class="btn tiny" data-action="dr-vm-qmp-reconcile" data-id="'+vm.id+'">Réconcilier</button>':''):'')
    +'<button class="btn tiny" data-action="dr-vm-failover" data-id="'+vm.id+'">Simuler la bascule</button>'
    +'<button class="btn tiny" data-action="dr-vm-failback" data-id="'+vm.id+'">Simuler le retour</button>'
    +'<button class="btn tiny" data-action="dr-vm-history" data-id="'+vm.id+'">Historique</button>'
@@ -624,14 +640,14 @@ function protectedVMsPage(){
    '<div class="tool-row"><button class="btn primary" data-action="dr-vm-new">＋ Ajouter une VM</button>'
    +'<button class="btn" data-action="dr-vm-refresh">↻ Actualiser</button></div>')
   +'<div class="notice dr-safety-notice"><b>QMP expérimental :</b> une synchronisation approuvée peut créer une VM REP_ arrêtée sur stockage DIR inscriptible ; source toujours allumée. '
-  +'Le pilote LVM permet désormais une copie FULL/incrémentale réelle sur LV de RECETTE marqués LAB-ONLY, sans démarrage ni attachement automatique. '
+  +'Copie LVM recette : amorçage REP_, copies FULL/incrémentales et publication, avec limite de 8 générations sans rétention automatique. '
   +'Une vérification QCOW2 hors ligne ne garantit pas le démarrage ni la cohérence applicative. '
    +'Les tests de bascule et de retour restent des simulations : aucune promotion automatique.</div>'
   +'<div class="stats-grid dr-vm-stat-grid">'
   +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Politiques PRA</div></div>'
   +'<div class="stat-card"><span class="label">Politiques actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Tâches programmées après amorçage</div></div>'
   +'<div class="stat-card"><span class="label">En pause</span><div class="value">'+current.filter(x=>x.state==='paused').length+'</div><div class="sub">Enregistrements conservés</div></div>'
-  +'<div class="stat-card"><span class="label">Dernières synchros réussies</span><div class="value">'+current.filter(x=>x.replication_status==='completed').length+'</div><div class="sub">Sans validation de bascule PRA</div></div></div>'
+  +'<div class="stat-card"><span class="label">Dernières synchros réussies</span><div class="value">'+current.filter(x=>x.lvm_last_completed||x.replication_status==='completed').length+'</div><div class="sub">Sans validation de bascule PRA</div></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Inventaire des VM sélectionnées</h2>'
   +'<div class="tool-row"><label class="field">Groupe PRA'
   +'<select id="drVMPlanFilter">'+option([['all','Tous les groupes'],...plans.map(p=>[p.id,p.name])],selected)+'</select>'
@@ -680,39 +696,57 @@ async function openProtectedVMConfig(planId,sourceDC,targetDC){
  if(!r.vms.length)throw Error('Aucune VM QEMU n’a été découverte sur le cluster principal.');
  const src= r.vms.find(x=>x.vmid===vmid)||r.vms[0];
  const candidate=current?.target_vmid||src.vmid;
- const targetDefault=r.target_vmids_in_use.includes(candidate)?'':candidate;
+ const occupied=new Set(r.target_vmids_in_use);
+ let targetDefault=candidate;
+ if(!current&&occupied.has(candidate)){
+  targetDefault=Math.max(100,candidate);
+  while(occupied.has(targetDefault)&&targetDefault<999999999)targetDefault++;
+  if(occupied.has(targetDefault))throw Error('Aucun VMID libre disponible sur la destination.');
+ }
  const nodes=r.target_nodes.filter(x=>x.status==='online');
  const pools=r.target_storages.filter(x=>x.images);
  if(!nodes.length||!pools.length)throw Error('Aucun nœud en ligne ou stockage cible compatible VM détecté.');
+ const labCompatible=pools.some(x=>x.type==='lvm'&&x.snapshot_as_volume_chain);
+ const defaultEngine=labCompatible&&src.status==='running'?'qmp_live_incremental':'planning_only';
  const engines=[['planning_only','Préparation / simulation uniquement'],
-   ['qmp_live_incremental','QEMU à chaud : complet puis incrémental (pilote DIR)'],
+   ['qmp_live_incremental','QEMU à chaud : DIR ou LVM de recette compatible'],
    ['offline_copy','Copie à froid (non disponible)'],
    ['pbs_backup_restore','PBS : sauvegarde réelle manuelle (restauration à intégrer)']];
  const body='<form id="drVMConfigForm" data-id="'+(current?.id||'')+'">'
-  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Enregistrer seul ne copie rien. '
-  +'Le moteur QMP exige une cible Proxmox DIR inscriptible, pas un volume Pure RO ni un VG LVM partagé. '
-  +'La première synchronisation est manuelle et crée REP_ arrêtée après contrôle du checkpoint.</div>'
+  +'<div class="notice"><b>Étape 2 — Choisir la VM à protéger.</b> Pour un stockage LVM de recette compatible, '
+  +'l’activation crée REP_ puis lance la première copie FULL à chaud sans autre commande. '
+  +'La réplique reste arrêtée et sans réseau ; aucune bascule de production n’est autorisée.</div>'
   +'<p class="hint"><b>Source :</b> '+e(r.source_name)+' → <b>Destination :</b> '+e(r.target_name)
   +' · '+e(r.source_vm_total??r.vms.length)+' VM QEMU visibles'
   +' · '+e(r.source_lxc_excluded??0)+' conteneur(s) LXC exclus. Si des VM manquent, contrôler les ACL du token Proxmox sur le cluster.</p>'
   +'<div class="form-grid">'
-  +selectField('VM source (choix manuel)','source_vmid',
-    r.vms.map(v=>[v.vmid,v.vmid+' — '+v.name+' · '+v.node+' ['+v.status+']']),src.vmid)
+  +'<label class="field"><span>Rechercher une VM (nom ou VMID)</span><input id="praVMSearch" placeholder="Rechercher parmi '+e(r.vms.length)+' VM..." autocomplete="off"></label>'
+  +selectField('VM source (ordre alphabétique)','source_vmid',
+    [...r.vms].sort((a,b)=>a.name.localeCompare(b.name,'fr',{sensitivity:'base',numeric:true})).map(v=>[v.vmid,v.name+' — #'+v.vmid+' · '+v.node+' ['+v.status+']']),src.vmid)
   +field('VMID cible réservé pour REP_','target_vmid',targetDefault,'number')
+  +'<div class="tool-row"><button class="btn tiny" type="button" data-action="dr-vm-check-vmid">Vérifier VMID sur Proxmox</button><span id="praVMIDStatus" class="hint">Vérification en temps réel disponible</span></div>'
   +selectField('Nœud Proxmox cible','target_node',
     nodes.map(x=>[x.name,x.name]),current?.target_node||nodes[0].name)
   +selectField('Stockage cible','target_storage',
     pools.map(x=>[x.storage,x.storage+' · '+x.type+(x.shared?' (partagé)':'')+
       (x.snapshot_as_volume_chain?' · chaînes QCOW2 (preview; adaptateur PRA indisponible)':'')+
       (x.qmp_receiver_available?' · cible pilote QMP DIR':'')]),
-    current?.target_storage||pools[0].storage)
-  +selectField('Moteur de réplication','engine',engines,current?.engine||'planning_only')
+    current?.target_storage||(labCompatible?pools.find(x=>x.type==='lvm'&&x.snapshot_as_volume_chain)?.storage:pools[0].storage))
+  +selectField('Moteur de réplication','engine',engines,current?.engine||defaultEngine)
+  +(current?'':'<label class="field"><span>Amorçage automatique (recette LVM uniquement)</span><select name="activate_lab">'+(labCompatible&&src.status==='running'
+       ?'<option value="yes">Créer REP_ puis lancer une copie FULL à chaud</option><option value="no">Ne pas lancer (planification uniquement)</option>'
+       :'<option value="no">Ne pas lancer (planification uniquement)</option><option value="yes">Créer REP_ puis lancer une copie FULL à chaud (stockage LVM requis)</option>')+'</select></label>'
+    +'<label class="field"><span>Confirmation pour écriture sur stockage de RECETTE</span><input name="lab_confirmation" autocomplete="off" placeholder="DISPOSABLE-LAB-ONLY"></label>')
+  +'<label class="field"><span>Référence / ticket PRA (facultatif)</span><input name="reference" maxlength="80" value="'+e(current?.reference||'')+'" placeholder="Ex. REDMINE-40230"></label>'
+  +'<label class="field"><span>Commentaire de protection (facultatif)</span><input name="protection_note" maxlength="240" value="'+e(current?.protection_note||'')+'" placeholder="Description de cette protection"></label>'
   +selectField('Fréquence automatique après amorçage','interval_minutes',
     [[15,'15 minutes'],[30,'30 minutes'],[60,'1 heure'],[240,'4 heures'],
      [720,'12 heures'],[1440,'24 heures']],
     current?.interval_minutes||60)+'</div>'
-  +'<p class="hint">Noms cibles prévus : REP_&lt;nom de VM&gt;. Le VMID cible doit être libre. '
-  +'Aucune création ou réservation n’est envoyée au cluster de secours.</p>'
+  +'<p class="hint">Noms cibles : REP_&lt;nom de VM&gt;. Un VMID libre est proposé automatiquement. '
+  +'Confirmer la recette LAB-ONLY pour démarrer les opérations réelles sur la destination. '
+  +'Les incrémentaux LVM allouent des volumes épais : la planification s’arrête à la limite '
+  +'de sécurité sans rétention validée.</p>'
   +'<div class="tool-row"><button class="btn primary" type="submit">Enregistrer la protection</button>'
   +'<button type="button" class="btn" data-action="modal-close">Annuler</button></div></form>';
  modal('VM protégée · '+e(r.source_name)+' → '+e(r.target_name),body,'',true);
@@ -734,6 +768,19 @@ async function openPRALvmLabPanel(vmId){
  const vm=(state.drProtectedVMs||[]).find(x=>x.id===Number(vmId));
  if(!vm)return toast('Protection VM introuvable',false);
  const history=(await api('/dr/vms/'+vmId+'/lvm-lab/runs')).items||[];
+ let activations=[],scheduleEvents=[],bootTests=[],publications=[],stepHistory=[],guestEvidence=[];
+ try{publications=(await api('/dr/vms/'+vmId+'/lvm-lab/publications')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{activations=(await api('/dr/vms/'+vmId+'/lvm-lab/activations')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{stepHistory=(await api('/dr/vms/'+vmId+'/lvm-lab/steps')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{scheduleEvents=(await api('/dr/vms/'+vmId+'/lvm-lab/schedule-events')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{bootTests=(await api('/dr/vms/'+vmId+'/lvm-lab/boot-tests')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
+ try{guestEvidence=(await api('/dr/vms/'+vmId+'/lvm-lab/guest-evidence')).items||[]}
+ catch(ex){ /* The history remains accessible for older controllers. */ }
  let pre=null,preError='';
  try{pre=await api('/dr/vms/'+vmId+'/lvm-lab/preflight')}
  catch(ex){preError=ex.message}
@@ -741,28 +788,74 @@ async function openPRALvmLabPanel(vmId){
    +'</td><td>'+e(x.mode)+'</td><td>'+e(x.point_at?dt(x.point_at):'—')
    +'</td><td>'+e(x.details||'')+(x.test_vmid?' · clone VMID '+e(x.test_vmid):'')+'</td></tr>').join('');
  const running=history.some(x=>['queued','running','uncertain'].includes(x.status));
- const writable=Boolean(pre && pre.source_running && pre.target_stopped) && !running;
+ const writable=Boolean(pre && pre.source_running && pre.target_stopped
+   && !pre.retention_blocked) && !running;
  const latestCopy=history.find(x=>['full','incremental'].includes(x.mode));
  const restoreReady=writable&&Boolean(pre?.checkpoint)
    &&latestCopy?.status==='completed'&&latestCopy?.checkpoint_token===pre.checkpoint;
+ const restoredClone=history.find(x=>x.mode==='restore'&&x.status==='completed'
+   &&x.checkpoint_token===pre?.checkpoint);
+ const bootTestActive=bootTests.some(x=>['queued','running','uncertain'].includes(x.status));
+ const canTestBoot=restoreReady&&Boolean(restoredClone)&&!bootTestActive;
  const targetLabel=pre?'Source VM #'+e(pre.source_vmid)+' ON → cible VM #'+e(pre.target_vmid)
    +' OFF · '+e(pre.destination_storage):'Connexion des nœuds non validée';
- const labInitCommand='qm create '+vm.target_vmid+' --name REP_TEST_'+vm.target_vmid
-   +' --onboot 0 --description "ORIGAMITASKS_PRA_'+vm.id
-   +' ORIGAMITASKS_LAB_ONLY" --memory 2048 --cores 2';
- const content='<div class="notice error"><b>RECETTE UNIQUEMENT : vraies écritures sur LVM.</b> '
+ const canPrepare=vm.engine==='qmp_live_incremental' && !running
+   && !activations.some(x=>['queued','running','uncertain'].includes(x.status));
+ const canActivate=vm.engine==='qmp_live_incremental'&&vm.state==='planned'
+   &&activations.length===0&&!running;
+ const canResumeSource=Boolean(activations[0]?.status==='uncertain'
+   &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
+   &&String(activations[0]?.details||'').includes('source_probe')
+   &&history.length===0);
+ const canResumeOwned=Boolean(activations[0]?.status==='uncertain'
+   &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
+   &&String(activations[0]?.details||'').includes('LAB target VM must exist, be stopped and have exclusive VMID')
+   &&history.length===0);
+ const canRetryProvision=Boolean(activations[0]?.status==='uncertain'
+   &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
+   &&/LiveReplicationError\s*:\s*Échec commande agent PRA\s*:\s*lvm_lab_prepare_standby/.test(
+      String(activations[0]?.details||''))&&history.length===0);
+ const canRetryAuthorizationBug=Boolean(activations[0]?.status==='uncertain'
+   &&activations[0]?.phase==='blocked'&&!activations[0]?.replication_run_id
+   &&/LiveReplicationError\s*:\s*Action PRA non autorisée/.test(String(activations[0]?.details||''))
+   &&history.length===0);
+ const activation=activations[0]||null;
+ const content='<div class="panel"><h3>Diagnostic de la protection #'+e(vm.id)+'</h3>'
+   +'<p><b>Source : </b>'+e(vm.source_name)+' (#'+e(vm.source_vmid)+') sur '+e(vm.source_node)
+   +' → <b>Secours :</b> '+e(vm.replica_name)+' (#'+e(vm.target_vmid)+') sur '+e(vm.target_node)
+   +' · nom Proxmox : '+e(vm.replica_name.replaceAll('_','-'))+'</p>'
+   +'<p><b>Phase :</b> '+e(activation?.phase||'non démarrée')+' · <b>État :</b> '
+   +labelStatus(activation?.status||'not_configured')+'</p>'
+   +(activation?.details?'<div class="notice '+(activation.status==='uncertain'?'error':'')+'">'+e(activation.details)+'</div>':'')
+   +'<p class="hint">Référence : '+e(vm.reference||'—')+' · Commentaire : '+e(vm.protection_note||'—')+'</p></div>'
+   +'<div class="notice error"><b>RECETTE UNIQUEMENT : vraies écritures sur LVM.</b> '
    +'La cible doit porter ORIGAMITASKS_LAB_ONLY, être arrêtée, sans carte réseau et avec onboot=0. '
    +'Chaque transfert alloue de nouveaux volumes logiques épais, sans suppression automatique. '
    +'Aucune bascule ni aucun démarrage automatique.</div>'
    +'<p><b>'+targetLabel+'</b></p>'
-   +'<details><summary>Préparer la VM de secours vide (nœud Proxmox de recette)</summary>'
-   +'<p class="hint">Protection #'+e(vm.id)+' : créer cette VM seulement si le VMID '+e(vm.target_vmid)
-   +' est encore libre sur tout le cluster de RECETTE. Ne pas ajouter de disque ni réseau ; VM arrêtée.</p>'
-   +'<pre><code>'+e(labInitCommand)+'\nqm status '+e(vm.target_vmid)
-   +'\nqm config '+e(vm.target_vmid)+'</code></pre></details>'
+   +'<div class="tool-row"><button class="btn primary" data-action="dr-vm-lvm-lab-activate" data-id="'+vmId+'" '
+   +(canActivate?'':'disabled')+'>Activer la protection (REP_ + première copie FULL)</button>'
+   +(canRetryAuthorizationBug?'<button class="btn primary" data-action="dr-vm-lvm-lab-retry-allowlist" data-id="'+vmId+'">Relancer après correction du refus local</button>':'')
+   +(canRetryProvision?'<button class="btn primary" data-action="dr-vm-lvm-lab-reconcile-provision" data-id="'+vmId+'">Vérifier le VMID cible et reprendre la préparation</button>':'')
+   +(canResumeOwned?'<button class="btn primary" data-action="dr-vm-lvm-lab-resume-owned" data-id="'+vmId+'">Vérifier REP_ existante et reprendre la copie FULL</button>':'')
+   +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose-generation" data-id="'+vmId+'">Inspecter la génération LVM (lecture seule)</button>'
+   +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose-source" data-id="'+vmId+'">Diagnostiquer QMP source (lecture seule)</button>'
+   +'<button class="btn" data-action="dr-vm-lvm-network-preview" data-id="'+vmId+'">Prévisualiser le réseau de secours</button>'
+   +(canResumeSource?'<button class="btn primary" data-action="dr-vm-lvm-lab-resume-source" data-id="'+vmId+'">Vérifier la source et reprendre la copie FULL</button>':'')
+   +'<button class="btn" data-action="dr-vm-lvm-lab-diagnose" data-id="'+vmId+'">Diagnostiquer Proxmox (lecture seule)</button>'
+   +'<button class="btn" data-action="dr-vm-lvm-lab-prepare" data-id="'+vmId+'" '
+   +(canPrepare?'':'disabled')+'>Préparer seulement la VM de secours</button></div>'
+   +'<p class="hint">OrigamiTasks vérifie le VMID sur le cluster cible, prépare une VM REP_ arrêtée, sans réseau ni disque, et applique les marqueurs de protection. Aucune commande manuelle.</p>'
+   +(!pre&&(canRetryAuthorizationBug||canRetryProvision)?'<p class="hint">Le prévol de copie requiert REP_ créée. '
+     +'Ne pas lancer une copie FULL manuellement : vérifier d’abord l’état de la création de secours via la reprise contrôlée.</p>':'')
    +(pre?'<p class="hint">Disques : '+e((pre.disk_slots||[]).join(', '))
       +' · Espace libre : '+e(Math.round(pre.available_bytes/1073741824))+' Gio'
       +' · Dernier checkpoint : '+e(pre.checkpoint||'aucun')+'</p>'
+      +'<div class="notice '+(pre.retention_blocked?'error':'')+'"><b>Rétention LVM : '
+      +e(pre.generation_count??'?')+' / '+e(pre.retention_limit??'?')+' générations</b>'
+      +(pre.retention_blocked?' — plafond atteint : nouvelle copie bloquée avant allocation. '
+         +'Aucune suppression ou consolidation automatique de volume n’est autorisée.'
+         :' · Contrôle de rétention actif.')+'</div>'
       :'<div class="notice error"><b>Prévol bloqué :</b> '+e(preError)+'</div>')
    +'<label class="field"><span>Confirmer exactement DISPOSABLE-LAB-ONLY</span>'
    +'<input id="praLvmLabConfirmation" autocomplete="off" placeholder="DISPOSABLE-LAB-ONLY"></label>'
@@ -775,11 +868,60 @@ async function openPRALvmLabPanel(vmId){
    +'</div>'
    +'<h3>Préparer un clone indépendant pour un test de restauration</h3>'
    +'<p class="hint">Crée une nouvelle VM PRA_TEST_ arrêtée, avec ses propres LV aplatis, '
-   +'sans interface réseau. Le clone ne démarre pas : son boot devra être contrôlé séparément.</p>'
+   +'sans interface réseau. Un test QEMU séparé peut le démarrer puis l’arrêter automatiquement ; cela ne vérifie pas le système invité.</p>'
    +'<label class="field"><span>VMID Proxmox libre pour le clone</span>'
    +'<input id="praLvmLabCloneVMID" type="number" min="100" step="1" placeholder="Ex. 4301"></label>'
    +'<div class="tool-row"><button class="btn" data-action="dr-vm-lvm-lab-restore" data-id="'+vmId+'" '
-   +(restoreReady?'':'disabled')+'>Préparer un clone isolé (arrêté)</button></div>'
+   +(restoreReady?'':'disabled')+'>Préparer un clone isolé (arrêté)</button>'
+   +'<button class="btn" data-action="dr-vm-lvm-lab-test-boot" data-id="'+vmId+'" data-restore-run="'+e(restoredClone?.id||'')+'" '
+   +(canTestBoot?'':'disabled')+'>Tester le démarrage du clone (isolé)</button></div>'
+   +'<div class="table-wrap"><table><thead><tr><th>Test</th><th>Clone</th><th>État</th><th>Journal</th></tr></thead><tbody>'
+   +(bootTests.map(x=>'<tr><td>#'+e(x.id)+'</td><td>VMID '+e(x.test_vmid)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.details)+'</td></tr>').join('')
+     ||'<tr><td colspan="4">Aucun test de démarrage QEMU</td></tr>')+'</tbody></table></div>'
+   +'<h3>Validation de connexion au système restauré (observation humaine)</h3>'
+   +'<p class="hint">Si tu as réellement ouvert une session sur la console d’un clone isolé, enregistre ce contrôle. '
+   +'Il n’atteste pas les services applicatifs, le démarrage réseau, le fencing ou une bascule réelle. '
+   +'La preuve est rattachée au checkpoint exact du clone, et non aux copies ultérieures.</p>'
+   +'<label class="field"><span>Clone restauré</span><select id="praGuestEvidenceRestore">'
+   +option(history.filter(x=>x.mode==='restore'&&x.status==='completed').map(x=>[x.id,
+       'Clone #'+x.test_vmid+' · restauration #'+x.id+' · '+String(x.checkpoint_token||'').slice(0,12)]),
+       restoredClone?.id||'')+'</select></label>'
+   +'<label class="field"><span>Compte et vérification effectuée (sans mot de passe)</span>'
+   +'<input id="praGuestEvidenceNote" maxlength="400" placeholder="Ex. Console Proxmox : connexion root, shell opérationnel"></label>'
+   +'<label class="field"><span>Confirmer exactement OS-LOGIN-VERIFIED</span>'
+   +'<input id="praGuestEvidenceConfirm" autocomplete="off" placeholder="OS-LOGIN-VERIFIED"></label>'
+   +'<div class="tool-row"><button class="btn" data-action="dr-vm-lvm-record-os-login" data-id="'+vmId+'" '
+   +(history.some(x=>x.mode==='restore'&&x.status==='completed')?'':'disabled')
+   +'>Enregistrer le démarrage OS vérifié</button></div>'
+   +'<div class="table-wrap"><table><thead><tr><th>Date</th><th>Clone</th><th>Contrôle</th><th>Opérateur</th></tr></thead><tbody>'
+   +(guestEvidence.map(x=>'<tr><td>'+e(dt(x.created_at))+'</td><td>VMID '+e(x.test_vmid)
+       +'</td><td>'+e(x.note)+'</td><td>'+e(x.actor)+'</td></tr>').join('')
+     ||'<tr><td colspan="4">Aucune connexion OS observée et enregistrée</td></tr>')
+   +'</tbody></table></div>'
+   +'<h3>Publication de la réplique REP_</h3>'
+   +'<p class="hint">Les volumes vérifiés sont attachés à la configuration Proxmox de REP_ arrêtée. '
+   +'Ce contrôle ne certifie pas le démarrage de la VM ni une bascule réelle.</p>'
+   +'<div class="table-wrap"><table><thead><tr><th>Date</th><th>État</th><th>Journal</th></tr></thead><tbody>'
+   +(publications.map(x=>'<tr><td>'+e(dt(x.updated_at))+'</td><td>'+labelStatus(x.status)
+      +'</td><td>'+e(x.details)+'</td></tr>').join('')
+      ||'<tr><td colspan="3">Aucune publication de disque LVM</td></tr>')+'</tbody></table></div>'
+   +'<h3>Débogage : étapes de la protection</h3>'
+   +'<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Étape</th><th>Diagnostic</th></tr></thead><tbody>'
+   +(stepHistory.map(x=>'<tr><td>'+e(dt(x.created_at))+'</td><td>'+e(x.action.replace('pra.lvm.lab.activation.',''))+'</td><td>'+e(x.detail)+'</td></tr>').join('')
+       ||'<tr><td colspan="3">Aucune étape reçue</td></tr>')+'</tbody></table></div>'
+   +'<h3>Journal d’activation de la protection</h3>'
+   +'<div class="table-wrap"><table><thead><tr><th>Activation</th><th>État</th><th>Étape</th><th>Journal</th></tr></thead><tbody>'
+   +(activations.map(x=>'<tr><td>#'+e(x.id)+'</td><td>'+labelStatus(x.status)+'</td><td>'+e(x.phase)+'</td><td>'+e(x.details)
+     +(x.replication_run_id?' · Copie #'+e(x.replication_run_id)+': '+e(x.replication_details||x.replication_status||'en cours'):'')+'</td></tr>').join('')
+     ||'<tr><td colspan="4">Aucune activation automatique</td></tr>')+'</tbody></table></div>'
+   +'<h3>Journal de planification incrémentale</h3>'
+   +'<p class="hint">Intervalle configuré : '+e(vm.interval_minutes)+' min après la dernière copie terminée. '
+   +'Aucune reprise automatique si le bitmap, les volumes ou les checkpoints sont incertains. '
+   +'Une vérification structurelle ne garantit pas un démarrage.</p>'
+   +'<div class="table-wrap"><table><thead><tr><th>Date</th><th>État</th><th>Journal</th></tr></thead><tbody>'
+   +(scheduleEvents.map(x=>'<tr><td>'+e(dt(x.created_at))+'</td><td>'+labelStatus(x.status)
+      +'</td><td>'+e(x.detail)+'</td></tr>').join('')
+     ||'<tr><td colspan="3">Aucune synchronisation planifiée exécutée</td></tr>')+'</tbody></table></div>'
    +'<h3>Historique des copies LVM de recette</h3>'
    +'<div class="table-wrap"><table><thead><tr><th>Run</th><th>État</th><th>Mode</th><th>Point</th><th>Diagnostic</th>'
    +'</tr></thead><tbody>'+(rows||'<tr><td colspan="5">Aucune copie lancée</td></tr>')+'</tbody></table></div>'
@@ -1128,7 +1270,11 @@ function renderUpdateVersion(data){
   +(!fresh&&w.checked_at?'<div class="notice error">Dernière vérification trop ancienne : relancer un contrôle Git.</div>':'')
   +(w.error?'<div class="notice error">'+e(w.error)+'</div>':'');
 }
-function audit(){return title('Journal d’audit','Traçabilité des connexions, modifications, exécutions et opérations Git.')+`<div class="panel" id="auditTable">Chargement...</div>`}
+function audit(){return title('Journal d’audit','Traçabilité des connexions, modifications, exécutions et opérations Git.')
+  +'<div class="panel"><div class="tool-row"><label class="field"><span>Catégorie</span><select id="auditCategory">'
+  +option([['all','Tous'],['pra','PRA / Proxmox'],['agents','Agents / installations'],['jobs','Jobs / exécutions'],['security','Connexions / sécurité'],['system','Mises à jour / système']],state.auditCategory||'all')
+  +'</select></label><label class="field"><span>Rechercher</span><input id="auditSearch" value="'+e(state.auditSearch||'')+'" placeholder="Action, auteur, VMID, détails..."></label>'
+  +'<button class="btn" data-action="audit-refresh">Rechercher / Actualiser</button></div><div id="auditTable">Chargement...</div></div>'}
 function modal(title,body,footer='',wide=false){$('#modalRoot').innerHTML=`<div class="modal-overlay"><div class="modal ${wide?'xl':''}" role="dialog" aria-modal="true"><div class="modal-head"><h2>${title}</h2><button class="close" data-action="modal-close" aria-label="Fermer">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}</div></div>`}
 function closeModal(){$('#modalRoot').innerHTML='';state.editor=null}
 async function webhookManager(id){const job=state.jobs.find(j=>j.id===id);try{const r=await api('/jobs/'+id+'/webhook');modal('Webhook · '+e(job?.name||id),`<p class="muted">Déclenchez ce workflow via un événement externe, avec un jeton secret distinct.</p><div class="field"><span>Endpoint (requête POST)</span><input readonly value="${e(location.origin+'/api/hooks/'+id)}"></div><p>${r.enabled?'<span class="status success">Webhook actif</span>':'<span class="status">Webhook désactivé</span>'}</p><div class="notice">Envoyez le jeton dans l’en-tête <span class="code-inline">X-Origami-Webhook-Token</span>. Un corps JSON optionnel fournit des variables accessibles comme <span class="code-inline">{{ var.ticket_id }}</span>. Le jeton n’est affiché qu’à la création/rotation.</div>`,`<button class="btn" data-action="modal-close">Fermer</button>${r.enabled?`<button class="btn danger" data-action="disable-webhook" data-id="${id}">Désactiver</button>`:''}<button class="btn primary" data-action="rotate-webhook" data-id="${id}">${r.enabled?'↻ Régénérer le jeton':'＋ Activer'}</button>`)}catch(ex){toast(ex.message,false)}}
@@ -1835,7 +1981,7 @@ steps.forEach((s,i)=>{const x=coords[i].x,y=coords[i].y;svg+=`<g class="step-nod
 async function saveEditor(){captureEditor();const j=state.editor;if(!j.name.trim())return toast('Saisis un nom de workflow',false);try{if(j.id){await api('/jobs/'+j.id,'PUT',j)}else await api('/jobs','POST',j);toast('Workflow enregistré');closeModal();await refresh();showPage('jobs')}catch(ex){toast(ex.message,false)}}
 async function runJob(id){try{const r=await api('/jobs/'+id+'/run','POST');toast('Exécution #'+r.run_id+' mise en file');await refresh();showPage('runs');await openRun(r.run_id)}catch(ex){toast(ex.message,false)}}
 async function openRun(id){try{const r=await api('/runs/'+id);state.selectedRun=r;modal('Exécution #'+r.id+' — '+e(r.job_name),`<div class="tool-row">${labelStatus(r.status)}<span class="hint">Déclenché par ${e(r.requested_by)} · ${dt(r.queued_at)}</span></div>${r.error?`<div class="notice error">${e(r.error)}</div>`:''}${r.notification_status?`<div class="notice">Notification e-mail : ${e(r.notification_status==='sent'?'envoyée':r.notification_status==='failed'?'échec de l’envoi':r.notification_status==='skipped'?'non demandée pour ce statut':'désactivée')}${r.notification_error?' · '+e(r.notification_error):''}</div>`:''}<h3>Résultats par étape</h3>${r.steps.map(s=>`<div class="step-log"><div class="step-header">${labelStatus(s.status)}<b>${e(s.name)}</b><span class="muted">${e(s.type)} · essai ${s.attempt} · code ${s.exit_code??'—'}</span></div><pre>${e(s.output||'(aucune sortie)')}</pre></div>`).join('')||'<p class="muted">Exécution en attente. Réactualisez dans quelques secondes.</p>'}`,`<button class="btn" data-action="run-detail" data-id="${id}">↻ Actualiser</button><button class="btn primary" data-action="modal-close">Fermer</button>`,true)}catch(ex){toast(ex.message,false)}}
-async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit')).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateVersionSummary').innerHTML=renderUpdateVersion(u);$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
+async function hydrateAdmins(){if(!roleAdmin())return;try{if(state.page==='users'){const users=(await api('/users')).items;$('#userTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Utilisateur</th><th>Source</th><th>Rôle</th><th>Groupes internes / LDAP</th></tr></thead><tbody>${users.map(u=>`<tr><td class="name-cell">${e(u.display_name)}<div class="tinytext muted">${e(u.username)}</div></td><td>${e(u.source)}</td><td>${e(u.role)}</td><td>${(u.groups_json||[]).map(x=>`<span class="chip">${e(x)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='audit'){const rows=(await api('/audit?category='+encodeURIComponent(state.auditCategory||'all')+'&search='+encodeURIComponent(state.auditSearch||''))).items;$('#auditTable').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Heure</th><th>Auteur</th><th>Action</th><th>Objet</th><th>Détails</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${dt(r.created_at)}</td><td>${e(r.actor)}</td><td>${e(r.action)}</td><td>${e(r.target)}</td><td>${e(r.detail)}</td></tr>`).join('')}</tbody></table></div>`}if(state.page==='updates'){const u=await api('/updates');$('#updateVersionSummary').innerHTML=renderUpdateVersion(u);$('#updateStatus').innerHTML=`<div class="hint" style="margin-bottom:14px">${u.worker?.message?e(u.worker.message):'Aucune information du service hôte. Lancez ops/update-worker.py.'}</div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Statut</th><th>Auteur</th><th>Date</th><th>Message</th></tr></thead><tbody>${u.requests.map(r=>`<tr><td>${e(r.action)}</td><td>${labelStatus(r.status)}</td><td>${e(r.actor)}</td><td>${dt(r.created_at)}</td><td>${e(r.message)}</td></tr>`).join('')}</tbody></table></div>`}}catch(ex){toast(ex.message,false)}}
 function bindLocal(){hydrateAdmins();if(state.page==='ldap')hydrateLDAP();if(state.page==='agents')scheduleAgentBatchPoll()}
 async function refresh(){await load();render()}
 async function handleClick(ev){const b=ev.target.closest('[data-action], [data-page]');if(!b)return;const a=b.dataset.action||'page',id=Number(b.dataset.id);try{if(a==='overview-tab'){state.dashboardTab=b.dataset.value||'tasks';render();return}
@@ -2030,6 +2176,245 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
   if(a==='dr-vm-lvm-lab-open'){
    await openPRALvmLabPanel(id);return;
   }
+  if(a==='dr-vm-check-vmid'){
+   const form=document.getElementById('drVMConfigForm'),r=state.drVMOptions;
+   if(!form||!r)return;
+   const field=form.elements.namedItem('target_vmid'),msg=document.getElementById('praVMIDStatus');
+   msg.textContent='Vérification en cours...';
+   try{
+    const report=await api('/dr/vms/check-target-vmid?plan_id='+r.plan_id
+       +'&source_dc_id='+r.source_dc_id+'&target_dc_id='+r.target_dc_id
+       +'&vmid='+encodeURIComponent(field.value));
+    msg.textContent=report.free?'VMID '+report.requested_vmid+' libre sur le cluster cible'
+       :'VMID occupé. Proposition libre : '+report.suggested_vmid;
+    if(!report.free){field.value=report.suggested_vmid;toast('VMID occupé : VMID '+report.suggested_vmid+' proposé')}
+   }catch(ex){msg.textContent='Échec vérification : '+ex.message;toast(ex.message,false)}
+   return;
+  }
+  if(a==='audit-refresh'){
+   state.auditSearch=document.getElementById('auditSearch')?.value||'';
+   state.auditCategory=document.getElementById('auditCategory')?.value||'all';
+   hydrateAdmins();return;
+  }
+  if(a==='dr-vm-lvm-reconcile-empty'){
+   const confirmation=document.getElementById('praEmptyReconConfirm')?.value?.trim();
+   const token=b.dataset.token;
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY',false);
+   if(!/^[a-f0-9]{32}$/.test(token||''))return toast('Jeton de génération invalide',false);
+   if(!confirm('Vérifier une seconde fois que le LV n’existe pas et que QMP/NBD est inactif, '
+      +'archiver le journal sans effacer de volume, puis relancer une nouvelle FULL ?'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/reconcile-empty-generation','POST',
+      {confirmation,token});
+    toast('Journal LVM archivé ; nouvelle activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast('Réconciliation refusée : '+ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-network-preview'){
+   try{
+     const r=await api('/dr/vms/'+id+'/lvm-lab/network-preview');
+     modal('Prévol réseau PRA — lecture seule',
+       '<div class="notice error"><b>Réseau de secours non validé. Aucun changement Proxmox.</b> '
+       +e(r.warning)+'</div>'
+       +'<p>Bridges du nœud secours : '+e((r.destination_bridges||[]).join(', ')||'aucun')+'</p>'
+       +'<div class="table-wrap"><table><thead><tr><th>Carte</th><th>Modèle</th><th>Bridge source</th><th>VLAN source</th><th>Suggestion secours</th><th>État</th></tr></thead><tbody>'
+       +((r.nics||[]).map(n=>'<tr><td>'+e(n.slot)+'</td><td>'+e(n.model)+'</td>'
+          +'<td>'+e(n.source_bridge)+'</td><td>'+e(n.source_vlan??'non tagué')+'</td>'
+          +'<td>'+e(n.suggested_target_bridge||'aucun')+'</td><td>'
+          +(n.bridge_exists?'Bridge existant, VLAN non vérifié':'Bridge absent')+'</td></tr>').join('')
+          ||'<tr><td colspan="6">Aucune interface réseau déclarée sur la source</td></tr>')
+       +'</tbody></table></div><p class="hint">Cette prévisualisation ne prouve pas la connectivité, '
+       +'la compatibilité VLAN, l’absence de doublon IP/MAC ni le fencing. '
+       +'Le clone reste sans interface et aucune bascule n’est possible.</p>',
+       '<button class="btn" data-action="modal-close">Fermer</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-record-os-login'){
+   const restoreId=Number(document.getElementById('praGuestEvidenceRestore')?.value);
+   const confirmation=document.getElementById('praGuestEvidenceConfirm')?.value?.trim();
+   const note=document.getElementById('praGuestEvidenceNote')?.value?.trim()||'';
+   if(!Number.isInteger(restoreId)||restoreId<=0)return toast('Choisir un clone restauré',false);
+   if(confirmation!=='OS-LOGIN-VERIFIED')return toast('Confirmer exactement OS-LOGIN-VERIFIED',false);
+   if(note.length<8||note.length>400)return toast('Décrire le contrôle OS en 8 à 400 caractères',false);
+   if(!confirm('Confirmer avoir réellement ouvert une session dans le système invité de ce clone ? '
+       +'Cela ne valide pas les applications ni une bascule réelle.'))return;
+   try{
+     await api('/dr/vms/'+id+'/lvm-lab/guest-evidence','POST',
+       {restore_run_id:restoreId,confirmation,note});
+     toast('Observation de connexion OS enregistrée pour ce checkpoint');
+     await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-diagnose-generation'){
+   try{
+    const r=await api('/dr/vms/'+id+'/lvm-lab/diagnose-generation');
+    const record=(x,label)=>'<div class="panel"><b>'+label+'</b><p>État : '+e(x?.status||'aucun')
+       +' · Mode : '+e(x?.mode||'—')+' · Jeton : '+e(x?.token||'—')+'</p>'
+       +'<p>Disques : '+e((x?.slots||[]).join(', ')||'—')+'</p>'
+       +'<p>Volumes déclarés : '+e((x?.volumes||[]).join(', ')||'—')+'</p></div>';
+    modal('Générations LVM — diagnostic sans écriture',
+      '<div class="notice '+(r.requires_reconciliation?'error':'')+'"><b>'
+      +(r.requires_reconciliation?'Réconciliation requise : ne pas relancer FULL, ni supprimer les LV.'
+         :'Aucune génération en attente déclarée par le journal local.')
+      +'</b> · État : '+e(r.state)+' · Générations historiques : '+e(r.generation_count)+'</div>'
+      +'<div class="notice '+(r.retention_full?'error':'')+'"><b>Rétention : '
+      +e(r.generation_count)+' / '+e(r.retention_limit??8)+' générations</b>'
+      +(r.retention_full?' — capacité logique atteinte : nouvel incrémental interdit. '
+         +'Les générations QCOW2 peuvent avoir une chaîne de backing ; aucune purge automatique.'
+         :' — aucun nettoyage automatique autorisé.')+'</div>'
+      +'<div class="panel"><h3>Références de stockage Proxmox</h3>'
+      +'<div class="table-wrap"><table><thead><tr><th>Emplacement VM</th><th>Volume</th><th>Répertorié dans le journal</th></tr></thead><tbody>'
+      +((r.pve_disk_references||[]).map(x=>'<tr><td>'+e(x.slot)+'</td><td>'+e(x.volid)
+          +'</td><td>'+e(x.ledger_owned?'Oui':'Non confirmé')+'</td></tr>').join('')
+        ||'<tr><td colspan="3">Aucune référence Proxmox contrôlée</td></tr>')
+      +'</tbody></table></div>'
+      +(r.pve_reference_error?'<p class="notice error">'+e(r.pve_reference_error)+'</p>':'')
+      +'<p class="hint">Les entrées unused sont toujours des références Proxmox. '
+      +'Ne pas les supprimer avant vérification complète de la chaîne QCOW2, des snapshots et des clones.</p></div>'
+      +record(r.pending,'Génération en attente')
+      +(r.pending?.failure_category?'<p><b>Code dernier échec : </b>'+e(r.pending.failure_category)+'</p>':'')
+      +'<div class="panel"><h3>Contrôle du VG réel (lecture seule)</h3>'
+      +(r.inventory_checked?'<p>Inventaire LV consulté ; absence constatée ≠ preuve de non-création en cas d’opération incertaine.</p>'
+          :'<p>Inventaire LVM non confirmé : '+e(r.inventory_error||'journal sans prévision de volumes')+'</p>')
+      +'<div class="table-wrap"><table><thead><tr><th>Disque</th><th>Nom LV attendu</th><th>Présence dans le VG</th></tr></thead><tbody>'
+      +((r.predicted_allocations||[]).map(x=>'<tr><td>'+e(x.slot)+'</td><td>'+e(x.name)+'</td><td>'
+          +e(x.present===true?'Présent':x.present===false?'Non trouvé':'Non vérifié')+'</td></tr>').join('')
+         ||'<tr><td colspan="3">Aucun volume attendu identifié</td></tr>')
+      +'</tbody></table></div></div>'
+      +record(r.current,'Dernière génération publiée')
+      +'<p>Fichiers PID NBD : '+e((r.pid_files||[]).join(', ')||'aucun')+'</p>'
+      +'<p class="hint">Lecture seule : ces informations ne prouvent pas à elles seules que les LV ou processus NBD sont inactifs.</p>'
+      +(r.state==='pending'&&r.pending?.status==='uncertain'&&r.pending?.mode==='full'
+         &&!(r.pending?.volumes||[]).length&&r.current===null&&r.generation_count===0
+         &&!(r.pid_files||[]).length&&r.inventory_checked===true
+         &&(r.predicted_allocations||[]).length>0
+         &&r.predicted_allocations.every(x=>x.present===false)
+         ?'<div class="panel"><h3>Réconcilier la tentative sans LV</h3>'
+          +'<p>OrigamiTasks vérifiera à nouveau la source, la propriété de REP_ et le VG réel avant '
+          +'d’archiver le journal de cette tentative. Aucun LV ni VM ne sera supprimé.</p>'
+          +'<label class="field"><span>Confirmer DISPOSABLE-LAB-ONLY</span><input id="praEmptyReconConfirm" placeholder="DISPOSABLE-LAB-ONLY" autocomplete="off"></label>'
+          +'<button class="btn primary" data-action="dr-vm-lvm-reconcile-empty" data-id="'+id
+          +'" data-token="'+e(r.pending.token)+'">Vérifier, archiver et reprendre la copie FULL</button></div>'
+         :'') ,
+      '<button class="btn" data-action="modal-close">Fermer</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-diagnose-source'){
+   try{
+    const report=await api('/dr/vms/'+id+'/lvm-lab/diagnose-source');
+    modal('Diagnostic QMP source — VM #'+e(report.vmid),
+      '<div class="notice '+(report.ready?'':'error')+'"><b>'
+       +(report.ready?'Source QMP accessible':'Source QMP non validée')
+       +'</b> · Étape : '+e(report.stage)+' · '+e(report.message)+'</div>'
+       +(report.ready?'<p>Disques détectés : '+e((report.slots||[]).join(', '))
+            +' · Jobs Origami actifs : '+e(report.active_jobs)+'</p>':'')
+       +'<p class="hint">Diagnostic en lecture seule : aucune copie, aucun arrêt de VM.</p>',
+      '<button class="btn" data-action="modal-close">Fermer</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-resume-source'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')return toast('Saisir DISPOSABLE-LAB-ONLY',false);
+   if(!confirm('Vérifier le QMP source et la propriété de REP_ arrêtée, et reprendre la première copie FULL uniquement si aucun transfert LVM n’existe ?'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/resume-source','POST',{confirmation});
+    toast('Vérification réussie ; activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-diagnose'){
+   try{
+    const report=await api('/dr/vms/'+id+'/lvm-lab/diagnose-standby');
+    const rows=(report.checks||[]).map(x=>'<tr><td>'+e(x.stage)+'</td><td>'+labelStatus(x.ok?'completed':'failed')
+      +'</td><td>'+e(x.message)+'</td></tr>').join('');
+    modal('Diagnostic Proxmox en lecture seule — VMID '+e(report.vmid),
+      '<div class="notice"><b>Aucune écriture ni création de VM.</b> '
+      +(report.ready_for_creation?'Le VMID est libre, mais aucun transfert n’est autorisé par ce diagnostic.'
+        :report.owned_standby?'VM REP_ appartenant à cette protection : arrêtée et isolée. Une reprise contrôlée est possible après vérification des checkpoints.'
+        :report.target_exists?'Le VMID est occupé mais sa propriété n’est pas attestée : aucune suppression ni reprise.'
+        :'Un prérequis Proxmox a échoué. Corriger ce contrôle avant la reprise.')+'</div>'
+      +'<div class="table-wrap"><table><thead><tr><th>Étape</th><th>État</th><th>Diagnostic</th></tr></thead><tbody>'
+      +rows+'</tbody></table></div>',
+      '<button class="btn" data-action="modal-close">Fermer</button>',true);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-resume-owned'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')return toast('Saisir DISPOSABLE-LAB-ONLY',false);
+   if(!confirm('Vérifier directement sur Proxmox que REP_ existe, appartient à cette protection, '
+     +'est arrêtée, sans réseau et sans checkpoint LVM ? Aucun disque ou VM ne sera supprimé. '
+     +'Après validation, la première copie FULL pourra démarrer automatiquement.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/resume-owned','POST',{confirmation});
+    toast('Réplique existante vérifiée, activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-reconcile-provision'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Saisir DISPOSABLE-LAB-ONLY',false);
+   if(!confirm('Vérifier l’absence du VMID sur le cluster Proxmox cible avant toute nouvelle préparation ? Si la VM existe, la reprise sera refusée.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/reconcile-provision','POST',{confirmation});
+    toast('Réconciliation confirmée : activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-retry-allowlist'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')return toast('Confirmation de recette LAB-ONLY requise',false);
+   if(!confirm('Reprendre seulement l’échec local avant toute commande Proxmox ? Cette reprise reste interdite pour les copies incertaines.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/retry-local-error','POST',{confirmation});
+    toast('Nouvelle activation #'+result.activation_id+' lancée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-activate'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour lancer le PRA de recette',false);
+   if(!confirm('Créer la réplique REP_ et démarrer la première vraie copie QMP/LVM à chaud ? '
+      +'Le secours reste arrêté et la bascule réelle reste interdite.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/activate','POST',{confirmation});
+    toast('Activation PRA de recette #'+result.activation_id+' lancée : consulter les journaux.');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-prepare'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   if(confirmation!=='DISPOSABLE-LAB-ONLY'){
+    toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour préparer la VM de recette',false);return;
+   }
+   if(!confirm('Créer une VM de secours vide, isolée et arrêtée sur Proxmox ? Aucun disque ni réseau ne sera ajouté.'))return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/prepare-standby','POST',{confirmation});
+    toast(result.created?'VM de secours #'+result.vmid+' créée et vérifiée':'VM de secours #'+result.vmid+' déjà préparée et vérifiée');
+    state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
   if(a==='dr-vm-lvm-lab-run'){
    const mode=b.dataset.mode;
    const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
@@ -2044,6 +2429,22 @@ async function handleClick(ev){const b=ev.target.closest('[data-action], [data-p
     const result=await api('/dr/vms/'+id+'/lvm-lab/replicate','POST',{mode,confirmation});
     toast('Copie LVM de recette #'+result.run_id+' lancée. Suivre son état ici.');
     state.drProtectedVMs=(await api('/dr/vms')).items;
+    await openPRALvmLabPanel(id);
+   }catch(ex){toast(ex.message,false)}
+   return;
+  }
+  if(a==='dr-vm-lvm-lab-test-boot'){
+   const confirmation=document.getElementById('praLvmLabConfirmation')?.value?.trim();
+   const restore_run_id=Number(b.dataset.restoreRun);
+   if(confirmation!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour tester le clone',false);
+   if(!Number.isInteger(restore_run_id)||restore_run_id<=0)
+    return toast('Aucun clone indépendant vérifié pour le dernier checkpoint',false);
+   if(!confirm('Démarrer puis arrêter réellement le clone PRA_TEST_ sans réseau ? Le système invité ne sera pas validé.'))
+    return;
+   try{
+    const result=await api('/dr/vms/'+id+'/lvm-lab/test-boot','POST',{restore_run_id,confirmation});
+    toast('Test isolé QEMU #'+result.test_id+' enregistré. Suivre les journaux ici.');
     await openPRALvmLabPanel(id);
    }catch(ex){toast(ex.message,false)}
    return;
@@ -2236,8 +2637,18 @@ async function handleSubmit(ev){
    plan_id:r.plan_id,source_dc_id:r.source_dc_id,target_dc_id:r.target_dc_id,
    source_vmid:Number(f.get('source_vmid')),target_vmid:Number(f.get('target_vmid')),
    target_node:String(f.get('target_node')||''),target_storage:String(f.get('target_storage')||''),
-   interval_minutes:Number(f.get('interval_minutes')),engine:String(f.get('engine'))
+   interval_minutes:Number(f.get('interval_minutes')),engine:String(f.get('engine')),
+   reference:String(f.get('reference')||'').trim(),protection_note:String(f.get('protection_note')||'').trim()
   };
+  if((r.target_vmids_in_use||[]).includes(body.target_vmid)&&!currentId)
+   return toast('VMID cible déjà utilisé sur le dernier inventaire : sélectionner un VMID libre',false);
+  if(!currentId && f.get('activate_lab')==='yes'){
+   if(body.engine!=='qmp_live_incremental')return toast('Choisir le moteur QMP pour amorcer la protection',false);
+   if(String(f.get('lab_confirmation')||'').trim()!=='DISPOSABLE-LAB-ONLY')
+    return toast('Confirmer exactement DISPOSABLE-LAB-ONLY pour autoriser la copie de recette',false);
+   body.activate_lab=true;
+   body.lab_confirmation='DISPOSABLE-LAB-ONLY';
+  }
   const button=ev.target.querySelector('[type=submit]');
   if(button)button.disabled=true;
   try{
@@ -2246,8 +2657,9 @@ async function handleSubmit(ev){
    closeModal();state.drProtectedVMs=(await api('/dr/vms')).items;
    state.drVMPlanFilter=String(body.plan_id);
    showPage('protected-vms');
-   toast('VM #'+body.source_vmid+' enregistrée : cible '+result.replica_name+
-         ' (aucune copie lancée à l’enregistrement)');
+   toast(result.activation
+    ?'VM #'+body.source_vmid+' enregistrée : préparation REP_ et copie initiale lancées, consulter Réplication LVM'
+    :'VM #'+body.source_vmid+' enregistrée : aucune copie lancée');
   }catch(ex){toast(ex.message,false);if(button)button.disabled=false}
   return;
  }
@@ -2538,6 +2950,23 @@ async function bootstrap(){document.addEventListener('submit',handleSubmit);
   graphZoomTo((state.graphZoom||1)*(ev.deltaY>0?0.9:1.1),ev.clientX,ev.clientY);
  },{passive:false});
 try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initialisation:',ex)}try{const r=await api('/me');state.user=r.user;$('#auth').hidden=true;$('#application').hidden=false;$('#adminNav').hidden=!roleAdmin();if(!roleAdmin())$$('.side-admin').forEach(x=>x.hidden=true);$('#userAvatar').textContent=initials();await load();showPage('dashboard')}catch{$('#auth').hidden=false;$('#application').hidden=true}document.addEventListener('click',handleClick);document.addEventListener('input',ev=>{
+ if(ev.target.closest('#drVMConfigForm')&&ev.target.name==='target_vmid'){
+  const status=document.getElementById('praVMIDStatus'),occupied=state.drVMOptions?.target_vmids_in_use||[];
+  if(status){const n=Number(ev.target.value);
+    status.textContent=Number.isInteger(n)&&n>=100
+       ?(occupied.includes(n)?'VMID occupé dans le dernier inventaire : utiliser Vérifier VMID':'VMID apparemment libre — vérifier avant la création')
+       :'VMID non valide';
+  }
+ }
+ if(ev.target.id==='praVMSearch'){
+  const selector=document.querySelector('#drVMConfigForm [name="source_vmid"]'),q=ev.target.value.toLowerCase().trim();
+  if(selector){const prev=selector.value;
+    const choices=(state.drVMOptions?.vms||[]).filter(v=>(v.name+' '+v.vmid+' '+v.node).toLowerCase().includes(q))
+       .sort((a,b)=>a.name.localeCompare(b.name,'fr',{sensitivity:'base',numeric:true}));
+    selector.innerHTML=option(choices.map(v=>[v.vmid,v.name+' — #'+v.vmid+' · '+v.node+' ['+v.status+']']),prev);
+    if(choices.some(v=>String(v.vmid)===prev))selector.value=prev;
+  }
+ }
  if(ev.target.id==='credentialSearch'){state.credentialSearch=ev.target.value;filterCredentialRows()}
  if(ev.target.matches('#credentialTestForm [name="manual_host"]')){
   const panel=document.getElementById('sshHostTrustPanel');
@@ -2553,6 +2982,21 @@ try{initTheme();decorateSidebar()}catch(ex){console.error('OrigamiTasks initiali
  if(ev.target.id==='catalogSearch'){const q=ev.target.value.toLowerCase().trim();$$('.catalog-search-item').forEach(card=>card.hidden=!card.dataset.search.includes(q));}});document.addEventListener('change',async ev=>{
  if(ev.target.id==='drVMPlanFilter'){
   state.drVMPlanFilter=String(ev.target.value||'all');render();return;
+ }
+ if(ev.target.name==='source_vmid'&&ev.target.closest('#drVMConfigForm')){
+  const form=ev.target.closest('form'),r=state.drVMOptions;
+  const vm=(r?.vms||[]).find(x=>x.vmid===Number(ev.target.value));
+  if(vm&&!state.drVMWizard?.existingId){
+   const used=new Set(r.target_vmids_in_use||[]);
+   let candidate=vm.vmid;
+   while(used.has(candidate)&&candidate<999999999)candidate++;
+   if(!used.has(candidate)){
+    form.elements.namedItem('target_vmid').value=candidate;
+    const status=document.getElementById('praVMIDStatus');
+    if(status)status.textContent='Proposition libre #'+candidate+' (dernier inventaire) — vérification en temps réel disponible';
+   }
+  }
+  return;
  }
  if(ev.target.name==='dr_vm_plan'&&ev.target.closest('#drVMSourceForm')){
   const form=ev.target.closest('form'),planId=Number(ev.target.value);

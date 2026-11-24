@@ -6,7 +6,7 @@ from app.main import app
 
 
 def test_version_comparison():
-    assert agent_updates.available_versions()=={"linux":"0.3.30","windows":"0.3.23"}
+    assert agent_updates.available_versions()=={"linux":"0.3.43","windows":"0.3.43"}
     assert agent_updates.outdated("0.3.2","0.3.23")
     assert not agent_updates.outdated("0.3.23","0.3.23")
     assert not agent_updates.outdated("0.4.0","0.3.23")
@@ -41,3 +41,13 @@ def test_upgrade_does_not_replace_identity_or_modules():
     assert "modules.json" not in source
     assert "agent_id" in source
     assert "installed_controller_url" not in source
+
+
+def test_upgrade_sftp_mode_matches_installer():
+    upgrade=(Path(__file__).resolve().parents[1]/'app/agent_updates.py').read_text()
+    install=(Path(__file__).resolve().parents[1]/'app/agents.py').read_text()
+    assert 'with sftp.file(stage+"_"+name,"wb") as f:' in upgrade
+    assert 'with sftp.file(stage+"_"+name,"xb") as f:' not in upgrade
+    assert "with sftp.file(base+'/'+name_, 'wb') as f:" in install
+    assert "Transfert SFTP refusé" in upgrade
+    assert "Ouverture du canal SFTP impossible" in upgrade

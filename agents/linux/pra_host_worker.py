@@ -42,8 +42,40 @@ def cmd(*args, timeout=25):
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise HostError("Required host command unavailable") from exc
     if r.returncode:
+        if len(args)>1 and args[:2]==("pvesm","alloc"):
+            # Never return raw stdout/stderr (may contain sensitive data).
+            diagnostic=((r.stderr or "")+" "+(r.stdout or "")).lower()
+            categories=(
+                (("already exists","exists already","existiert bereits"),"VOLUME_EXISTS"),
+                (("not enough free space","insufficient free","no space left","not enough space"),"INSUFFICIENT_SPACE"),
+                (("invalid volume","invalid name","invalid filename","illegal name"),"INVALID_VOLUME_NAME"),
+                (("permission denied","operation not permitted","access denied"),"PERMISSION_DENIED"),
+                (("format mismatch","unsupported format","not supported","does not support"),"FORMAT_UNSUPPORTED"),
+                (("lvcreate","logical volume"),"LVM_CREATION_FAILED"),
+                (("storage does not exist","storage not found","unknown storage"),"STORAGE_NOT_FOUND"),
+            )
+            category=next((label for terms,label in categories
+                           if any(term in diagnostic for term in terms)),
+                          "ALLOCATION_REJECTED")
+            raise HostError("PVE_LVM_ALLOC_"+category)
         raise HostError("Host operation rejected: " + args[0])
     return r.stdout
+
+
+def pve_guest_name(logical_name):
+    """Map OrigamiTasks REP_/PRA_TEST_ labels to valid PVE dns-name labels.
+
+    Preserve the logical REP_ prefix in the controller and the ownership
+    marker in VM descriptions. Proxmox qm --name rejects underscores.
+    """
+    if (not isinstance(logical_name, str) or not
+            re.fullmatch(r"(?:REP_|PRA_TEST_)[A-Za-z0-9_-]{1,50}", logical_name)):
+        raise HostError("Invalid logical replica name")
+    hostname = logical_name.replace("_", "-")
+    if (len(hostname) > 63 or not
+            re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", hostname)):
+        raise HostError("Invalid Proxmox DNS-format guest name")
+    return hostname
 
 
 def vmid(value):
@@ -92,6 +124,31 @@ def _source_generation(vmid_):
     return "vm-" + str(vmid_) + "-" + str(pid) + "-" + str(ticks)
 
 
+def _qmp_block_for_slot(rows, slot):
+    """Resolve one PVE disk through qdev (blockdev) or legacy device id.
+
+    PVE 9's -blockdev mode may return device='' with qdev='scsi0'.
+    Fail closed on conflicting mappings or multiple matches. Never match by
+    disk position or loosely by backing file name.
+    """
+    if not isinstance(rows, list) or not _NODE.fullmatch(slot):
+        raise HostError("Invalid QMP block query")
+    matched=[]
+    for row in rows:
+        if not isinstance(row,dict):
+            continue
+        qdev=row.get("qdev")
+        device=row.get("device")
+        if qdev == slot or device == "drive-" + slot or device == slot:
+            matched.append(row)
+    if len(matched)!=1:
+        raise HostError("QMP disk unavailable or ambiguous: " + slot)
+    inserted=matched[0].get("inserted")
+    if not isinstance(inserted,dict):
+        raise HostError("QMP disk unavailable: " + slot)
+    return inserted
+
+
 def source_probe(data):
     ident = vmid(data["vmid"])
     configured = _vm_config(ident)
@@ -114,22 +171,22 @@ def source_probe(data):
         raise HostError("Source VM not running")
     with QMP(_qmp_path(ident)) as qmp:
         block = qmp.execute("query-block")
-        entries = {row.get("device"): row for row in block if isinstance(row, dict)}
         sizes = {}
         bitmaps = {}
         nodes = {}
         for slot in slots:
-            node = "drive-" + slot
-            row = entries.get(node)
-            inserted = row.get("inserted") if row else None
-            if not isinstance(inserted, dict):
-                raise HostError("QMP disk unavailable: " + slot)
-            size = inserted.get("image", {}).get("virtual-size")
+            inserted = _qmp_block_for_slot(block, slot)
+            image = inserted.get("image")
+            size = image.get("virtual-size") if isinstance(image,dict) else None
             if type(size) is not int or size < 1024:
                 raise HostError("Invalid disk virtual size")
             sizes[slot] = size
-            # Device aliases may differ from graph node names in PVE builds.
-            nodes[slot] = inserted.get("node-name") or node
+            # A QMP blockdev source needs the real inserted graph node.
+            # Legacy PVE returns the same node; never invent a fallback.
+            resolved = inserted.get("node-name")
+            if not isinstance(resolved,str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,101}",resolved):
+                raise HostError("QMP block node unavailable: " + slot)
+            nodes[slot] = resolved
         named = qmp.execute("query-named-block-nodes")
         active_jobs = [{"id": str(item.get("id") or ""),
                         "status": str(item.get("status") or "")}
@@ -149,6 +206,90 @@ def source_probe(data):
             "active_jobs": active_jobs,
             "config": {k: configured[k] for k in ("name", "memory", "cores", "sockets", "bios", "scsihw", "cpu")
                        if k in configured}}
+
+
+def source_network_inventory(data):
+    """Read network intent only; NEVER attach a NIC to a backup or clone."""
+    ident=vmid(data["vmid"])
+    config=_vm_config(ident)
+    items=[]
+    for slot,value in sorted(config.items()):
+        if not re.fullmatch(r"net[0-9]{1,2}",slot):
+            continue
+        if not isinstance(value,str) or len(value)>512:
+            raise HostError("Invalid source network configuration")
+        pieces=value.split(",")
+        model=pieces[0].split("=",1)[0]
+        if not re.fullmatch(r"(virtio|e1000|e1000e|rtl8139|vmxnet3|ne2k_pci)",model):
+            raise HostError("Unsupported source NIC model")
+        opts={}
+        for piece in pieces[1:]:
+            if "=" in piece:
+                key,val=piece.split("=",1)
+                if key in ("bridge","tag","trunks","firewall","mtu","link_down"):
+                    opts[key]=val
+        bridge=opts.get("bridge")
+        if not isinstance(bridge,str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}",bridge):
+            raise HostError("Unmapped source bridge")
+        if "tag" in opts and (not opts["tag"].isdigit()
+                             or not 1<=int(opts["tag"])<=4094):
+            raise HostError("Invalid source VLAN tag")
+        items.append({"slot":slot,"model":model,"source_bridge":bridge,
+                      "source_vlan":int(opts["tag"]) if "tag" in opts else None,
+                      "source_mtu":opts.get("mtu"),
+                      "source_firewall":opts.get("firewall","0")})
+    return {"vmid":ident,"nics":items,"applied":False}
+
+
+def destination_network_inventory(data):
+    """Read destination bridge names through PVE API, no modifications."""
+    host=socket.gethostname().split(".")[0]
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,63}",host):
+        raise HostError("Invalid Proxmox node name")
+    raw=cmd("pvesh","get","/nodes/"+host+"/network",
+            "--output-format","json",timeout=30)
+    result=json.loads(raw)
+    if not isinstance(result,list):
+        raise HostError("Invalid Proxmox network inventory")
+    bridges=sorted({r["iface"] for r in result if isinstance(r,dict)
+                    and r.get("type") in ("bridge","OVSBridge")
+                    and isinstance(r.get("iface"),str)
+                    and re.fullmatch(r"[A-Za-z0-9_.-]{1,32}",r["iface"])})
+    return {"node":host,"bridges":bridges,"applied":False}
+
+
+def source_diagnose(data):
+    """Read-only source VM and QMP probe, with bounded, safe error categories.
+
+    Unlike executing a backup, this only checks qm configuration, socket,
+    query-block, node names, dirty bitmaps, and QEMU process identity.
+    """
+    try:
+        result=source_probe(data)
+    except (HostError, ReplicationError, ValueError, OSError) as exc:
+        detail=str(exc)
+        known=(
+            ("The request does not cover every source disk","DISK_INVENTORY","Configuration disques incompatible avec la sélection"),
+            ("OVMF/TPM/unused disk/PCI passthrough","HARDWARE","Profil matériel EFI/TPM/PCI non qualifié"),
+            ("Optical drives cannot","DISK_INVENTORY","Lecteur optique sélectionné"),
+            ("Source VM not running","POWER","VM source arrêtée"),
+            ("VM QMP socket unavailable","QMP_SOCKET","Socket QMP indisponible"),
+            ("QMP disk unavailable or ambiguous","QMP_BLOCKS","Association QMP disque ambiguë ou introuvable"),
+            ("QMP block node unavailable","QMP_BLOCKS","Nœud de disque QMP non identifié"),
+            ("QMP disk unavailable","QMP_BLOCKS","Disque source non visible via query-block"),
+            ("Invalid disk virtual size","QMP_BLOCKS","Taille de disque invalide"),
+            ("Source VM PID unavailable","QEMU_PROCESS","PID QEMU introuvable"),
+            ("Source QEMU process identity unavailable","QEMU_PROCESS","Identité du processus QEMU indisponible"),
+            ("Host operation rejected: qm","QM_COMMAND","Commande qm refusée sur le nœud source"),
+            ("Required host command unavailable","HOST_TOOL","Commande système Proxmox introuvable"),
+            ("Permission denied","QMP_SOCKET","Permission refusée sur le socket QMP"),
+        )
+        stage,message=next(((stage,msg) for prefix,stage,msg in known
+                            if detail.startswith(prefix)),("QMP_QUERY","Requête QMP refusée ou incompatible"))
+        return {"ready":False,"stage":stage,"message":message,"vmid":data.get("vmid")}
+    return {"ready":True,"stage":"SOURCE_VERIFIED","message":"Source QMP vérifiée en lecture seule",
+            "vmid":data["vmid"],"slots":result.get("slots",[]),
+            "active_jobs":len(result.get("active_jobs",[]))}
 
 
 def _dir_path(storage, target_vmid):
@@ -400,7 +541,7 @@ def target_publish(data):
         memory = integer("memory", "1024", 2097152)
         cores = integer("cores", "1", 512)
         sockets = integer("sockets", "1", 16)
-        args = ["qm", "create", str(ident), "--name", name, "--onboot", "0",
+        args = ["qm", "create", str(ident), "--name", pve_guest_name(name), "--onboot", "0",
                 "--memory", memory, "--cores", cores, "--sockets", sockets,
                 "--description", marker]
         scsihw = config.get("scsihw")
@@ -592,6 +733,206 @@ def _lvm_lab_store(data):
     return LvmCheckpointStore(target)
 
 
+def lvm_lab_validate_standby(data):
+    """Read-only proof that an existing guest belongs exclusively to this policy.
+
+    Never adopt a VM simply because its VMID exists. Verify ownership,
+    node, name, stopped state, isolation and disabled autoboot on the host.
+    """
+    ident=vmid(data.get("vmid"))
+    protected=data.get("protected_vm_id")
+    logical=data.get("name")
+    if type(protected) is not int or protected<=0:
+        raise HostError("Invalid protection identity")
+    name=pve_guest_name(logical)
+    resources=json.loads(cmd("pvesh","get","/cluster/resources",
+                             "--type","vm","--output-format","json"))
+    if not isinstance(resources,list):
+        raise HostError("Cluster VM inventory unavailable")
+    candidates=[r for r in resources if isinstance(r,dict) and r.get("vmid")==ident]
+    if len(candidates)!=1 or candidates[0].get("type")!="qemu" or candidates[0].get("node")!=socket.gethostname().split(".")[0]:
+        raise HostError("Target VMID missing, duplicated or belongs to another node")
+    if not _is_target_stopped(ident):
+        raise HostError("Existing standby VM must be stopped")
+    config=_vm_config(ident)
+    markers=set(re.findall(r"[A-Za-z0-9_]+",config.get("description","")))
+    if ("ORIGAMITASKS_PRA_"+str(protected) not in markers
+            or "ORIGAMITASKS_LAB_ONLY" not in markers):
+        raise HostError("Existing standby belongs to another protection or is unmarked")
+    if config.get("name") != name:
+        raise HostError("Existing standby name does not match this protection")
+    if config.get("onboot","0") not in ("0","false"):
+        raise HostError("Existing standby autoboot is enabled")
+    if any(re.fullmatch(r"net[0-9]{1,2}",key) for key in config):
+        raise HostError("Existing standby is not network-isolated")
+    return {"owned":True,"vmid":ident,"target_stopped":True,
+            "network_isolated":True,"lab_only":True,
+            "name":name,"node":candidates[0]["node"]}
+
+
+def lvm_lab_diagnose_standby(data):
+    """Read-only staged diagnostic of storage and cluster availability.
+
+    No qm create/set/start, no volume allocation or journal modifications.
+    Error text is restricted to a fixed stage and command category.
+    """
+    ident = vmid(data.get("vmid"))
+    store = PveLvmTarget(data["storage"], ident, cmd,
+                         protected_vm_id=data.get("protected_vm_id"))
+    checks = []
+    def inspect(stage, operation):
+        try:
+            result = operation()
+            checks.append({"stage": stage, "ok": True,
+                           "message": "Vérification Proxmox réussie"})
+            return result
+        except (HostError, LvmTargetError, ValueError) as exc:
+            error = str(exc)
+            kind = "pvesh" if "pvesh" in error else (
+                "qm" if "qm" in error else "compatibilité ou droits Proxmox")
+            checks.append({"stage": stage, "ok": False,
+                           "message": "Échec "+kind+" ; vérifier l’API et les permissions"})
+            return None
+
+    storage = inspect("STORAGE_CONFIG", store.inspect)
+    if storage is None:
+        return {"checks": checks, "ready_for_creation": False,
+                "target_exists": None, "vmid": ident}
+    capacity = inspect("STORAGE_CAPACITY", store._node_capacity)
+    if capacity is None:
+        return {"checks": checks, "ready_for_creation": False,
+                "target_exists": None, "vmid": ident}
+    raw = inspect("CLUSTER_INVENTORY",
+                  lambda: cmd("pvesh", "get", "/cluster/resources",
+                              "--type", "vm", "--output-format", "json"))
+    if raw is None:
+        return {"checks": checks, "ready_for_creation": False,
+                "target_exists": None, "vmid": ident}
+    try:
+        data_set = json.loads(raw)
+        if not isinstance(data_set, list):
+            raise ValueError("Invalid inventory")
+        matching = [x for x in data_set if isinstance(x, dict)
+                    and x.get("vmid") == ident]
+    except (ValueError, TypeError):
+        checks.append({"stage": "CLUSTER_INVENTORY_PARSE", "ok": False,
+                       "message": "Inventaire Proxmox invalide"})
+        return {"checks": checks, "ready_for_creation": False,
+                "target_exists": None, "vmid": ident}
+    if matching:
+        try:
+            owned=lvm_lab_validate_standby({
+                "vmid":ident,"protected_vm_id":data.get("protected_vm_id"),
+                "name":data.get("name")
+            })
+        except (HostError,LvmTargetError,ValueError,KeyError):
+            checks.append({"stage":"OWNERSHIP","ok":False,
+                           "message":"VMID occupé : propriétaire, état OFF ou isolation non vérifiés"})
+            return {"checks":checks,"ready_for_creation":False,
+                    "target_exists":True,"owned_standby":False,"vmid":ident}
+        checks.append({"stage":"OWNERSHIP","ok":True,
+                       "message":"VM REP_ identifiée, arrêtée, isolée, marqueurs conformes"})
+        return {"checks":checks,"ready_for_creation":False,
+                "target_exists":True,"owned_standby":True,"vmid":ident}
+    checks.append({"stage":"VMID_AVAILABILITY","ok":True,"message":"VMID libre"})
+    return {"checks":checks,"ready_for_creation":True,
+            "target_exists":False,"owned_standby":False,"vmid":ident}
+
+
+def lvm_lab_prepare_standby(data):
+    """Create only an owned, powered-off, networkless LAB VM.
+
+    Recheck the *cluster-wide* VMID at the host immediately before qm create.
+    No disks are attached and no guest is started. This does not authorize
+    production failover or make an LVM checkpoint bootable.
+    """
+    if data.get("lab_ack") != "DISPOSABLE-LAB-ONLY":
+        raise HostError("Explicit disposable lab approval required")
+    ident = vmid(data.get("vmid"))
+    protected = data.get("protected_vm_id")
+    if type(protected) is not int or protected <= 0:
+        raise HostError("Invalid protection identity")
+    name = data.get("name")
+    if not isinstance(name, str) or not re.fullmatch(r"REP_[a-zA-Z0-9_-]{1,50}", name):
+        raise HostError("Invalid standby VM name")
+    storage = data.get("storage")
+    store = PveLvmTarget(storage, ident, cmd, protected_vm_id=protected)
+    def checked(stage, operation):
+        try:
+            return operation()
+        except (HostError, LvmTargetError, ValueError) as exc:
+            # Fixed, non-sensitive stage names. Never print raw PVE stderr or
+            # the complete command, which could contain user-controlled data.
+            raise HostError("PRA_STEP_" + stage + " : " + str(exc)[:160]) from None
+    checked("STORAGE_CONFIG", store.inspect)
+    checked("STORAGE_CAPACITY", store._node_capacity)
+    marker = "ORIGAMITASKS_PRA_" + str(protected)
+    source_name = data.get("source_name")
+    source_node = data.get("source_node")
+    source_vmid = data.get("source_vmid")
+    reference = data.get("reference", "")
+    note = data.get("protection_note", "")
+    if (not isinstance(source_name,str) or len(source_name)>120
+            or not isinstance(source_node,str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}",source_node)
+            or type(source_vmid) is not int or source_vmid < 100
+            or not isinstance(reference,str) or len(reference)>80
+            or not isinstance(note,str) or len(note)>240
+            or any(ord(ch)<32 for ch in source_name+reference+note)):
+        raise HostError("Invalid source identity or descriptive metadata")
+    description = (marker+" ORIGAMITASKS_LAB_ONLY"
+                   +" | Réplique PRA de "+source_name+" (VMID "+str(source_vmid)
+                   +" sur "+source_node+")"
+                   +(" | Référence: "+reference if reference else "")
+                   +(" | Commentaire: "+note if note else ""))
+    def inspect_existing():
+        resources = json.loads(cmd("pvesh", "get", "/cluster/resources",
+                                   "--type", "vm", "--output-format", "json"))
+        if not isinstance(resources, list):
+            raise HostError("Cluster VMID inventory unavailable")
+        matches = [x for x in resources if isinstance(x, dict) and x.get("vmid") == ident]
+        if len(matches) > 1:
+            raise HostError("Ambiguous target VMID in cluster")
+        return matches[0] if matches else None
+
+    existing = checked("CLUSTER_INVENTORY", inspect_existing)
+    if existing:
+        if existing.get("type") != "qemu" or existing.get("node") != socket.gethostname().split(".")[0]:
+            raise HostError("Target VMID already used by another resource or node")
+        if not _is_target_stopped(ident):
+            raise HostError("Existing VM is not a stopped standby")
+        config = _vm_config(ident)
+        if config.get("name") != pve_guest_name(name):
+            raise HostError("Existing standby does not match expected Proxmox DNS name")
+        markers = set(re.findall(r"[A-Za-z0-9_]+", config.get("description", "")))
+        if marker not in markers or "ORIGAMITASKS_LAB_ONLY" not in markers:
+            raise HostError("Existing VM is not owned by this lab protection")
+        if config.get("onboot", "0") not in ("0", "false"):
+            raise HostError("Standby autoboot is forbidden")
+        if any(re.fullmatch(r"net[0-9]{1,2}", k) for k in config):
+            raise HostError("Standby network must be empty")
+        return {"created": False, "vmid": ident, "target_stopped": True,
+                "network_isolated": True, "lab_only": True}
+
+    checked("VM_CREATE", lambda: cmd(
+        "qm", "create", str(ident), "--name", pve_guest_name(name), "--onboot", "0",
+        "--memory", "2048", "--cores", "2",
+        "--description", description, timeout=90))
+    existing = checked("POST_CREATE_INVENTORY", inspect_existing)
+    if not existing or existing.get("type") != "qemu":
+        raise HostError("Created standby not visible in cluster inventory")
+    if not _is_target_stopped(ident):
+        raise HostError("New standby is not stopped")
+    config = _vm_config(ident)
+    if config.get("name") != pve_guest_name(name):
+        raise HostError("New standby has an unexpected Proxmox name")
+    if any(re.fullmatch(r"net[0-9]{1,2}", k) for k in config):
+        raise HostError("Unexpected standby network interface")
+    if marker not in set(re.findall(r"[A-Za-z0-9_]+", config.get("description", ""))):
+        raise HostError("Missing ownership marker on new standby")
+    return {"created": True, "vmid": ident, "target_stopped": True,
+            "network_isolated": True, "lab_only": True}
+
+
 def lvm_lab_probe(data):
     store = _lvm_lab_store(data)
     exists = store.root.exists() and not store.root.is_symlink()
@@ -600,8 +941,182 @@ def lvm_lab_probe(data):
         "source_vm_stopped": False, "vm_started": False,
         "checkpoint": store.current() if exists else None,
         "pending": store._read(store.pending) if exists else None,
+        "generation_count":len((store._read(store.owned) or {"generations":[]}).get("generations",[])) if exists else 0,
+        "retention_limit":8,
         "auto_failover": False, "cluster_manifest_ready": False
     }
+
+
+def lvm_lab_diagnose_generation(data):
+    """Inspect owned local LVM journal without mutating VMs, LVs or files.
+
+    A pending allocation may have created thick volumes even if qm hardware
+    has no disks. This intentionally neither acknowledges nor clears it.
+    """
+    store=_lvm_lab_store(data)
+    if store.root.is_symlink():
+        raise HostError("Unsafe journal path")
+    if not store.root.exists():
+        return {"state":"empty","pending":None,"current":None,
+                "generation_count":0,"pid_files":[],"requires_reconciliation":False}
+    pending=store._read(store.pending)
+    current=store._read(store.current_file)
+    owned=store._read(store.owned) or {"generations":[]}
+    if not isinstance(owned.get("generations"),list):
+        raise HostError("Invalid LVM generation ledger")
+    def describe(record):
+        if not isinstance(record,dict):
+            return None
+        disks=record.get("disks") or record.get("allocated") or {}
+        if not isinstance(disks,dict):
+            raise HostError("Invalid LVM checkpoint disk ledger")
+        return {"status":str(record.get("status","unknown"))[:32],
+                "token":str(record.get("token",""))[:40],
+                "mode":str(record.get("mode",""))[:20],
+                "slots":sorted(str(s) for s in disks if _NODE.fullmatch(str(s))),
+                "volumes":[str(d.get("volid",""))[:150] for d in disks.values()
+                           if isinstance(d,dict) and isinstance(d.get("volid"),str)]}
+    pid_files=sorted(p.name for p in store.root.iterdir()
+                     if p.name.startswith(".origami-") and p.name.endswith(".pid"))
+    generation_count=len(owned["generations"])
+    # Expose the hard ceiling even when no pending staging exists. The
+    # receiver checks it BEFORE allocation; no LV is leaked by this refusal.
+    retention_limit=8
+    retention_full=generation_count>=retention_limit
+    # A Proxmox "unused" entry is still an attached configuration reference.
+    # Never infer reclaimability from its name.
+    references={}
+    reference_error=None
+    try:
+        conf=_vm_config(store.target.vmid)
+        for slot,val in conf.items():
+            if (_NODE.fullmatch(slot) or re.fullmatch(r"unused[0-9]+",slot)):
+                volid=val.split(",",1)[0]
+                if volid.startswith(store.target.storage+":"):
+                    references[slot]=volid
+    except (HostError,ValueError,OSError,KeyError,TypeError):
+        reference_error="Références Proxmox non confirmées"
+    protected_volumes=sorted({
+        volume for gen in owned["generations"] if isinstance(gen,dict)
+        for volume in gen.get("volids",[]) if isinstance(volume,str)})
+    reference_rows=[{"slot":slot,"volid":volid,
+                     "ledger_owned":volid in protected_volumes}
+                    for slot,volid in sorted(references.items())]
+
+    # Inspect the deterministic allocation name, including cases where
+    # pvesm alloc succeeded but the success journal write never happened.
+    # A negative inventory is NOT sufficient proof to delete the journal.
+    expected=[]
+    checked_inventory=False
+    inventory_error=None
+    if isinstance(pending,dict):
+        token=pending.get("token")
+        slots=pending.get("planned")
+        if (isinstance(token,str) and re.fullmatch(r"[0-9a-f]{32}",token)
+                and isinstance(slots,list) and 1<=len(slots)<=32
+                and all(isinstance(s,str) and _NODE.fullmatch(s) for s in slots)
+                and len(set(slots))==len(slots)):
+            first=int(token[:12],16)
+            for index,slot in enumerate(slots):
+                expected.append({"slot":slot,
+                    "name":"vm-"+str(store.target.vmid)+"-disk-"
+                           +str(first+index)+".qcow2","present":None})
+            try:
+                conf=store.target.inspect()
+                raw=cmd("lvs","--reportformat","json","-o","vg_name,lv_name",
+                        timeout=30)
+                info=json.loads(raw)
+                rows=[lv for report in info.get("report",[]) if isinstance(report,dict)
+                      for lv in report.get("lv",[]) if isinstance(lv,dict)]
+                names={lv.get("lv_name") for lv in rows
+                       if lv.get("vg_name")==conf["vgname"]
+                       and isinstance(lv.get("lv_name"),str)}
+                for candidate in expected:
+                    candidate["present"]=candidate["name"] in names
+                checked_inventory=True
+            except (HostError,LvmTargetError,ValueError,KeyError,TypeError):
+                inventory_error="Inventaire LVM non confirmé"
+        else:
+            inventory_error="Identifiants de génération invalides"
+    pending_result=describe(pending)
+    if pending_result and isinstance(pending.get("failure_category"),str):
+        category=pending["failure_category"]
+        if re.fullmatch(r"PVE_LVM_ALLOC_[A-Z_]{1,50}",category):
+            pending_result["failure_category"]=category
+    return {"state":"pending" if pending else ("committed" if current else "empty"),
+            "pending":pending_result,"current":describe(current),
+            "generation_count":len(owned["generations"]),
+            "pid_files":pid_files[:32],"requires_reconciliation":bool(pending or pid_files),
+            "predicted_allocations":expected,"inventory_checked":checked_inventory,
+            "inventory_error":inventory_error,
+            "retention_limit":retention_limit,"retention_full":retention_full,
+            "retention_policy":"blocked_without_chain_safe_consolidation",
+            "pve_disk_references":reference_rows,
+            "pve_reference_error":reference_error,
+            "ledger_volume_count":len(protected_volumes),
+            "automated_volume_deletion_allowed":False}
+
+
+def lvm_lab_archive_empty_uncertain(data):
+    """Archive an EMPTY failed allocation intent, never free an LV.
+
+    This is an administrator-authorized reconciliation action, not cleanup.
+    The exact allocation token is checked under the same checkpoint and
+    allocation locks as the writer. Any unverified LV/inventory/NBD state
+    refuses the operation. The journal is retained as an immutable archive.
+    """
+    if data.get("lab_ack") != "DISPOSABLE-LAB-ONLY":
+        raise HostError("Explicit LAB-only reconciliation approval required")
+    token=data.get("token")
+    if not isinstance(token,str) or not re.fullmatch(r"[a-f0-9]{32}",token):
+        raise HostError("Invalid LVM generation token")
+    store=_lvm_lab_store(data)
+    # Verify a pre-existing owned standby, never adopt a random VMID.
+    lvm_lab_validate_standby({
+        "vmid":store.target.vmid,"protected_vm_id":store.target.protected_vm_id,
+        "name":data.get("name")
+    })
+    if not store.root.is_dir() or store.root.is_symlink():
+        raise HostError("Journal LVM non vérifié")
+    # The writer takes checkpoint.lock then allocation .lock, in this order.
+    import fcntl
+    checkpoint_fd=os.open(str(store.lock_file),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
+    allocation_fd=None
+    try:
+        fcntl.flock(checkpoint_fd,fcntl.LOCK_EX)
+        allocation_fd=os.open(str(store.root/".lock"),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
+        fcntl.flock(allocation_fd,fcntl.LOCK_EX)
+        pending=store._read(store.pending)
+        if (not pending or pending.get("token")!=token
+                or pending.get("status")!="uncertain"
+                or pending.get("mode")!="full"
+                or pending.get("allocated")!={}
+                or store._read(store.current_file) is not None
+                or (store._read(store.owned) or {"generations":[]}).get("generations")!=[]):
+            raise HostError("Journal LVM non réconciliable : génération modifiée ou non vide")
+        if any(p.name.startswith(".origami-") and p.name.endswith(".pid")
+               for p in store.root.iterdir()):
+            raise HostError("Un export NBD peut encore être présent")
+        report=lvm_lab_diagnose_generation(data)
+        expected=report.get("predicted_allocations")
+        if (report.get("state")!="pending"
+                or report.get("inventory_checked") is not True
+                or not isinstance(expected,list) or not expected
+                or any(e.get("present") is not False for e in expected)):
+            raise HostError("Absence de LV non confirmée : conserver le pending")
+        archived=store.root/("reconciled-no-lv-"+token+".json")
+        if archived.exists() or archived.is_symlink():
+            raise HostError("Archive de réconciliation déjà présente")
+        # Preserve evidence; no LV or source VM is modified.
+        os.replace(store.pending,archived)
+        return {"archived":True,"token":token,"volumes_freed":0,
+                "archive_name":archived.name,"reconciled_empty":True}
+    finally:
+        if allocation_fd is not None:
+            fcntl.flock(allocation_fd,fcntl.LOCK_UN)
+            os.close(allocation_fd)
+        fcntl.flock(checkpoint_fd,fcntl.LOCK_UN)
+        os.close(checkpoint_fd)
 
 
 def lvm_lab_begin(data):
@@ -725,6 +1240,89 @@ def lvm_lab_verify(data):
             "lab_only": True}
 
 
+def lvm_lab_publish_standby(data):
+    """Attach only a proven committed QCOW2/LVM generation to an OFF REP_ VM.
+
+    This prepares a boot *configuration*, not a proven bootable guest or a
+    production promotion. Old thick volumes are retained, never freed.
+    """
+    store = _lvm_lab_store(data)
+    token = data.get("token")
+    if not isinstance(token, str) or not _TOKEN.fullmatch(token):
+        raise HostError("Missing exact published checkpoint identity")
+    current = store.current()
+    if (not current or current.get("status") != "committed"
+            or current.get("token") != token or store.pending.exists()):
+        raise HostError("LVM checkpoint is not committed and immutable")
+    verification = lvm_lab_verify(data)
+    if verification.get("verified_offline") is not True:
+        raise HostError("Checkpoint structural verification missing")
+    hardware = data.get("source_config")
+    if not isinstance(hardware, dict):
+        raise HostError("Source hardware profile unavailable")
+    if (hardware.get("bios", "seabios") != "seabios"
+            or any(k in hardware for k in ("efidisk0", "tpmstate0"))):
+        raise HostError("UEFI/TPM profile not qualified for LVM lab publish")
+    def numeric(key, default, maxval):
+        value = str(hardware.get(key, default))
+        if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= maxval:
+            raise HostError("Unsafe VM hardware option: " + key)
+        return value
+    name = data.get("name")
+    if not isinstance(name, str) or not re.fullmatch(r"REP_[A-Za-z0-9_-]{1,50}", name):
+        raise HostError("Invalid standby name")
+    config = _vm_config(store.target.vmid)
+    if config.get("name") != pve_guest_name(name):
+        raise HostError("Destination VM does not match the owned REP_ policy name")
+    if any(k in config for k in ("efidisk0", "tpmstate0")):
+        raise HostError("Destination EFI/TPM profile unsupported")
+    ledger = store._read(store.owned)
+    if not isinstance(ledger, dict) or not isinstance(ledger.get("generations"), list):
+        raise HostError("Missing host LVM ownership ledger")
+    allowed = {volid for generation in ledger["generations"]
+               if isinstance(generation, dict)
+               for volid in generation.get("volids", []) if isinstance(volid, str)}
+    expected = {}
+    for slot, detail in sorted(current["disks"].items()):
+        if not _NODE.fullmatch(slot) or not isinstance(detail, dict):
+            raise HostError("Invalid checkpoint disk configuration")
+        volid = detail.get("volid")
+        if volid not in allowed:
+            raise HostError("Checkpoint volume not present in ownership ledger")
+        store.target.resolve_existing(volid)
+        expected[slot] = volid
+    if not expected:
+        raise HostError("No validated checkpoint disks")
+    scsihw = hardware.get("scsihw")
+    if scsihw is not None and scsihw not in (
+            "virtio-scsi-pci", "virtio-scsi-single", "lsi", "megasas", "pvscsi"):
+        raise HostError("Unsupported source SCSI controller")
+    args = ["qm", "set", str(store.target.vmid),
+            "--onboot", "0",
+            "--memory", numeric("memory", "2048", 2097152),
+            "--cores", numeric("cores", "2", 512),
+            "--sockets", numeric("sockets", "1", 16)]
+    if scsihw is not None:
+        args.extend(["--scsihw", scsihw])
+    for slot, volid in sorted(expected.items()):
+        args.extend(["--" + slot, volid])
+    args.extend(["--boot", "order=" + sorted(expected)[0]])
+    # All checks above are read-only. This sole PVE configuration update does
+    # not start the standby or alter source storage.
+    cmd(*args, timeout=180)
+    final = _vm_config(store.target.vmid)
+    if (not _is_target_stopped(store.target.vmid)
+            or any(re.fullmatch(r"net[0-9]{1,2}", k) for k in final)):
+        raise HostError("Standby isolation or stopped status lost during publish")
+    for slot, volid in expected.items():
+        if final.get(slot, "").split(",", 1)[0] != volid:
+            raise HostError("Standby disk attachment did not match checkpoint")
+    return {"checkpoint_token": token, "standby_configured": True,
+            "target_stopped": True, "network_isolated": True,
+            "attached_volumes": expected, "boot_tested": False,
+            "application_verified": False, "failover_authorized": False}
+
+
 def lvm_lab_prepare_clone(data):
     """Prepare a separate, networkless, powered-OFF lab test VM.
 
@@ -753,6 +1351,72 @@ def lvm_lab_prepare_clone(data):
     )
 
 
+def lvm_lab_test_boot(data):
+    """Temporarily boot ONLY a disposable, networkless PRA_TEST clone.
+
+    It is intentionally not a production promotion or guest/application
+    health check. Never start the protected standby or the source.
+    """
+    store = _lvm_lab_store(data)
+    current = store.current()
+    if (not current or current.get("status") != "committed"
+            or current.get("token") != data.get("token") or store.pending.exists()):
+        raise HostError("Boot test checkpoint changed or is pending")
+    test_id = vmid(data.get("test_vmid"))
+    if test_id == store.target.vmid:
+        raise HostError("Protected standby must never be booted in a lab test")
+    volumes = data.get("test_volumes")
+    if not isinstance(volumes, dict) or not volumes or set(volumes) != set(current["disks"]):
+        raise HostError("Missing independent clone disk manifest")
+    resources = json.loads(cmd("pvesh", "get", "/cluster/resources",
+                               "--type", "vm", "--output-format", "json"))
+    node = socket.gethostname().split(".", 1)[0]
+    matched = [x for x in resources if isinstance(x, dict)
+               and x.get("vmid") == test_id]
+    if (len(matched) != 1 or matched[0].get("type") != "qemu"
+            or matched[0].get("node") != node):
+        raise HostError("Test clone VMID is not exclusively owned by this node")
+    if not _is_target_stopped(test_id):
+        raise HostError("Test VM must already exist and be stopped")
+    config = _vm_config(test_id)
+    marker = "ORIGAMITASKS_LAB_CLONE_" + str(store.target.protected_vm_id)
+    markers = set(re.findall(r"[A-Za-z0-9_]+", config.get("description", "")))
+    if (marker not in markers or config.get("onboot", "0") not in ("0", "false")
+            or any(re.fullmatch(r"net[0-9]{1,2}", key) for key in config)
+            or any(key in config for key in ("efidisk0", "tpmstate0"))
+            or config.get("bios", "seabios") != "seabios"):
+        raise HostError("Clone ownership or isolation is not proven")
+    for slot, volid in sorted(volumes.items()):
+        if not _NODE.fullmatch(slot):
+            raise HostError("Invalid clone slot")
+        # Require a distinct PVE volume owned by this disposable VMID.
+        fresh = PveLvmTarget(store.target.storage, test_id, cmd,
+                             protected_vm_id=store.target.protected_vm_id)
+        fresh.resolve_existing(volid)
+        if config.get(slot, "").split(",", 1)[0] != volid:
+            raise HostError("Clone disk attachment differs from recovery record")
+        cmd("qemu-img", "check", "-f", "qcow2",
+            fresh.resolve_existing(volid), timeout=120)
+    started = False
+    try:
+        cmd("qm", "start", str(test_id), timeout=120)
+        started = True
+        if cmd("qm", "status", str(test_id)).strip() != "status: running":
+            raise HostError("Test QEMU process did not enter RUNNING state")
+        evidence = {"test_vmid": test_id, "checkpoint": current["token"],
+                    "qemu_started": True, "guest_boot_verified": False,
+                    "application_verified": False, "network_isolated": True,
+                    "production_failover": False}
+    finally:
+        # Even if qm start times out, the guest may have been started. Stop
+        # the isolated test clone; never issue qm stop against the standby.
+        if started or cmd("qm", "status", str(test_id)).strip() == "status: running":
+            cmd("qm", "stop", str(test_id), timeout=180)
+        if cmd("qm", "status", str(test_id)).strip() != "status: stopped":
+            raise HostError("Test clone shutdown not confirmed; manual intervention required")
+    return dict(evidence, stopped_after_test=True)
+
+
 def lvm_lab_abort(data):
     store = _lvm_lab_store(data)
     token = data.get("token")
@@ -764,17 +1428,26 @@ def lvm_lab_abort(data):
     return store.abort(token)
 
 
-ACTIONS = {"source_probe": source_probe, "source_copy": source_copy,
+ACTIONS = {"source_network_inventory": source_network_inventory,
+           "destination_network_inventory": destination_network_inventory,
+           "source_diagnose": source_diagnose, "source_probe": source_probe, "source_copy": source_copy,
            "source_dismiss": source_dismiss,
            "target_probe": target_probe, "target_begin": target_begin,
            "target_finish": target_finish, "target_abort": target_abort,
            "target_publish": target_publish, "target_verify": target_verify,
+           "lvm_lab_validate_standby": lvm_lab_validate_standby,
+           "lvm_lab_diagnose_standby": lvm_lab_diagnose_standby,
+           "lvm_lab_prepare_standby": lvm_lab_prepare_standby,
+           "lvm_lab_diagnose_generation": lvm_lab_diagnose_generation,
+           "lvm_lab_archive_empty_uncertain": lvm_lab_archive_empty_uncertain,
            "lvm_lab_probe": lvm_lab_probe,
            "lvm_lab_begin": lvm_lab_begin,
            "lvm_lab_finish": lvm_lab_finish,
            "lvm_lab_verify": lvm_lab_verify,
            "lvm_lab_abort": lvm_lab_abort,
-           "lvm_lab_prepare_clone": lvm_lab_prepare_clone}
+           "lvm_lab_publish_standby": lvm_lab_publish_standby,
+           "lvm_lab_prepare_clone": lvm_lab_prepare_clone,
+           "lvm_lab_test_boot": lvm_lab_test_boot}
 
 
 def main():

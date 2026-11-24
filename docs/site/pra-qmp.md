@@ -1,5 +1,62 @@
 # Live incremental QMP replication — laboratory pilot
 
+## Automated QMP → LVM laboratory workflow (PR #51)
+
+!!! warning "LAB ONLY — no production failover"
+    This branch orchestrates hot QMP/LVM transfers and an OFF standby entirely
+    from OrigamiTasks, but **is not production-ready disaster recovery**.
+    EFI/TPM guests, OS boot, application consistency, exclusive promotion
+    authority and reverse failback are not qualified. Use disposable lab VMs.
+
+### Automatic enrollment
+
+1. Deploy or update the Linux PRA agents using **Agents** and associate each
+   hypervisor with the appropriate DR site.
+2. Under **Protected DR VMs**, choose a running source VM, the destination
+   node and Proxmox LVM `images` storage with QCOW2 volume chains enabled.
+   A free target VMID is suggested automatically.
+3. Select QMP, retain **Create REP_ and start the initial FULL hot backup**,
+   type `DISPOSABLE-LAB-ONLY` for lab authorization and save. No manual
+   `qm create` or `scp` commands are required.
+4. The controller validates both clusters, creates an OFF, networkless,
+   diskless `REP_` with `onboot=0`, then runs hot QMP/NBD backup.
+5. After structural verification, the checkpoint is attached to the OFF
+   `REP_` configuration. **Configured does not mean guest boot tested.**
+6. Scheduled incrementals require a verified previous copy and a confirmed
+   publish; failures or uncertain states stop automatic replay.
+7. The **LVM Replication** screen provides activation, publication,
+   scheduler, copy and isolated boot-test histories.
+
+### Test a recovery clone
+
+Create an independent `PRA_TEST_` clone from the latest checkpoint.
+**Test isolated clone boot** briefly starts this networkless clone, verifies
+QEMU is `running` and stops it. This is **not** OS-boot or application
+health proof; an unconfirmed stop is persistently marked uncertain.
+
+### Hard safety limits
+
+- LVM generations allocate **thick** LVs and may consume the entire virtual
+  disk capacity per incremental. The lab pilot caps allocations at **8
+  generations** pending a safe, verified flatten/retention system.
+- Checkpoint journals are **node-local**, not distributed promotion authority.
+  Cross-hypervisor standby recovery cannot be guaranteed.
+- Production failover, reverse sync and failback are **disabled** pending an
+  independent witness, verified fencing, host-enforced start guards and
+  split-brain/crash fault-injection tests.
+- No new `.env` settings are required; controller **and agents** must be
+  upgraded together.
+
+### Acceptance testing
+
+Run CI and then qualify a sacrificial guest across real lab Proxmox clusters:
+FULL + incremental, bitmap loss, VG exhaustion, network disconnection,
+controller restart, guest hardware changes, isolated restore, clone shutdown
+and complete run logs. CI alone is not a Proxmox certification.
+
+---
+
+
 !!! warning "Not production-certified"
     This feature is implemented as an experimental transport and controller, but
     has **not been tested against the actual AU/SD Proxmox clusters**.

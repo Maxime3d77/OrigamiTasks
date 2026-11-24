@@ -1,5 +1,139 @@
 # Historique des modifications
 
+## 0.3.43-rc1 — 24 novembre 2026 : limite de rétention des huit générations LVM détectée avant écriture
+
+- Sur `sd-bearnaise`, le pilote QMP→LVM a réussi le FULL (run #2) et sept incrémentaux (#3 à #9). Le suivant (#10) a été classé `uncertain` parce que le récepteur refuse toute génération au-delà de huit. Aucun `pending`, huit LV de 5 Gio dans `SD-PP-vg`, `scsi0` sur le dernier checkpoint `5547f64f032b47378a5c9e0f40424712`, et sept anciennes images visibles en `unused0..unused6`. Réplique arrêtée, sans réseau et `onboot=0`.
+- **Contrôle anticipé** : le helper retourne maintenant `generation_count` et `retention_limit` au prévol de chaque copie. Quand le quota est atteint, OrigamiTasks refuse le job **avant** sa mise en file et l'allocation LVM : pas de nouvelle génération `uncertain` due uniquement à ce plafond. Le scheduler reste bloqué et audite le refus.
+- **Diagnostic de génération enrichi** : affiche `8/8`, les volumes actifs et `unused` référencés dans la configuration Proxmox et leur appartenance au journal de propriété. Les entrées `unused` sont **des références**, pas une permission de supprimer des données.
+- **Tableau de bord corrigé** : distingue le dernier run échoué du dernier checkpoint LVM réussi ; le compteur « dernières synchros réussies » reconnaît maintenant le moteur LVM de recette.
+- **Pas de purge/rétention automatique à ce stade.** Les incrémentaux créent de véritables QCOW2 avec backing sur LV ; il faut développer une consolidation (flatten / rebase / publication transactionnelle), vérifier clones, snapshots, journal et références Proxmox, puis éprouver les coupures à chaque étape avant d'autoriser une libération de LV. Ne jamais faire `pvesm free`, `lvremove` ou `qm set --delete unusedN` sur les volumes historiques sans procédure validée.
+- L'ancien run #10 reste `uncertain` : le correctif ne le réécrit pas et ne relance rien. Après mise à jour, relever les nouveaux diagnostics et continuer les tests non destructifs.
+- Manager `0.3.43-rc1`, agents Linux/Windows `0.3.43`, recette uniquement.
+
+
+## 0.3.42-rc1 — 23 novembre 2026 : attestation du boot OS et prévol réseau PRA
+
+- **Validation humaine du clone** : après restauration, l'administrateur peut sélectionner le run de clone isolé, confirmer `OS-LOGIN-VERIFIED` et préciser l'observation (ex. connexion root réussie dans la console). OrigamiTasks conserve opérateur, date, VMID du clone, checkpoint exact et commentaire dans un historique dédié. Aucun mot de passe n'est requis ni conservé.
+- Une attestation sur un ancien checkpoint reste consultable, mais **ne valide pas les générations incrémentales suivantes**. Le rapport de préparation à la bascule distingue cette observation humaine de la validation applicative (toujours non confirmée).
+- **Prévisualisation réseau de secours en lecture seule** : le helper récupère la configuration `net*` de la VM source et les bridges disponibles sur le nœud cible. Une correspondance de nom est seulement une suggestion ; la présence du bridge ne valide pas VLAN, trunk, routage, IP, MAC ni isolation. Aucune interface n'est ajoutée à la VM `REP_` ou au clone.
+- Le rapport de bascule demeure `blocked` : **aucun witness indépendant, fencing, garde de démarrage, bascule réelle ou failback n'est activé**. Les fonctions de configuration réseau et de promotion restent à développer et à qualifier hors production.
+- Manager `0.3.42-rc1`, agents intégrés Linux/Windows `0.3.42`. Mettre à jour les agents Proxmox source et secours depuis l'interface avant le prévol réseau.
+
+### Tests de recette à effectuer
+1. Sur le clone `PRA_TEST_`, confirmer le démarrage de l'OS et ouvrir une session console ; enregistrer la preuve avec le run de restauration exact. Vérifier qu'aucun secret n'est demandé ou enregistré.
+2. Déclencher un incrémental après l'attestation : cette preuve devient historique et ne doit plus être présentée comme une validation du checkpoint courant.
+3. Ouvrir `Prévisualiser le réseau de secours` : comparer chaque `net0` et son bridge/VLAN à la source puis aux bridges proposés sur la destination. Vérifier que la VM `REP_` n'acquiert aucune carte réseau.
+4. Ouvrir `Préparation bascule` : les contrôles fencing, witness, réseau et validation applicative doivent rester bloquants, même si le boot OS a été attesté.
+5. Faire des tests de panne **en recette seulement** : interface Proxmox indisponible, bridge manquant, checkpoint périmé, clone non isolé, erreurs QMP/LVM, et vérifier que la réplication reste fail-closed.
+
+
+## 0.3.41-rc1 — 23 novembre 2026 : correction pvesm alloc et réconciliation encadrée
+
+- **Cause du refus d'allocation identifiée** : le pilote envoyait la taille virtuelle QMP en octets à `pvesm alloc`, dont l'argument `size` s'exprime en Kio. Une VM de 5 Gio provoquait une demande équivalente à 5 Tio. Correction : `ceil(bytes/1024)` avant appel Proxmox, sans modifier les tailles virtuelles inscrites dans les checkpoints.
+- **Nouvelle reprise de recette depuis l'interface** : si le dernier run FULL est `uncertain` pour `lvm_lab_begin`, que le pending journal ne déclare aucun LV et que le volume attendu est absent de l'inventaire réel du VG, l'administrateur peut cliquer **« Vérifier, archiver et reprendre la copie FULL »**. L'action exige la confirmation `DISPOSABLE-LAB-ONLY`, un diagnostic QMP source sans job actif, la vérification de propriété de `REP_` arrêtée, l'absence de PID NBD, checkpoint publié ou autre run incertain.
+- Le helper refait l'inventaire LV sous verrou, puis **archive `pending.json` sous `reconciled-no-lv-<token>.json`** sans supprimer ni détacher aucun LV. L'historique de l'ancienne tentative est conservé et une nouvelle activation peut seulement ensuite démarrer.
+- **Refus automatique** si un LV existe, que l'inventaire est ambigu, qu'un autre run est en cours, ou qu'une génération partielle a été enregistrée. Aucune reprise aveugle ou purge générale n'est autorisée.
+- Manager `0.3.41-rc1`, agents Linux/Windows `0.3.41`. Mettre à jour le manager puis `sd-bearnaise` et `au-dodo` avant la reprise. Tests de conversion Kio, journal conservé, LV présent refusé et diagnostics inchangés.
+- Le dispositif reste **LAB-ONLY** : pas de bascule réelle, de fencing ni de failback ; la CI ne remplace pas une validation sur les Proxmox physiques.
+
+
+## 0.3.40-rc1 — 23 novembre 2026 : vérification des volumes LVM non journalisés
+
+- La tentative FULL sur `sd-bearnaise` a laissé un `pending` de statut `uncertain`, `allocated={}`, sans génération publiée ni PID NBD. Le journal est créé AVANT `pvesm alloc` : aucun volume *journalisé* ne signifie pas qu'aucun LV n'a réellement été créé.
+- Le diagnostic existant **Inspecter la génération LVM (lecture seule)** recalcule maintenant, pour chaque disque planifié, le nom exact attendu du volume à partir du jeton. Il interroge l'inventaire **réel du VG avec `lvs`**, indique le résultat `Présent` / `Non trouvé` / `Non vérifié`, sans supprimer ni modifier de LV.
+- Le helper classe également les prochains refus de `pvesm alloc` en catégories sûres (volume existant, espace, permissions, nom incorrect, format ou LVM) et enregistre uniquement le code de la catégorie dans le journal d'échec. Les détails complets de la commande et des erreurs système ne sont pas transmis à l'interface.
+- **La réconciliation ne supprime rien et n'autorise pas une nouvelle copie FULL** tant qu'aucune procédure de libération des générations n'est validée. L'absence dans un inventaire ponctuel n'est pas une preuve suffisante pour une purge automatique.
+- Manager `0.3.40-rc1` / agents intégrés `0.3.40`. Mettre à jour `sd-bearnaise` depuis l'interface Agents, puis réexécuter ce diagnostic. Les sources et les VMs restent inchangées.
+
+
+## 0.3.39-rc1 — 23 novembre 2026 : journal des générations LVM de recette
+
+- La VM de secours `REP-vl-bbiokou` est bien créée sur `sd-bearnaise` et la source QMP est vérifiée (`scsi0`). Après l'amorçage, `lvm_lab_begin` a échoué et laissé une génération LVM non résolue. **Ne pas lancer une nouvelle FULL ou purger les LV à l'aveugle.**
+- Nouveau bouton **« Inspecter la génération LVM (lecture seule) »** dans le panneau Réplication LVM : affiche l'état du journal de préparation (`pending.json`), le dernier checkpoint (`current.json`), le nombre de générations enregistrées (`owned.json`), les volumes déclarés et les fichiers PID d'exports NBD.
+- Le diagnostic ne démarre/arrête aucune VM, n'appelle pas `qm create`, `pvesm alloc/free`, ni `qemu-img`. Un état `pending` impose toujours une réconciliation humaine avant toute nouvelle écriture. La présence ou l'absence d'un fichier PID n'atteste pas à elle seule l'état réel du processus.
+- Manager `0.3.39-rc1`, agents intégrés `0.3.39` : mise à jour du helper de `sd-bearnaise` depuis l'interface Agents.
+- **Pas de purge ou de reprise automatique** tant que la propriété et l'état réel de chaque volume ne sont pas prouvés ; la bascule réelle et le failback restent désactivés.
+
+
+## 0.3.38-rc1 — 23 novembre 2026 : résolution QMP des disques Proxmox VE 9
+
+- Le diagnostic source `QMP_BLOCKS` était provoqué par une recherche limitée au champ `device="drive-scsi0"`. Sur les versions récentes de Proxmox utilisant QEMU `-blockdev`, `query-block` peut exposer `device=""` et `qdev="scsi0"`.
+- `source_probe` associe désormais chaque disque configuré au `qdev` correspondant (PVE 9) ou à l'ancien identifiant `device`, en exigeant **exactement une** entrée QMP et un véritable nom de nœud. Les entrées ambiguës et absentes bloquent la réplication pour ne pas copier le mauvais disque.
+- Le diagnostic QMP source permet de vérifier cette résolution sans arrêter la VM. Aucun réglage disque ou redémarrage source ne doit être nécessaire.
+- Manager `0.3.38-rc1`, agents intégrés `0.3.38` : mettre à jour le helper de `au-dodo` depuis l'interface Agents ; conserver `REP-vl-bbiokou` sur `sd-bearnaise`.
+- Une reprise de copie FULL n'est autorisée qu'après succès du diagnostic et réconciliation de l'état `uncertain`. Les bascules réelles restent interdites.
+
+
+## 0.3.37-rc1 — 23 novembre 2026 : diagnostic QMP de la VM source
+
+- Après création et vérification de la réplique `REP-vl-bbiokou`, la première copie FULL peut bloquer sur `source_probe` (le helper source QMP). Le nouveau bouton **Diagnostiquer QMP source (lecture seule)** vérifie l'inventaire matériel, l'état de la source, l'accès QMP et les nœuds de disques sans copier de bloc ni arrêter la VM.
+- Les messages sont classés sans données sensibles : `DISK_INVENTORY`, `HARDWARE`, `POWER`, `QMP_SOCKET`, `QMP_BLOCKS`, `QM_COMMAND`, `QEMU_PROCESS` ou `QMP_QUERY`. Le détail de la commande ou de l'exception non fiable reste local au nœud.
+- Le bouton **Vérifier la source et reprendre la copie FULL** n'est disponible que si la dernière activation est `uncertain` pour `source_probe`, sans run de transfert enregistré. Le contrôleur exige une réplique déjà possédée et arrêtée, aucun checkpoint LVM et un diagnostic QMP source validé ; il conserve les anciennes tentatives et ne supprime rien.
+- Manager `0.3.37-rc1`, agents embarqués `0.3.37` afin d'installer le helper QMP source sur `au-dodo`. Le serveur `sd-bearnaise` doit également disposer du helper de vérification des marqueurs.
+- Les tests logiciels ne qualifient pas une récupération OS ou une bascule réelle. Recette LAB-ONLY uniquement.
+
+
+## 0.3.36-rc1 — 23 novembre 2026 : reprise du secours REP_ déjà créé
+
+- La création de VM `REP-vl-bbiokou` peut réussir alors que l'inventaire Proxmox remonte encore un statut non confirmé. Le contrôleur ne prend plus ce statut comme preuve d'échec : il fait une nouvelle vérification **directement sur le nœud** des marqueurs `ORIGAMITASKS_PRA_<id>` et `ORIGAMITASKS_LAB_ONLY`, du nom DNS, de la VM arrêtée, sans réseau, et de l'autoboot désactivé.
+- Le diagnostic en lecture seule différencie maintenant **VMID appartenant à cette protection** de **VMID occupé par une autre VM**.
+- Nouvelle action **« Vérifier REP_ existante et reprendre la copie FULL »**, réservée au blocage précis `LabJobError: LAB target VM must exist, be stopped and have exclusive VMID`. Avant reprise : propriété attestée sur l'hôte, source active, aucun run de transfert et aucun checkpoint LVM local en attente ou déjà commité. L'ancien run est conservé en historique ; une nouvelle activation est créée.
+- **Aucune suppression de VM ou de LV, aucun changement automatique de VMID.** Le VMID existant ne doit pas être remplacé si `REP_` est déjà possédée et correctement isolée. Un VMID étranger est strictement refusé.
+- Manager `0.3.36-rc1` et agents embarqués `0.3.36`, afin de déployer le nouveau helper de vérification sans intervention SSH manuelle.
+- Recette uniquement ; publication de disques et tests QEMU n'autorisent toujours pas de bascule réelle.
+
+
+## 0.3.35-rc1 — 23 novembre 2026 : correction création de REP_ sur Proxmox
+
+- **Cause de `PRA_STEP_VM_CREATE / commande qm refusée` :** le pilote passait `REP_vl-bbiokou` comme nom de machine à `qm create`. Proxmox impose un nom DNS, donc le caractère souligné `_` est rejeté. OrigamiTasks conserve son nom logique `REP_vl-bbiokou` et ses marqueurs de protection, mais utilise désormais `REP-vl-bbiokou` pour le champ `name` Proxmox.
+- Même normalisation pour les clones de recette : `PRA_TEST_4301` reste le nom logique de test, le nom natif Proxmox est `PRA-TEST-4301`.
+- Le helper vérifie le nom Proxmox attendu avant d'adopter ou publier une VM existante. Le nom natif s'affiche dans le diagnostic de la protection.
+- **Manager `0.3.35-rc1`, agents intégrés `0.3.35`** : mettre à jour le manager puis l'agent du nœud destination afin de diffuser le helper corrigé. Après une activation `uncertain`, vérifier l'absence du VMID via l'API avant d'utiliser la reprise contrôlée ; ne jamais supprimer de VM automatiquement.
+- Tests de non-régression ajoutés pour la génération du nom DNS, le marqueur de protection et la création `qm` sans démarrage.
+
+
+## 0.3.34-rc1 — 23 novembre 2026 : diagnostic PRA Proxmox sans écriture
+
+- Corrige le manque de précision de `Host operation rejected:` lors de la préparation de `REP_`. Les étapes identifiées sont `STORAGE_CONFIG`, `STORAGE_CAPACITY`, `CLUSTER_INVENTORY`, `VM_CREATE` et `POST_CREATE_INVENTORY`. La console n'affiche pas les arguments libres ou sorties distantes sensibles.
+- **Bouton « Diagnostiquer Proxmox (lecture seule) »** : utilisable même en état `uncertain`. Vérifie configuration et capacité LVM, disponibilité de l'inventaire et occupation du VMID sans créer ni supprimer de VM/LV.
+- Le manager et les agents Linux/Windows intégrés passent à **0.3.34** (manager `0.3.34-rc1`), pour permettre de redéployer depuis l'interface le nouveau helper PRA sur les nœuds déjà en `0.3.33`.
+- La création de secours `uncertain` reste bloquée ; la reprise n'est pas automatique et nécessite confirmation d'absence du VMID et de transferts.
+
+
+## Correctif urgent du 23 novembre 2026 — agents 0.3.32 → 0.3.33 et PRA #183
+
+- Les échecs de mises à jour des agents étaient tous affichés avec le même message générique. Les mises à jour affichent désormais l'étape SSH atteinte (vérification, sauvegarde, installation, redémarrage, état systemd) ou une catégorie de défaillance SFTP/SSH, sans exposer la sortie distante sensible.
+- La version du helper PRA sur le nœud doit être celle livrée avec l'agent mis à jour. Une console v0.3.33-rc1 ne met pas à niveau les fichiers déjà installés sur Proxmox : la mise à jour des agents sur les nœuds doit réussir.
+- Une erreur de préparation distante `lvm_lab_prepare_standby` peut être réconciliée depuis l'interface si, et seulement si, aucune copie LVM n'a été enregistrée et que l'API Proxmox confirme le VMID cible absent. Le bouton « Vérifier le VMID cible et reprendre la préparation » ne supprime ni n'adopte une VM existante.
+- Après une erreur distante, commencer par réessayer la mise à jour **d'un seul agent** (nœud PRA cible) et consulter le nouveau message détaillé. Ne pas relancer neuf installations ni un transfert LVM incertain sans diagnostic.
+
+
+## 0.3.33-rc1 — 23 novembre 2026 (diagnostics PRA et ergonomie)
+
+- **Correction du PRA bloqué :** les actions internes autorisées intègrent désormais explicitement `lvm_lab_prepare_standby`, `lvm_lab_publish_standby` et `lvm_lab_test_boot`. Le refus local `Action PRA non autorisée` survenait avant toute commande Proxmox.
+- **Reprise contrôlée :** bouton réservé à la régression locale *précise*, uniquement si aucune copie n'a été créée, aucun run n'a démarré et aucun appel à l'agent n'a été envoyé ; tout autre état incertain reste bloquant.
+- **Sélection de VM :** liste triée par nom (français, casse ignorée), recherche par nom/VMID/nœud, suggestion automatique d'un VMID libre lors du changement de source, et bouton de vérification en temps réel du VMID cible sur Proxmox.
+- **Commentaires de réplique :** champs `Référence / ticket` et `Commentaire` sur la politique PRA, enregistrés en base et repris, lors de la création de la VM `REP_`, dans la description Proxmox avec nom, VMID et nœud source ainsi que les marqueurs d'appartenance.
+- **Diagnostics :** nom de la source et de `REP_` cliquables dans VM protégées ; vue détaillée de la phase d'activation, des éventuels blocages, des copies, des publications et des tests. L'état de préparation ne masque plus un échec d'activation enregistré.
+- **Audit :** filtres administrateur par PRA, agents/déploiements, jobs, sécurité et système, avec recherche textuelle ; catégories filtrées côté serveur avant limitation de la liste.
+- **Versions :** manager `0.3.33-rc1`, agents Linux/Windows intégrés `0.3.33`. Les versions effectivement rapportées par les agents restent affichées séparément ; aucune rétrogradation automatique d'un agent plus récent.
+- **Sécurité :** aucune bascule réelle et aucun failback activé ; seuls les tests de recette `LAB-ONLY` sont autorisés.
+
+
+## 0.3.31-rc1 — 20 novembre 2026 (PRA QMP/LVM piloté, RECETTE uniquement)
+
+- **Enrôlement PRA** : choix d'une VM source en marche, VMID cible libre proposé, création automatique d'une VM `REP_` arrêtée, sans réseau ni disque, avec marqueurs d'appartenance.
+- **Amorçage à chaud** : une autorisation `DISPOSABLE-LAB-ONLY` dans le formulaire déclenche préparation, copie FULL QMP/NBD vers des LV QCOW2 et suivi d'activation.
+- **Incrémental planifié** : cadence définie par VM après amorçage vérifié ; aucune relance des copies ambiguës, aucune action avant confirmation de la dernière publication.
+- **Publication sur REP_** : attachement des volumes du dernier checkpoint vérifié, sans démarrer la VM ; le profil EFI/TPM reste refusé.
+- **Test isolé** : clone indépendant `PRA_TEST_`, démarrage QEMU contrôlé sans réseau et arrêt automatique ; **aucune preuve de démarrage OS ni applicatif**.
+- **Journaux** : historiques séparés par VM pour amorçage, publications, planification, copies et tests. États incertains conservés après redémarrage.
+- **Stockage** : LV épais par génération, **limite de 8 générations** sans purge, car la rétention des chaînes QCOW2 n'est pas encore sûre.
+- **Bascule/failback** : simulations et vérification des prérequis disponibles ; **promotion réelle, fencing/witness et réplication inverse restent désactivés**.
+- **Installation** : nouvelle version du contrôleur et mise à jour des agents Linux PRA depuis OrigamiTasks ; aucune nouvelle variable `.env`.
+- Détails : [Guide QMP et pilote LVM](pra-qmp.fr.md).
+
+
 ## 0.3.24-rc1 — 19 novembre 2026 (pilote QMP, non validé en production)
 
 - **Moteur PRA QMP incrémental à chaud** : copie initiale complète, dirty bitmaps, transferts suivants des blocs modifiés et gestion multi-disques par transactions QMP.

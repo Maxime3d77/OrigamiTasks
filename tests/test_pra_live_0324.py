@@ -116,8 +116,14 @@ def test_frontend_exposes_manual_qmp_controls_and_no_storage_array_option():
     assert "storage_array_replication','Réplication" not in script
     helper=(root/"agents/linux/pra_host_worker.py").read_text()
     assert "target_publish" in helper
-    assert 'cmd("qm", "start"' not in helper
-    assert 'cmd("qm", "stop"' not in helper
+    # Only an explicitly isolated PRA_TEST clone can be started/stopped by
+    # the new host helper; protected REP_ guests remain strictly OFF.
+    assert "def lvm_lab_test_boot(data):" in helper
+    boot=helper.split("def lvm_lab_test_boot(data):",1)[1].split("def lvm_lab_abort(data):",1)[0]
+    assert 'cmd("qm", "start", str(test_id)' in boot
+    assert 'cmd("qm", "stop", str(test_id)' in boot
+    assert helper.count('cmd("qm", "start"') == 1
+    assert helper.count('cmd("qm", "stop"') == 1
     orchestration=(root/"app/pra_live.py").read_text()
     assert "request_port_forward" in orchestration
     assert "/usr/local/lib/origamitasks-pra" in orchestration

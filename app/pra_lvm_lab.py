@@ -39,9 +39,26 @@ def _runtime(vm):
     candidates = [r for r in target_inventory if r.get("type") in ("qemu", "lxc")
                   and r.get("vmid") == vm["target_vmid"]]
     if (len(candidates) != 1 or candidates[0].get("type") != "qemu"
-            or candidates[0].get("node") != vm["target_node"]
-            or candidates[0].get("status") != "stopped"):
-        raise LabError("LAB target VM must exist, be stopped and have exclusive VMID")
+            or candidates[0].get("node") != vm["target_node"]):
+        raise LabError("LAB target VMID absent, duplicate ou hébergé sur un autre nœud")
+    # /cluster/resources can lag after qm create or report an ambiguous
+    # status. Confirm state and policy ownership on the actual target host,
+    # never rely on inventory status alone.
+    binding=pra_live._remote_ssh_binding(vm["target_site_id"],vm["target_node"])
+    connection=pra_live._connect(binding)
+    try:
+        attestation=pra_live._run_helper(connection,"lvm_lab_validate_standby",{
+            "vmid":vm["target_vmid"],
+            "protected_vm_id":vm["id"],
+            "name":vm["replica_name"]
+        },timeout=90)
+    finally:
+        connection.close()
+    if (attestation.get("vmid")!=vm["target_vmid"]
+            or attestation.get("owned") is not True
+            or attestation.get("target_stopped") is not True
+            or attestation.get("network_isolated") is not True):
+        raise LabError("Secours REP_ non attesté : propriété, arrêt et isolation obligatoires")
     storages = dr_protected_vms._storages(target_dc, target_cred)
     target = next((s for s in storages if s.get("storage")==vm["target_storage"]),None)
     if not target or target["type"] != "lvm" or not target.get("snapshot_as_volume_chain") or not target.get("images"):
@@ -112,7 +129,17 @@ def run(vm_id, *, execute=False, incremental=False, lab_confirm=None):
                 if (bitmap.get("recording") is not True or bitmap.get("busy") is True
                         or bitmap.get("inconsistent") is True):
                     raise LabError("QMP dirty bitmap missing or unsafe; FULL LAB reseed required")
+        generation_count=destination.get("generation_count")
+        retention_limit=destination.get("retention_limit")
+        if (type(generation_count) is not int or generation_count<0
+                or type(retention_limit) is not int or retention_limit<1):
+            raise LabError("Inventaire de rétention LVM non vérifié : mise à jour des agents requise")
+        retention_full=generation_count>=retention_limit
         result = {
+            "generation_count":generation_count,
+            "retention_limit":retention_limit,
+            "retention_blocked":retention_full,
+            "retention_action":"inspect_only_no_deletion" if retention_full else "capacity_available",
             "vm_id":vm_id, "source_vmid":vm["source_vmid"],
             "target_vmid":vm["target_vmid"],"mode":mode,
             "disk_slots":info["slots"],"source_running":True,
@@ -126,6 +153,10 @@ def run(vm_id, *, execute=False, incremental=False, lab_confirm=None):
         if not execute:
             result["note"]="READ ONLY: supply --execute and --lab-confirm to allocate a disposable test LV"
             return result
+        if retention_full:
+            raise LabError(
+                "Limite de "+str(retention_limit)+" générations LVM atteinte : "
+                "copie refusée avant allocation ; diagnostic et consolidation sûrs requis")
         if lab_confirm != LAB_ACK:
             raise LabError("LAB execute requires explicit acknowledgement")
         prepared = pra_live._run_helper(dst,"lvm_lab_begin",{

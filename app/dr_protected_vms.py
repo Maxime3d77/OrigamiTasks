@@ -104,7 +104,7 @@ def options(plan_id, source_dc_id, target_dc_id):
           "node":r.get("node") or "","status":r.get("status") or "unknown"}
          for r in source_resources if r.get("type")=="qemu" and
          type(r.get("vmid")) is int]
-    vms=sorted(vms,key=lambda x:x["vmid"])
+    vms=sorted(vms,key=lambda x:(x["name"].casefold(),x["vmid"]))
     nodes=[{"name":r.get("node") or r.get("name") or "",
             "status":r.get("status") or "unknown"}
            for r in target_resources if r.get("type")=="node"]
@@ -124,7 +124,8 @@ def options(plan_id, source_dc_id, target_dc_id):
 def _payload(data):
     if (not isinstance(data,dict) or set(data)-{
         "plan_id","source_dc_id","target_dc_id","source_vmid","target_vmid",
-        "target_node","target_storage","interval_minutes","engine"}):
+        "target_node","target_storage","interval_minutes","engine",
+        "protection_note","reference"}):
         raise ProtectedVMError("Paramètres de protection VM invalides")
     plan_id=_positive(data.get("plan_id"),"Groupe PRA")
     source_dc_id=_positive(data.get("source_dc_id"),"Cluster source")
@@ -143,11 +144,19 @@ def _payload(data):
         raise ProtectedVMError("Nœud cible invalide")
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}",storage):
         raise ProtectedVMError("Stockage cible invalide")
+    note = str(data.get("protection_note") or "").strip()
+    reference = str(data.get("reference") or "").strip()
+    if len(note) > 240 or any(ord(ch)<32 for ch in note):
+        raise ProtectedVMError("Commentaire PRA invalide (240 caractères maximum)")
+    if len(reference) > 80 or any(ord(ch)<32 for ch in reference):
+        raise ProtectedVMError("Référence PRA invalide (80 caractères maximum)")
     return plan_id,source_dc_id,target_dc_id,vmid,target_vmid,node,storage,interval,engine
 
 
 def save(data, actor, existing_id=None):
     (plan_id,src,dst,vmid,target_vmid,node,storage,interval,engine)=_payload(data)
+    note=str(data.get("protection_note") or "").strip()
+    reference=str(data.get("reference") or "").strip()
     if src==dst:
         raise ProtectedVMError("Impossible de protéger une VM sur le même cluster")
     source_site_id,target_site_id=_sites(plan_id,src,dst)
@@ -216,6 +225,8 @@ def save(data, actor, existing_id=None):
                     (*values,actor,now,now)
                 )
                 vm_record_id=cursor.lastrowid
+                con.execute("UPDATE dr_protected_vms SET protection_note=?,reference=? WHERE id=?",
+                            (note,reference,vm_record_id))
             else:
                 old=con.execute(
                     "SELECT id FROM dr_protected_vms WHERE id=?",(existing_id,)
@@ -231,6 +242,8 @@ def save(data, actor, existing_id=None):
                     (*values,now,existing_id)
                 )
                 vm_record_id=existing_id
+                con.execute("UPDATE dr_protected_vms SET protection_note=?,reference=? WHERE id=?",
+                            (note,reference,vm_record_id))
         except db.sqlite3.IntegrityError:
             raise ProtectedVMError(
                 "VM source déjà protégée ou VMID cible réservé par une autre protection"
@@ -285,6 +298,39 @@ def list_vms(plan_id=None):
                 "ORDER BY id DESC LIMIT 1", (item["id"],)
             ).fetchone()
         item["lvm_lab_latest_run"]=dict(lab) if lab else None
+        # A failed/blocked newest run must not erase the evidence of the last
+        # completed checkpoint in the PRA overview. It still does NOT make
+        # the current generation failover-ready.
+        with db.session() as con:
+            completed_lvm=con.execute(
+                "SELECT id,point_at,checkpoint_token,mode FROM pra_lvm_lab_runs "
+                "WHERE protected_vm_id=? AND status='completed' "
+                "AND mode IN ('full','incremental') ORDER BY id DESC LIMIT 1",
+                (item["id"],)
+            ).fetchone()
+        item["lvm_last_completed"]=dict(completed_lvm) if completed_lvm else None
+        with db.session() as con:
+            published=con.execute(
+                "SELECT id,status,checkpoint_token,details,updated_at "
+                "FROM pra_lvm_publications WHERE protected_vm_id=? "
+                "ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+        item["lvm_last_publication"]=dict(published) if published else None
+        with db.session() as con:
+            activation=con.execute(
+                "SELECT status,phase,details FROM pra_lvm_activations "
+                "WHERE protected_vm_id=? ORDER BY id DESC LIMIT 1",(item["id"],)
+            ).fetchone()
+        item["lvm_lab_activated"]=activation is not None
+        item["lvm_activation"]=dict(activation) if activation else None
+        item["lvm_effective_status"]=(activation["status"] if activation and
+                                      activation["status"] in ("uncertain","failed","queued","running")
+                                      else (lab["status"] if lab else "not_configured"))
+        item["lvm_standby_configured"]=bool(
+            published and published["status"]=="completed" and lab
+            and lab["status"]=="completed"
+            and lab["mode"] in ("full","incremental")
+            and lab["checkpoint_token"]==published["checkpoint_token"])
         # An old 'completed' run predating structural verification is NOT
         # evidence of an intact standby or a safe incremental base.
         item["offline_image_verified"]=bool(latest.get("offline_image_verified", False))
@@ -327,6 +373,16 @@ def delete(vm_id):
             "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
         if pending_live:
             raise ProtectedVMError("Réplication active/indéterminée : réconcilier avant suppression")
+        pending_lvm=con.execute(
+            "SELECT 1 FROM pra_lvm_lab_runs WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
+        if pending_lvm:
+            raise ProtectedVMError("Réplication LVM active/incertaine : réconcilier avant suppression")
+        active_activation=con.execute(
+            "SELECT 1 FROM pra_lvm_activations WHERE protected_vm_id=? "
+            "AND status IN ('queued','running','uncertain')",(vm_id,)).fetchone()
+        if active_activation:
+            raise ProtectedVMError("Amorçage PRA actif/incertain : réconcilier avant suppression")
         con.execute("DELETE FROM dr_protected_vms WHERE id=?",(vm_id,))
     return {"ok":True,"vm_config_removed":True,
             "vm_deleted":False,"disks_deleted":False}

@@ -11,6 +11,18 @@ from test_dr_protected_vms_0321 import login
 from test_pra_live_0324 import _setup, _remove
 
 
+def _cleanup_lab(client,h,vm_id,sites,clusters,plans):
+    # Test fixture teardown explicitly quarantines incomplete LAB operations
+    # before deleting a protection. The application itself must reject it.
+    with db.session() as con:
+        con.execute("DELETE FROM pra_lvm_lab_runs WHERE protected_vm_id=?",(vm_id,))
+        con.execute("DELETE FROM pra_lvm_activations WHERE protected_vm_id=?",(vm_id,))
+        con.execute("DELETE FROM pra_lvm_schedule_events WHERE protected_vm_id=?",(vm_id,))
+        con.execute("DELETE FROM pra_lvm_publications WHERE protected_vm_id=?",(vm_id,))
+        con.execute("DELETE FROM pra_lvm_boot_tests WHERE protected_vm_id=?",(vm_id,))
+    _remove(client,h,vm_id,sites,clusters,plans)
+
+
 class NoThread:
     def __init__(self, *args, **kwargs):
         pass
@@ -70,7 +82,7 @@ def test_admin_only_and_required_lab_ack(monkeypatch):
                 assert con.execute("SELECT COUNT(*) FROM pra_lvm_lab_runs WHERE protected_vm_id=?",
                                    (vm_id,)).fetchone()[0]==0
         finally:
-            _remove(client,h,vm_id,sites,clusters,plans)
+            _cleanup_lab(client,h,vm_id,sites,clusters,plans)
 
 
 def test_full_run_is_exclusive_tracked_and_distinct_from_failover(monkeypatch):
@@ -110,7 +122,7 @@ def test_full_run_is_exclusive_tracked_and_distinct_from_failover(monkeypatch):
             # claim a bootable REP_ or a real failover-ready guest.
             assert vm["replica_verified"] is False
         finally:
-            _remove(client,h,vm_id,sites,clusters,plans)
+            _cleanup_lab(client,h,vm_id,sites,clusters,plans)
 
 
 def test_ambiguous_write_is_persistently_blocked_after_restart(monkeypatch):
@@ -139,7 +151,7 @@ def test_ambiguous_write_is_persistently_blocked_after_restart(monkeypatch):
             pra_lvm_jobs.initialize()
             assert pra_lvm_jobs.list_runs(vm_id)[0]["status"]=="uncertain"
         finally:
-            _remove(client,h,vm_id,sites,clusters,plans)
+            _cleanup_lab(client,h,vm_id,sites,clusters,plans)
 
 
 def test_incremental_requires_committed_checkpoint_before_job_creation(monkeypatch):
@@ -156,7 +168,7 @@ def test_incremental_requires_committed_checkpoint_before_job_creation(monkeypat
                 assert con.execute("SELECT COUNT(*) FROM pra_lvm_lab_runs WHERE protected_vm_id=?",
                                    (vm_id,)).fetchone()[0]==0
         finally:
-            _remove(client,h,vm_id,sites,clusters,plans)
+            _cleanup_lab(client,h,vm_id,sites,clusters,plans)
 
 
 def test_ui_does_not_claim_lvm_recovery_is_production_safe():
@@ -166,9 +178,11 @@ def test_ui_does_not_claim_lvm_recovery_is_production_safe():
     for phrase in ("Copie LVM recette","DISPOSABLE-LAB-ONLY",
                    "lvm-lab/replicate","lvm-lab/runs",
                    "Copie complète à chaud","Synchronisation incrémentale",
-                   "Protection OrigamiTasks #","qm create ",
-                   "ORIGAMITASKS_PRA_"):
+                   "Activer la protection (REP_ + première copie FULL)",
+                   "lvm-lab/prepare-standby"):
         assert phrase in ui
+    # The legacy UI must no longer tell operators to run qm create manually.
+    assert "qm create " not in ui
     assert "Bascule réelle interdite" in ui
 
 
@@ -223,7 +237,7 @@ def test_restore_clone_requires_verified_full_and_never_starts_vm(monkeypatch):
             assert history[0]["checkpoint_token"]==token
             assert "arrêté" in history[0]["details"]
         finally:
-            _remove(client,h,vm_id,sites,clusters,plans)
+            _cleanup_lab(client,h,vm_id,sites,clusters,plans)
 
 
 def test_clone_approval_never_exposes_generic_hypervisor_start(monkeypatch):
@@ -242,4 +256,4 @@ def test_clone_approval_never_exposes_generic_hypervisor_start(monkeypatch):
                 __import__("pathlib").Path(__file__).resolve().parents[1]/
                 "agents/linux/pra_host_worker.py").read_text()
         finally:
-            _remove(client,h,vm_id,sites,clusters,plans)
+            _cleanup_lab(client,h,vm_id,sites,clusters,plans)

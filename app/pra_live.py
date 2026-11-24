@@ -122,11 +122,14 @@ def _connect(binding):
 
 
 def _run_helper(ssh, action, data, timeout=60):
-    if action not in {"source_probe", "source_copy", "source_dismiss",
+    if action not in {"source_network_inventory", "destination_network_inventory",
+                       "source_diagnose", "source_probe", "source_copy", "source_dismiss",
                       "target_probe", "target_begin",
                       "target_finish", "target_abort", "target_publish", "target_verify",
                        "lvm_lab_probe", "lvm_lab_begin", "lvm_lab_finish",
-                       "lvm_lab_verify", "lvm_lab_abort", "lvm_lab_prepare_clone"}:
+                       "lvm_lab_verify", "lvm_lab_abort", "lvm_lab_prepare_clone",
+                       "lvm_lab_prepare_standby", "lvm_lab_validate_standby", "lvm_lab_diagnose_standby", "lvm_lab_diagnose_generation", "lvm_lab_archive_empty_uncertain", "lvm_lab_publish_standby",
+                       "lvm_lab_test_boot"}:
         raise LiveReplicationError("Action PRA non autorisée")
     encoded = base64.b64encode(json.dumps(data, separators=(",", ":")).encode()).decode()
     invoke = "/usr/bin/python3 " + shlex.quote(_HELPER) + " " + action + " " + shlex.quote(encoded)
@@ -137,9 +140,49 @@ def _run_helper(ssh, action, data, timeout=60):
     output = stdout.read(262144).decode(errors="replace")
     code = channel.recv_exit_status()
     if code:
-        # Error details from a remote host are deliberately sanitized.
-        raise LiveReplicationError("Échec commande agent PRA: " + action +
-                                   " (vérifier root helper, qemu-nbd et logs locaux)")
+        # Parse the structured error *only* to classify known, non-secret
+        # host failures. Arbitrary remote stdout/stderr never enters the UI.
+        known = (
+            "Required host command unavailable",
+            "Host operation rejected: ",
+            "Invalid source identity or descriptive metadata",
+            "Invalid standby VM name",
+            "Experimental LVM replication requires LAB-only approval",
+            "Target VMID already used by another resource or node",
+            "Existing VM is not owned by this lab protection",
+            "LAB standby must have zero network interfaces",
+            "LAB standby VM onboot must be disabled",
+            "Invalid lab protection identifier",
+            "Invalid protection identity",
+            "Standby autoboot is forbidden",
+            "Standby network must be empty",
+        )
+        reason = ""
+        try:
+            document = json.loads(output.strip().splitlines()[-1])
+            reported = document.get("error", "") if isinstance(document, dict) else ""
+            if isinstance(reported, str):
+                # The host helper emits stable provisioning stage markers.
+                # Show only a known marker and allowlisted CLI category.
+                stage = re.match(
+                    r"^(PRA_STEP_(?:STORAGE_CONFIG|STORAGE_CAPACITY|"
+                    r"CLUSTER_INVENTORY|VM_CREATE|POST_CREATE_INVENTORY))\s*:",
+                    reported,
+                )
+                if stage:
+                    cli = re.search(r"Host operation rejected: (pvesh|qm|pvesm|vgs|lvs)", reported)
+                    reason = stage.group(1) + (
+                        " / commande " + cli.group(1) + " refusée" if cli else
+                        " / vérification Proxmox refusée"
+                    )
+                else:
+                    reason = next((k for k in known if reported.startswith(k)), "")
+        except (ValueError, IndexError, TypeError):
+            pass
+        raise LiveReplicationError(
+            "Échec commande agent PRA : "+action
+            +(" — "+reason if reason else " — refus ou exception côté Proxmox")
+            +" (vérifier les journaux locaux du nœud)")
     try:
         response = json.loads(output.strip().splitlines()[-1])
     except (ValueError, IndexError):

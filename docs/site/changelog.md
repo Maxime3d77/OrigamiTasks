@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.3.42-rc1 — 2026-11-23: isolated guest OS evidence and read-only DR network preview
+
+- **Human-observed guest login:** admins may select a completed, networkless restored clone, enter `OS-LOGIN-VERIFIED` and record a brief console-login observation. The audit stores actor, timestamp, clone VMID, exact immutable checkpoint and observation text; never credentials. This is NOT an automated guest or application health test.
+- A previously observed clone remains in history when incrementals advance, but cannot be reused as evidence for a newer checkpoint. Recovery readiness distinguishes human-observed OS login from application evidence and still **always blocks production promotion** without independent witness, fencing and host start guard.
+- **Read-only DR network preview:** inspect source NIC model/bridge/VLAN and available target Proxmox bridges. Matching bridge names are suggestions only; VLAN trunks, routing, IP/MAC exclusivity and actual connectivity are NOT verified. No NIC is attached to REP_ or PRA_TEST_, no start/stop or failover action is implemented.
+- Manager `0.3.42-rc1`, Linux/Windows bundled agents `0.3.42`. Upgrade source and target Proxmox agents from OrigamiTasks before running the network preview.
+- LAB-only tests: validated clone console login, checkpoint freshness, missing destination bridge, invalid network mapping, read-only host operations, and failover remaining blocked.
+
+
+## 0.3.33-rc1 — 2026-11-23 (PRA diagnostics and usability)
+
+- **Fix blocked PRA activation:** allowlist controller-to-host actions `lvm_lab_prepare_standby`, `lvm_lab_publish_standby`, and `lvm_lab_test_boot` explicitly. The local `Action PRA non autorisée` rejection occurred before contacting Proxmox.
+- **Targeted recovery:** an administrator may retry *only* this exact pre-SSH authorization bug when no replication job was ever recorded. All other uncertain transfers remain blocked until safely reconciled.
+- **VM selector:** locale-aware alphabetical sorting, search by VM name/ID/node, free target VMID suggestions after source changes, and a read-only live target VMID availability probe.
+- **Replica identity:** optional protection reference/ticket and note in the OrigamiTasks policy, included in the newly created `REP_` description together with source VM name/VMID/node and mandatory ownership markers.
+- **Per-VM diagnostics:** click the source or replica name to see activation phase, failure, publication, copy and isolated boot-test history. An uncertain activation is no longer presented as simply preparing.
+- **Audit trail:** administrator filters for DR, agents, jobs, security and system activities, plus server-filtered text search.
+- **Release parity:** manager `0.3.33-rc1`; bundled Linux/Windows agents `0.3.33`. Actual installed agent versions remain independent; newer versions are never treated as stale.
+- **Production failover and reverse failback are still disabled.** LAB-only controls remain in place.
+
+
+## 0.3.31-rc1 — 2026-11-20 (QMP/LVM DR workflow, LAB ONLY)
+
+- **DR enrollment**: free target VMID suggestion; automatically prepare an OFF, networkless and diskless owned `REP_` VM.
+- **Hot first seed**: one `DISPOSABLE-LAB-ONLY` approval starts preparation and QMP/NBD FULL transfer into QCOW2-on-LVM volumes.
+- **Scheduled incremental**: per-VM cadence only after an acknowledged previous copy and OFF-standby publication. Errors/uncertain checkpoints stop unattended retries.
+- **REP_ publication**: verified LVM volumes are attached to the stopped standby configuration; unsupported EFI/TPM profiles are rejected.
+- **Isolated QEMU clone test**: independent `PRA_TEST_` guest starts without a NIC and is stopped; this is **not OS boot/application proof**.
+- **Auditable histories**: activation, publication, schedule, transfer and clone-test logs. Restart ambiguity is retained.
+- **Storage bound**: thick LVM volume per generation, **8-generation limit** pending safe flatten/retention.
+- **Safety**: production promotion, fencing/witness and reverse sync/failback remain **disabled**. Simulations do not power on a standby.
+- **Deployment**: update controller and PRA agents through the UI; no new `.env` variables.
+- Details: [QMP and LVM laboratory guide](pra-qmp.md).
+
+
 ## 0.3.24-rc1 — 2026-11-19 (QMP pilot, not production validated)
 
 - **Live QMP incremental DR transport**: one full backup, dirty bitmap incremental backups, grouped multi-disk QMP transactions.

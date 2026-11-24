@@ -252,12 +252,24 @@ class PveLvmTarget:
                     size = validated["disks"][slot]
                     name = "vm-" + str(self.vmid) + "-disk-" + str(sequence + index) + ".qcow2"
                     volid = self.storage + ":" + name
+                    # QMP reports virtual-size in BYTES; pvesm alloc expects
+                    # KiB. Passing raw QMP bytes requests 1024x the intended LV.
+                    # Round up rather than underallocating a non-KiB disk.
+                    size_kib = (size + 1023) // 1024
                     self.run("pvesm", "alloc", self.storage, str(self.vmid),
-                             name, str(size), "--format", "qcow2")
+                             name, str(size_kib), "--format", "qcow2")
                     record["allocated"][slot] = {"volid": volid, "size": size}
                     _atomic(journal_file, record)
-            except BaseException:
+            except BaseException as exc:
+                # Persist only a bounded, allowlisted code. The PVE CLI may
+                # have created a volume without returning success: NEVER
+                # delete it or clear the journal merely because allocated={}
                 record["status"] = "uncertain"
+                category = str(exc)
+                if re.fullmatch(r"PVE_LVM_ALLOC_[A-Z_]{1,50}", category):
+                    record["failure_category"] = category
+                else:
+                    record["failure_category"] = "PVE_LVM_ALLOC_UNCONFIRMED"
                 _atomic(journal_file, record)
                 raise
             record["status"] = "staged_only"
