@@ -257,7 +257,7 @@ def deploy(body, *, cluster_authorized=False):
                 worker=Path(__file__).resolve().parent.parent / 'agents/linux/pra_worker.py'
                 files[marker+'_pra_worker.py']=worker.read_bytes()
                 # Root-only, bounded PRA helper libraries: shipped as part of the agent.
-                for helper in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"):
+                for helper in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_consolidation.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"):
                     files[marker+"_"+helper]=(worker.parent/helper).read_bytes()
             for name_, data in files.items():
                 with sftp.file(base+'/'+name_, 'wb') as f:
@@ -297,7 +297,7 @@ def deploy(body, *, cluster_authorized=False):
             stage_worker = shlex.quote(base+'/'+marker+'_pra_worker.py')
             stage_config = shlex.quote(base+'/'+marker+'_config.json')
             stage_privileged = {name:shlex.quote(base+'/'+marker+'_'+name) for name in
-                                ('pra_qmp_incremental.py','pra_checkpoint.py','pra_host_worker.py','pra_lvm_target.py','pra_lvm_checkpoint.py','pra_lvm_lab_cli.py','pra_lvm_restore_lab.py')}
+                                ('pra_qmp_incremental.py','pra_checkpoint.py','pra_host_worker.py','pra_lvm_target.py','pra_lvm_checkpoint.py','pra_lvm_consolidation.py','pra_lvm_lab_cli.py','pra_lvm_restore_lab.py')}
             root_install = 'install -d -m 700 -o root -g root /usr/local/lib/origamitasks-pra; ' + ''.join(
                 'install -m 500 -o root -g root '+source+' /usr/local/lib/origamitasks-pra/'+name+'; '
                 for name,source in stage_privileged.items())
