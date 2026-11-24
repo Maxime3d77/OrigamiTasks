@@ -476,3 +476,44 @@ restore operation.
 A failed or ambiguously acknowledged clone remains `uncertain`; no
 blind retry, LV deletion or automatic promotion is attempted.
 
+
+
+### 0.3.44-rc1 LAB: one-time consolidation of legacy LVM chains
+
+On the **destination** Proxmox node with the REP_ VM **stopped**, Linux
+agent 0.3.44 ships the root-only tool
+`/usr/local/lib/origamitasks-pra/pra_lvm_consolidation.py`.
+
+Example **only for LAB VM 183 / protection #1**, after an independent
+backup of PVE VM configuration and local PRA metadata:
+
+```bash
+PRA=/usr/local/lib/origamitasks-pra/pra_lvm_consolidation.py
+python3 "$PRA" plan --vmid 183 --storage sd-PP-Proxmox --protected-id 1
+# Review the report before proceeding.
+python3 "$PRA" prepare --vmid 183 --storage sd-PP-Proxmox --protected-id 1
+python3 "$PRA" state --vmid 183 --storage sd-PP-Proxmox --protected-id 1
+qm config 183
+# Verify the standalone checkpoint and preferably test an isolated
+# LAB recovery boot before authorizing physical deletion.
+python3 "$PRA" prune --vmid 183 --storage sd-PP-Proxmox \
+  --protected-id 1 --confirm DELETE-OLD-PRA-CHAIN
+```
+
+`plan` makes no changes or LV activations. `prepare` locally activates
+only the LAB disks, allocates **one** new thick LV, performs a one-time
+full local flatten, verifies no backing chain, runs `qemu-img check`
+and a full logical compare, and then switches `scsi0`. All old volumes
+remain attached as `unusedN` until explicitly confirmed `prune`.
+Before each physical deletion, `prune` re-verifies VM shutdown, absence
+of snapshots or cross-VM references, and that the new active image is
+standalone. Proxmox performs the physical unlink; deletion is irreversible.
+Pre-consolidation metadata remains archived.
+
+This is **one-time legacy migration**, **not** the missing long-term
+delta-only transactional incremental engine. After consolidation, the
+checkpoint is marked `requires_full_reseed`: an uncertain or stale QMP
+bitmap must never be silently used as an incremental base. If interrupted
+or a QCOW2 backing path is missing (for instance an obsolete
+`/dev/dm-N`), the tool fails closed; retain the LVs for manual
+reconciliation. Not qualified for production.

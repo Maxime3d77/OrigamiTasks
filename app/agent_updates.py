@@ -97,7 +97,7 @@ def _remote(job):
             except OSError:
                 raise UpdateError("Résolution du répertoire SFTP impossible") from None
             stage=base+"/origami_upgrade_"+secrets.token_hex(12)
-            names=["agent.ps1"] if job["platform"]=="windows" else ["agent.py","pra_worker.py","pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"]
+            names=["agent.ps1"] if job["platform"]=="windows" else ["agent.py","pra_worker.py","pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_consolidation.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"]
             for name in names:
                 src=ROOT/("windows" if job["platform"]=="windows" else "linux")/name
                 try:
@@ -130,13 +130,13 @@ def _remote(job):
                 "install -m 500 -o origamitasks-agent -g origamitasks-agent "+shlex.quote(stage+"_pra_worker.py")+" /opt/origamitasks-agent/pra_worker.py; "
                 "install -d -m 700 -o root -g root /usr/local/lib/origamitasks-pra; "
                 +''.join("install -m 500 -o root -g root "+shlex.quote(stage+"_"+h)+" /usr/local/lib/origamitasks-pra/"+h+"; "
-                         for h in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"))+
+                         for h in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_consolidation.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"))+
                 "echo ORIGAMI_STAGE_RESTART; systemctl restart origamitasks-agent.service; "
                 "if systemctl is-enabled --quiet origamitasks-agent-pra.service 2>/dev/null; then systemctl restart origamitasks-agent-pra.service; fi; "
                 "echo ORIGAMI_STAGE_HEALTH; systemctl is-active --quiet origamitasks-agent.service; "
                 "trap - EXIT; "
                 "rm -f "+shlex.quote(stage+"_agent.py")+" "+shlex.quote(stage+"_pra_worker.py")+" "
-                + " ".join(shlex.quote(stage+"_"+h) for h in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"))+"; "
+                + " ".join(shlex.quote(stage+"_"+h) for h in ("pra_qmp_incremental.py","pra_checkpoint.py","pra_host_worker.py","pra_lvm_target.py","pra_lvm_checkpoint.py","pra_lvm_consolidation.py","pra_lvm_lab_cli.py","pra_lvm_restore_lab.py"))+"; "
                 "echo ORIGAMI_AGENT_UPDATED"
             )
             inner='if [ "$(id -u)" -eq 0 ]; then exec sh -c '+shlex.quote(script)+'; else exec sudo -n sh -c '+shlex.quote(script)+'; fi'

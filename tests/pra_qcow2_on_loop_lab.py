@@ -31,7 +31,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="origami-qcow2-block-lab-") as work:
         root=Path(work)
         try:
-            for i in range(2):
+            for i in range(3):
                 image=root/f"test-lv-{i}.img"
                 with image.open("wb") as stream:
                     stream.truncate(128*1024*1024)
@@ -42,7 +42,7 @@ def main():
                 if not stat.S_ISBLK(resolved.stat().st_mode):
                     raise RuntimeError("Allocated loop is not a block device")
                 devices.append(loop)
-            base, overlay=devices
+            base, overlay, standalone=devices
             run("qemu-img","create","-f","qcow2",base,"64M")
             run("qemu-io","-f","qcow2","-c","write -P 0x52 0 64k",base)
             run("qemu-img","create","-f","qcow2","-F","qcow2",
@@ -57,7 +57,22 @@ def main():
                                  "--backing-chain","--output=json",overlay))
             assert len(chain)==2,chain
             assert chain[0]["filename"]==overlay and chain[1]["filename"]==base
-            print("PASS: real block-device qcow2 volume-chain + immutable base")
+            # One-time full flatten into an independent QCOW2 block image.
+            # This verifies the PVE LVM consolidation primitive on actual
+            # block devices; it must not be used on production without guards.
+            run("qemu-img","create","-f","qcow2",standalone,"64M")
+            run("qemu-img","convert","-f","qcow2","-O","qcow2","-n",
+                overlay,standalone)
+            solo=json.loads(run("qemu-img","info","-f","qcow2",
+                                "--backing-chain","--output=json",standalone))
+            assert len(solo)==1 and solo[0]["filename"]==standalone,solo
+            run("qemu-img","check","-f","qcow2",standalone)
+            run("qemu-img","compare","-f","qcow2","-F","qcow2",
+                overlay,standalone)
+            # Existing backing remains intact and still needed by overlay.
+            assert len(json.loads(run("qemu-img","info","-f","qcow2",
+                                      "--backing-chain","--output=json",overlay)))==2
+            print("PASS: real QCOW2 block-chain + independent verified flatten")
         finally:
             # Disconnect only the loop devices allocated in this process.
             for dev in reversed(devices):
