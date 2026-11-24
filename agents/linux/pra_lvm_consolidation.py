@@ -278,7 +278,8 @@ class Maintenance:
                   "verified": False, "pruned": []}
         _atomic(self.state_file, record)
         run("pvesm", "alloc", self.storage, str(self.vmid), name,
-            str((virtual + 1023) // 1024), "--format", "qcow2", timeout=300)
+            str((virtual + max(512 * 1024 * 1024, virtual // 20) + 1023) // 1024),
+            "--format", "qcow2", timeout=300)
         record["status"] = "allocated"
         _atomic(self.state_file, record)
         destination = active_path(fresh, vg, activate=True)
