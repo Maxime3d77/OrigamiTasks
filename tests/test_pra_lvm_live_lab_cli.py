@@ -145,3 +145,35 @@ def test_lvm_lab_helper_requires_label_and_protection_marker(monkeypatch):
     cfg["net0"]="virtio,bridge=vmbr0"
     with pytest.raises(worker.HostError,match="zero network"):
         worker._lvm_lab_store(payload)
+
+
+def test_retention_limit_blocks_next_lvm_allocation_before_begin(pipeline,monkeypatch):
+    vm,connections,source,calls=pipeline
+    original=lab.pra_live._run_helper
+    def full_ledger(conn,action,data,timeout=60):
+        response=original(conn,action,data,timeout)
+        if action=="lvm_lab_probe":
+            return {**response,"generation_count":8,"retention_limit":8}
+        return response
+    monkeypatch.setattr(lab.pra_live,"_run_helper",full_ledger)
+    report=lab.run(17)
+    assert report["generation_count"]==8
+    assert report["retention_blocked"] is True
+    assert report["retention_limit"]==8
+    with pytest.raises(lab.LabError,match="8 générations LVM"):
+        lab.run(17,execute=True,lab_confirm=lab.LAB_ACK)
+    assert not any(a=="lvm_lab_begin" for a,_ in calls)
+
+
+def test_missing_retention_inventory_fails_closed(pipeline,monkeypatch):
+    vm,connections,source,calls=pipeline
+    original=lab.pra_live._run_helper
+    def legacy(conn,action,data,timeout=60):
+        response=original(conn,action,data,timeout)
+        if action=="lvm_lab_probe":
+            return {"pra_protocol":3,"checkpoint":None,"pending":None}
+        return response
+    monkeypatch.setattr(lab.pra_live,"_run_helper",legacy)
+    with pytest.raises(lab.LabError,match="Inventaire de rétention LVM"):
+        lab.run(17)
+    assert not any(a=="lvm_lab_begin" for a,_ in calls)
