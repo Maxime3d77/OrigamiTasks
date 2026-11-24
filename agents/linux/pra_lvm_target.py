@@ -285,7 +285,7 @@ class PveLvmTarget:
             raise LvmTargetError("Destination volume is not a block device")
         return str(canonical)
 
-    def assert_volume_unattached(self, volid):
+    def assert_volume_unattached(self, volid, *, config_root="/etc/pve/nodes"):
         """Fail closed before reusing a managed staging LV.
 
         Inspect the cluster-visible VM/LXC configuration files, including
@@ -293,7 +293,7 @@ class PveLvmTarget:
         proof that an arbitrary external QCOW2 backing chain is absent.
         """
         self.resolve_existing(volid)
-        root = Path("/etc/pve/nodes")
+        root = Path(config_root)
         if root.is_symlink() or not root.is_dir():
             raise LvmTargetError("Cluster PVE configuration unavailable; LV reuse refused")
         candidates = sorted(root.glob("*/qemu-server/*.conf"))
