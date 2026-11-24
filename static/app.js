@@ -610,6 +610,9 @@ function protectedVMsPage(){
      +'<div class="muted tinytext">Moteur : '+(vm.lvm_lab_latest_run?'QMP → LVM de recette':'QMP → DIR / non configuré')+'</div>'
    +'<div class="muted tinytext">Validation : '+(vm.lvm_standby_configured?'checkpoint LVM vérifié et attaché, boot non certifié':vm.offline_image_verified?'structurelle DIR, hors ligne':'pas encore certifiée')+'</div>'
    +'<div class="muted tinytext">'+e(vm.last_replication_run?.details||'')+'</div>'
+   +(vm.lvm_last_completed?'<div class="muted tinytext"><b>Dernière copie LVM réussie :</b> '
+     +e(vm.lvm_last_completed.mode)+' #'+e(vm.lvm_last_completed.id)
+     +' · '+e(vm.lvm_last_completed.point_at?dt(vm.lvm_last_completed.point_at):'date inconnue')+'</div>':'')
    +(vm.lvm_lab_latest_run?'<div class="muted tinytext"><b>LVM RECETTE :</b> '
      +labelStatus(vm.lvm_lab_latest_run.status)+' · '+e(vm.lvm_lab_latest_run.mode)
      +' · '+e(vm.lvm_lab_latest_run.details||'')+'</div>':'')
@@ -644,7 +647,7 @@ function protectedVMsPage(){
   +'<div class="stat-card featured"><span class="label">VM sélectionnées</span><div class="value">'+current.length+'</div><div class="sub">Politiques PRA</div></div>'
   +'<div class="stat-card"><span class="label">Politiques actives</span><div class="value">'+current.filter(x=>x.state==='planned').length+'</div><div class="sub">Tâches programmées après amorçage</div></div>'
   +'<div class="stat-card"><span class="label">En pause</span><div class="value">'+current.filter(x=>x.state==='paused').length+'</div><div class="sub">Enregistrements conservés</div></div>'
-  +'<div class="stat-card"><span class="label">Dernières synchros réussies</span><div class="value">'+current.filter(x=>x.replication_status==='completed').length+'</div><div class="sub">Sans validation de bascule PRA</div></div></div>'
+  +'<div class="stat-card"><span class="label">Dernières synchros réussies</span><div class="value">'+current.filter(x=>x.lvm_last_completed||x.replication_status==='completed').length+'</div><div class="sub">Sans validation de bascule PRA</div></div></div>'
   +'<div class="panel"><div class="panel-title"><h2>Inventaire des VM sélectionnées</h2>'
   +'<div class="tool-row"><label class="field">Groupe PRA'
   +'<select id="drVMPlanFilter">'+option([['all','Tous les groupes'],...plans.map(p=>[p.id,p.name])],selected)+'</select>'
