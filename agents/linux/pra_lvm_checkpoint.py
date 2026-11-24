@@ -120,7 +120,9 @@ class LvmCheckpointStore:
             if self.pending.exists() or self.pending.is_symlink():
                 raise LvmCheckpointError("Staged or uncertain checkpoint requires reconciliation")
             if self.consolidation.exists() or self.consolidation.is_symlink():
-                raise LvmCheckpointError("Legacy LVM consolidation requires explicit maintenance reconciliation")
+                maintenance = self._read(self.consolidation)
+                if not maintenance or maintenance.get("status") != "done":
+                    raise LvmCheckpointError("Legacy LVM consolidation requires explicit maintenance reconciliation")
             previous = self._read(self.current_file)
             # Every incremental LVM checkpoint allocates a full-size thick LV
             # per disk. Automatic garbage collection is not proven safe for
